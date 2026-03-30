@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment — NEVER commit secrets
+.env
+.env.local
+.env.*.local
+
+# Argos data directory — local DB, sessions, config with secrets
+~/.argos/
+.argos/
+
+# Telegram session files
+*.session
+*.session.json
+src/ingestion/channels/*.session
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# TypeScript incremental cache
+*.tsbuildinfo
+
+# Test coverage
+coverage/
