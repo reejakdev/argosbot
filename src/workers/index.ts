@@ -14,7 +14,7 @@
 import { monotonicFactory } from 'ulid';
 import { getDb, audit } from '../db/index.js';
 import { createLogger } from '../logger.js';
-import { upsertCronJob, disableCronJob } from '../scheduler/index.js';
+import { upsertCronJob, disableCronJob, validateCronSchedule } from '../scheduler/index.js';
 import { executeTelegramTool } from '../plugins/telegram.js';
 
 const ulid = monotonicFactory();
@@ -22,6 +22,17 @@ import type { Proposal, ProposedAction } from '../types.js';
 import type { Config } from '../config/schema.js';
 
 const log = createLogger('workers');
+
+// Late-bound sender — set once MTProto channel is ready
+let _sendDirectMessage: ((chatId: string, text: string) => Promise<void>) | null = null;
+
+export function setSendDirectMessage(fn: (chatId: string, text: string) => Promise<void>): void {
+  _sendDirectMessage = fn;
+}
+
+export async function sendDirectReply(to: string, chatId: string, content: string, config: Config): Promise<WorkerResult> {
+  return executeDraftReply({ to, chatId, content }, config);
+}
 
 // ─── Worker result ────────────────────────────────────────────────────────────
 
@@ -91,6 +102,9 @@ export async function executeProposal(
         case 'telegram_list_chats':
           result = executeTelegramTool(payload.tool, payload.input);
           break;
+        case 'add_knowledge_source':
+          result = await executeAddKnowledgeSource(payload.input, config);
+          break;
         default:
           result = { success: false, output: `Unknown tool: ${payload.tool}`, dryRun: true };
       }
@@ -105,14 +119,16 @@ export async function executeProposal(
     }
   }
 
-  // Mark proposal executed
+  // Atomically mark proposal executed + complete linked task.
+  // A transaction ensures they succeed or fail together — no orphaned state.
   const now = Date.now();
-  db.prepare(`UPDATE proposals SET status = 'executed', executed_at = ? WHERE id = ? AND status = 'approved'`).run(now, proposal.id);
-
-  // Mark linked task as completed (only if all actions succeeded)
-  if (proposal.taskId && results.every(r => r.success)) {
-    db.prepare(`UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?`).run(now, proposal.taskId);
-  }
+  const allSucceeded = results.every(r => r.success);
+  db.transaction(() => {
+    db.prepare(`UPDATE proposals SET status = 'executed', executed_at = ? WHERE id = ? AND status = 'approved'`).run(now, proposal.id);
+    if (proposal.taskId && allSucceeded) {
+      db.prepare(`UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?`).run(now, proposal.taskId);
+    }
+  })();
 
   // Send execution summary to owner
   const summary = results.map((r, i) => {
@@ -132,26 +148,25 @@ async function executeDraftReply(
   input: Record<string, unknown>,
   config: Config,
 ): Promise<WorkerResult> {
-  // In read-only mode: display the draft but don't send
   const content = input.content as string;
-  const to = input.to as string;
+  const to      = input.to as string;
+  const chatId  = (input.chatId as string | undefined) ?? to;
 
   if (config.readOnly) {
-    return {
-      success: true,
-      dryRun: true,
-      output: `Draft for ${to} (not sent — read-only mode):\n"${content.slice(0, 300)}"`,
-      data: { to, content },
-    };
+    return { success: true, dryRun: true, output: `Draft (read-only):\n"${content.slice(0, 300)}"`, data: { to, content } };
   }
 
-  // Write mode not yet implemented — always draft for now
-  return {
-    success: true,
-    dryRun: true,
-    output: `Draft for ${to} (write mode not yet implemented):\n"${content.slice(0, 300)}"`,
-    data: { to, content },
-  };
+  if (!_sendDirectMessage) {
+    return { success: true, dryRun: true, output: `Draft (MTProto not ready):\n"${content.slice(0, 300)}"`, data: { to, content } };
+  }
+
+  try {
+    await _sendDirectMessage(chatId, content);
+    log.info(`Reply sent to chatId=${chatId}`);
+    return { success: true, dryRun: false, output: `✅ Message envoyé à ${to}`, data: { to, content } };
+  } catch (e) {
+    return { success: false, dryRun: false, output: `❌ Envoi échoué: ${(e as Error).message}` };
+  }
 }
 
 async function executeCalendar(
@@ -183,17 +198,35 @@ async function executeTxPack(
 
 function executeCreateTask(input: Record<string, unknown>): WorkerResult {
   const db = getDb();
-  const id = ulid();
 
+  // Dedup by title — avoid duplicate tasks for the same thing
+  const title = String(input.title ?? '').trim();
+  const existing = db.prepare(`
+    SELECT id FROM tasks
+    WHERE title = ? AND status IN ('open', 'in_progress')
+    LIMIT 1
+  `).get(title) as { id: string } | undefined;
+
+  if (existing) {
+    log.debug(`Task dedup — open task ${existing.id} already exists with title "${title.slice(0, 60)}"`);
+    return {
+      success: true,
+      dryRun: false,
+      output: `Task already exists (id: ${existing.id}): ${title}`,
+      data: { id: existing.id, deduplicated: true },
+    };
+  }
+
+  const id = ulid();
   db.prepare(`
     INSERT INTO tasks (id, title, description, category, source_ref, assigned_team, is_my_task, status, detected_at)
     VALUES (?, ?, ?, 'task', 'worker', ?, 0, 'open', ?)
-  `).run(id, input.title, input.description ?? null, input.assigned_team ?? null, Date.now());
+  `).run(id, title, input.description ?? null, input.assigned_team ?? null, Date.now());
 
   return {
     success: true,
     dryRun: false,
-    output: `Task created: ${input.title}`,
+    output: `Task created: ${title}`,
     data: { id },
   };
 }
@@ -234,7 +267,7 @@ function executeCreateCronJob(input: Record<string, unknown>): WorkerResult {
     return { success: false, output: 'create_cron_job: name, schedule, and prompt are required', dryRun: false };
   }
 
-  if (!(require('node-cron') as typeof import('node-cron')).validate(schedule)) {
+  if (!validateCronSchedule(schedule)) {
     return { success: false, output: `Invalid cron expression: "${schedule}"`, dryRun: false };
   }
 
@@ -262,3 +295,75 @@ function executeDeleteCronJob(input: Record<string, unknown>): WorkerResult {
   };
 }
 
+async function executeAddKnowledgeSource(
+  input: Record<string, unknown>,
+  config: Config,
+): Promise<WorkerResult> {
+  const { getDataDir } = await import('../config/index.js');
+  const { readFileSync, writeFileSync } = await import('fs');
+  const { default: path } = await import('path');
+
+  const cfgPath = path.join(getDataDir(), 'config.json');
+  const raw = JSON.parse(readFileSync(cfgPath, 'utf8')) as Record<string, unknown>;
+  const knowledge = (raw.knowledge as Record<string, unknown>) ?? {};
+  const sources = (knowledge.sources as unknown[]) ?? [];
+
+  let newSource: Record<string, unknown>;
+  let label: string;
+
+  if (input.type === 'github' || (input.owner && input.repo)) {
+    const owner = String(input.owner ?? '');
+    const repo  = String(input.repo  ?? '');
+    const paths = (input.paths as string[]) ?? ['README.md'];
+    newSource = { type: 'github', owner, repo, paths, refreshHours: 168 };
+    label = `github:${owner}/${repo}`;
+  } else if (input.url) {
+    const url  = String(input.url);
+    const name = String(input.name ?? url.split('/').pop() ?? 'source');
+    newSource = { type: 'url', name, url, refreshHours: 168 };
+    label = url;
+  } else {
+    return { success: false, output: 'add_knowledge_source: url or owner+repo required', dryRun: false };
+  }
+
+  // Deduplicate
+  const alreadyExists = sources.some((s: unknown) => {
+    const src = s as Record<string, unknown>;
+    return (src.type === 'url' && src.url === (newSource.url ?? '')) ||
+      (src.type === 'github' && src.owner === newSource.owner && src.repo === newSource.repo);
+  });
+
+  if (!alreadyExists) {
+    sources.push(newSource);
+    knowledge.sources = sources;
+    raw.knowledge = knowledge;
+    writeFileSync(cfgPath, JSON.stringify(raw, null, 2), 'utf8');
+  }
+
+  // Index immediately
+  try {
+    const { fetchUrl }      = await import('../knowledge/connectors/url.js');
+    const { fetchGitHub }   = await import('../knowledge/connectors/github.js');
+    const { indexDocument } = await import('../knowledge/indexer.js');
+
+    let doc = null;
+    if (newSource.type === 'url') {
+      doc = await fetchUrl({ url: String(newSource.url), name: String(newSource.name), refreshDays: 7 });
+    } else {
+      doc = await fetchGitHub({
+        owner: String(newSource.owner),
+        repo:  String(newSource.repo),
+        paths: newSource.paths as string[],
+        refreshDays: 7,
+      });
+    }
+
+    if (doc) {
+      await indexDocument(doc, config);
+      return { success: true, dryRun: false, output: `📚 Knowledge source indexed: ${label}` };
+    }
+    return { success: true, dryRun: false, output: `⚠️ Source saved but returned no content: ${label}` };
+  } catch (e) {
+    return { success: false, dryRun: false, output: `Source saved but indexing failed: ${(e as Error).message}` };
+  }
+}

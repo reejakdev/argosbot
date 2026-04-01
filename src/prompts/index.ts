@@ -34,8 +34,8 @@ function interpolate(template: string, vars: Record<string, string>): string {
 // ─── Build template vars from config ─────────────────────────────────────────
 
 function buildVars(config: Config): Record<string, string> {
-  const partnerSummary = config.telegram.monitoredChats.length > 0
-    ? config.telegram.monitoredChats
+  const partnerSummary = config.channels.telegram.listener.monitoredChats.length > 0
+    ? config.channels.telegram.listener.monitoredChats
         .map(c => `- ${c.name}${c.tags.length ? ` [${c.tags.join(', ')}]` : ''}${c.isGroup ? ' (group)' : ''}`)
         .join('\n')
     : 'No chats monitored yet.';
@@ -86,6 +86,8 @@ export function buildSystemPrompt(role: PromptRole, config: Config): string {
         '---',
         `## Current role: PLANNER`,
         `Analyze the classified context and propose actions. All actions require owner approval before execution.`,
+        `If the message mentions any chain, address, contract, or vault: call semantic_search FIRST, then plan.`,
+        `Do not propose tx_pack or draft_reply containing addresses without verifying them via semantic_search.`,
       ].filter(Boolean).join('\n\n');
 
     case 'heartbeat':
@@ -103,9 +105,10 @@ export function buildSystemPrompt(role: PromptRole, config: Config): string {
 
     case 'chat': {
       const configuredServices: string[] = [];
-      if (config.context?.notion?.length)   configuredServices.push('Notion (full workspace search enabled)');
-      if (config.context?.urls?.length)     configuredServices.push(`Documentation URLs (${config.context.urls.map(u => u.name).join(', ')})`);
-      if (config.context?.github?.length)   configuredServices.push(`GitHub repos (${config.context.github.map(g => g.name ?? `${g.owner}/${g.repo}`).join(', ')})`);
+      const knowledgeSources = config.knowledge.sources;
+      if (knowledgeSources.some(s => s.type === 'notion'))  configuredServices.push('Notion (full workspace search enabled)');
+      if (knowledgeSources.some(s => s.type === 'url'))     configuredServices.push(`Documentation URLs (${knowledgeSources.filter(s => s.type === 'url').map(s => s.name).join(', ')})`);
+      if (knowledgeSources.some(s => s.type === 'github'))  configuredServices.push(`GitHub repos (${knowledgeSources.filter(s => s.type === 'github').map(s => s.name ?? (s.type === 'github' ? `${s.owner}/${s.repo}` : s.name)).join(', ')})`);
       if (config.mcpServers?.length)        configuredServices.push(`MCP servers (${config.mcpServers.filter(s => s.enabled).map(s => s.name).join(', ')})`);
       if (config.calendar)                  configuredServices.push('Google Calendar');
       if (config.notion)                    configuredServices.push('Notion API (read/write)');
@@ -138,6 +141,9 @@ export function buildSystemPrompt(role: PromptRole, config: Config): string {
         `9. ERROR RECOVERY. If a tool fails, try another approach. Don't give up and ask the user to fix it.`,
         `10. CLEAN UP. When you create something new that replaces something old, include cleanup (archive/delete the old thing) in the same proposal. Don't leave orphaned pages, databases, or duplicates behind.`,
         `11. CONTEXT FIRST. Before creating anything, ALWAYS search first (Notion, memory) to check what already exists. Don't create duplicates.`,
+        `12. ON-CHAIN FACTS → semantic_search FIRST. Any question about a blockchain address, chain ID, contract name, vault, or deployment config: call semantic_search before answering. Never state an address from memory. If not indexed, say so and offer to index it.`,
+        config.llm?.askOwner !== false ? `13. ASK BEFORE SEARCHING. If a task is ambiguous or would require more than 2 tool calls to resolve, ask ${vars.owner_name} one focused question first. A 5-word question saves more tokens than 10 tool calls.` : '',
+        config.embeddings?.enabled ? `Semantic search is available — indexed sources: docs + GitHub configs.` : '',
       ].filter(Boolean).join('\n\n');
     }
 

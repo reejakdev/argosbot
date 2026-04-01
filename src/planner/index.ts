@@ -25,8 +25,8 @@ import { getDb, audit } from '../db/index.js';
 import { createLogger } from '../logger.js';
 import { search as memorySearch } from '../memory/store.js';
 import { getSkillToolDefinitions, executeSkill } from '../skills/registry.js';
-import { buildAnthropicMcpConfig } from '../mcp/index.js';
 import { buildSystemPrompt } from '../prompts/index.js';
+import { llmConfigFromConfig, callAnthropicBearerRaw } from '../llm/index.js';
 import type {
   ContextWindow,
   ClassificationResult,
@@ -175,6 +175,22 @@ const TOOLS: Anthropic.Tool[] = [
       required: ['name'],
     },
   },
+  {
+    name: 'add_knowledge_source',
+    description: 'Index a new knowledge source (URL, raw GitHub file, GitHub repo) so Argos can search it in future replies. Use when you realize you are missing information that could be indexed from a known source.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        url:  { type: 'string', description: 'Full URL to fetch and index (https://...)' },
+        name: { type: 'string', description: 'Short human-readable name for this source' },
+        type: { type: 'string', enum: ['url', 'github'], description: 'Source type — default url' },
+        owner: { type: 'string', description: 'GitHub owner (only for type=github)' },
+        repo:  { type: 'string', description: 'GitHub repo (only for type=github)' },
+        paths: { type: 'array', items: { type: 'string' }, description: 'Specific paths to index in the repo' },
+      },
+      required: ['name'],
+    },
+  },
 ];
 
 // buildSystemPrompt is now imported from src/prompts/index.ts
@@ -222,6 +238,7 @@ function toolCallToAction(
     set_reminder: 'low',
     create_cron_job: 'low',
     delete_cron_job: 'medium',
+    add_knowledge_source: 'low',
   };
 
   const workerMap: Record<string, WorkerType> = {
@@ -233,10 +250,11 @@ function toolCallToAction(
     set_reminder: 'reply',
     create_cron_job: 'scheduler',
     delete_cron_job: 'scheduler',
+    add_knowledge_source: 'notion',
   };
 
   // Actions on the owner's own workspace don't need approval
-  const autoApprove = new Set(['create_notion_entry', 'create_task', 'set_reminder']);
+  const autoApprove = new Set(['create_notion_entry', 'create_task', 'set_reminder', 'add_knowledge_source']);
 
   return {
     type: workerMap[name] ?? 'reply',
@@ -265,6 +283,8 @@ function humanizeAction(name: string, input: Record<string, unknown>): string {
       return `Schedule recurring job "${input.name}" [${input.schedule}]: ${input.description}`;
     case 'delete_cron_job':
       return `Delete scheduled job "${input.name}"${input.reason ? ` — ${input.reason}` : ''}`;
+    case 'add_knowledge_source':
+      return `Index knowledge source: ${input.name} (${input.url ?? `github:${input.owner}/${input.repo}`})`;
     default:
       return `${name}: ${JSON.stringify(input).slice(0, 100)}`;
   }
@@ -294,26 +314,40 @@ export async function plan(
   ).join('\n');
 
   // ─── Anthropic tool use loop ───────────────────────────────────────────────
-  // Only supports Anthropic for tool use in v1 (OpenAI tool use: coming)
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
-
-  const client = new Anthropic({ apiKey });
+  // Resolve credentials via the multi-provider LLMConfig abstraction instead
+  // of reading ANTHROPIC_API_KEY directly — supports both api-key and OAuth bearer modes.
+  let llmCfg = llmConfigFromConfig(config);
+  // Tool use requires Anthropic (SDK + tool format are Anthropic-specific).
+  // If primary is not Anthropic but fallback is, use fallback.
+  if (llmCfg.provider !== 'anthropic') {
+    if (llmCfg.fallback?.provider === 'anthropic') {
+      log.warn(`Primary LLM is not Anthropic — using fallback for planner`);
+      llmCfg = llmCfg.fallback;
+    } else {
+      throw new Error(
+        `Planner requires an Anthropic provider (tool use). ` +
+        `Active provider: ${llmCfg.provider}. ` +
+        `Set llm.activeProvider or llm.fallbackProvider to an Anthropic provider.`
+      );
+    }
+  }
+  const useBearerMode = llmCfg.authMode === 'bearer';
+  const client = useBearerMode ? null : new Anthropic({ apiKey: llmCfg.apiKey });
 
   const systemPrompt = buildSystemPrompt('planner', config);
   const userPrompt = buildUserPrompt(window, result, memoryContext);
 
   // Merge proposal tools + enabled skill tools
+  // Note: MCP tools are NOT included here — they are chat-only and would waste
+  // thousands of tokens on every automated planner call.
   const skillTools = getSkillToolDefinitions(config.skills) as unknown as Anthropic.Tool[];
   const allTools: Anthropic.Tool[] = [...TOOLS, ...skillTools];
-
-  // MCP servers for the Anthropic beta API
-  const mcpServers = buildAnthropicMcpConfig(config.mcpServers ?? []);
-  const useMcp = mcpServers.length > 0;
 
   let planText = '';
   const actions: ProposedAction[] = [];
   let draftReply: string | undefined;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   const messages: Anthropic.MessageParam[] = [
     { role: 'user', content: userPrompt },
@@ -321,31 +355,31 @@ export async function plan(
 
   // Agentic loop — Claude may use multiple tools in sequence
   let iterations = 0;
-  const MAX_ITERATIONS = 8;
+  const MAX_ITERATIONS = 5; // reduced from 8 — most plans need ≤3 tool calls
 
   while (iterations < MAX_ITERATIONS) {
     iterations++;
 
-    // Use beta API when MCP servers are configured
-    const response = useMcp
-      ? await (client.beta.messages.create as Function)({
-          model: config.claude.model,
-          max_tokens: config.claude.maxTokens,
-          temperature: config.claude.planningTemperature,
-          system: systemPrompt,
-          tools: allTools,
-          mcp_servers: mcpServers,
-          messages,
-          betas: ['mcp-client-2025-04-04'],
-        })
-      : await client.messages.create({
-          model: config.claude.model,
-          max_tokens: config.claude.maxTokens,
-          temperature: config.claude.planningTemperature,
-          system: systemPrompt,
-          tools: allTools,
-          messages,
-        });
+    const useThinking = config.llm?.thinking?.planner ?? false;
+    const callBody = {
+      model:      llmCfg.model || config.claude.model,
+      max_tokens: config.claude.maxTokens,
+      ...(useThinking
+        ? { thinking: { type: 'enabled', budget_tokens: 1024 } }
+        : { temperature: config.claude.planningTemperature }),
+      system: systemPrompt,
+      tools:  allTools,
+      messages,
+    };
+
+    // Bearer (OAuth) path — uses raw fetch via callAnthropicBearerRaw
+    // API-key path — uses Anthropic SDK (avoids bearer-specific header issues)
+    const response: Anthropic.Message = useBearerMode
+      ? await callAnthropicBearerRaw(llmCfg, callBody as Record<string, unknown>) as unknown as Anthropic.Message
+      : await (client!.messages.create as Function)(callBody) as Anthropic.Message;
+
+    totalInputTokens  += response.usage.input_tokens;
+    totalOutputTokens += response.usage.output_tokens;
 
     // Collect text from this turn
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
@@ -401,15 +435,14 @@ export async function plan(
     messages.push({ role: 'user', content: toolResults });
   }
 
+  log.info(`Planner tokens: ${totalInputTokens}in / ${totalOutputTokens}out (${iterations} iteration${iterations > 1 ? 's' : ''})`);
+
   if (actions.length === 0 && !planText) {
     log.info(`Planner produced no actions for window ${window.id}`);
     return null;
   }
 
   // ─── Persist proposal ──────────────────────────────────────────────────────
-  const llmConfig = { provider: 'anthropic', model: config.claude.model, apiKey } as LLMConfig;
-  void llmConfig; // used above via Anthropic SDK directly
-
   const now = Date.now();
   const expiresAt = now + config.approval.defaultExpiryMs;
 

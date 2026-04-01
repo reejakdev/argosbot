@@ -34,6 +34,22 @@ registerSkill({
       return { success: false, output: 'URL must start with http:// or https://' };
     }
 
+    // SSRF guard — block localhost, private IPs, cloud metadata endpoints
+    try {
+      const parsed = new URL(url);
+      const h = parsed.hostname.toLowerCase();
+      if (
+        h === 'localhost' || h === '0.0.0.0' || h === '::1' || h.endsWith('.localhost') ||
+        /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^169\.254\./.test(h) ||
+        h === '169.254.169.254' || h === 'metadata.google.internal' || h === '100.100.100.200'
+      ) {
+        return { success: false, output: `Security: blocked private/internal network (${h})` };
+      }
+    } catch {
+      return { success: false, output: 'Invalid URL' };
+    }
+
     const res = await fetch(url, {
       headers: {
         'User-Agent': 'Argos/1.0 (AI assistant; research purposes)',

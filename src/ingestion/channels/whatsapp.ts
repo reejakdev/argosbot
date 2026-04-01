@@ -187,13 +187,21 @@ export class WhatsAppChannel implements Channel {
 
     const raw: RawMessage = {
       id:          `wa_${msg.key.id ?? Date.now()}`,
-      source:      'telegram',   // reuse 'telegram' type for now — 'whatsapp' in v2
+      channel:     'whatsapp',
+      source:      'whatsapp',   // @deprecated — use channel
       chatId:      jid,
+      chatName:    partnerName ?? msg.pushName,
+      chatType:    resolveWAChatType(jid),
       partnerName: partnerName ?? msg.pushName,
       senderName:  msg.pushName,
       content,
       links:       [],
-      receivedAt:  ts,
+      receivedAt:  Date.now(),
+      timestamp:   ts,
+      meta: {
+        whatsapp_jid:        jid,
+        whatsapp_message_id: msg.key.id,
+      },
     };
 
     try {
@@ -202,6 +210,18 @@ export class WhatsAppChannel implements Channel {
       log.error('WhatsApp message processing failed', e);
     }
   }
+}
+
+// ─── Chat type ────────────────────────────────────────────────────────────────
+// WhatsApp JID format:
+//   123456789@s.whatsapp.net  → DM
+//   groupId@g.us              → group
+//   broadcast@broadcast       → broadcast list
+
+function resolveWAChatType(jid: string): RawMessage['chatType'] {
+  if (jid.endsWith('@g.us'))        return 'group';
+  if (jid.endsWith('@broadcast'))   return 'channel';
+  return 'dm';
 }
 
 export function createWhatsAppChannel(dataDir: string): WhatsAppChannel {

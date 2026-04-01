@@ -1,6 +1,6 @@
 // ─── Shared domain types ──────────────────────────────────────────────────────
 
-export type MessageSource = 'telegram' | 'email' | 'calendar' | 'notion' | 'github';
+export type MessageSource = 'telegram' | 'whatsapp' | 'email' | 'calendar' | 'notion' | 'github';
 
 export type MessageCategory =
   | 'task'
@@ -43,61 +43,104 @@ export type WorkerType =
 
 // ─── Raw message as received from source ─────────────────────────────────────
 export interface RawMessage {
-  id: string;
-  source: MessageSource;
-  chatId: string;
-  partnerName?: string;          // resolved from config
+  id:           string;
 
-  senderId?: string;
-  senderName?: string;
-  content: string;
+  // ─── Channel identity ────────────────────────────────────────────────────
+  /** Channel adapter identifier — 'telegram' | 'slack' | 'discord' | 'gmail' | ... */
+  channel:      string;
+  /** @deprecated use channel */
+  source:       MessageSource;
 
-  /** Permalink to the original message (channel/group only — no link for DMs) */
-  messageUrl?: string;
+  // ─── Chat ────────────────────────────────────────────────────────────────
+  chatId:       string;
+  /** Human name of the chat/channel (from config or resolved by the adapter) */
+  chatName?:    string;
+  chatType?:    'dm' | 'group' | 'channel' | 'thread';
+
+  // ─── Sender ──────────────────────────────────────────────────────────────
+  senderId?:    string;
+  senderName?:  string;
+  /** Partner display name resolved from monitoredChats config */
+  partnerName?: string;
+
+  // ─── Content ─────────────────────────────────────────────────────────────
+  /** Raw text — NEVER log / store / send to LLM without anonymization */
+  content:      string;
+  /** Set by the privacy layer after anonymization — safe to store and forward */
+  anonText?:    string;
+
+  // ─── Links & media ───────────────────────────────────────────────────────
+  /** Permalink to the original message (channels/groups only — no link for DMs) */
+  messageUrl?:  string;
   /** URLs extracted from message content and/or media captions */
-  links: string[];
-  /** True if this message was forwarded from another chat */
-  isForward?: boolean;
+  links:        string[];
+  isForward?:   boolean;
   /** Display name of the original source if forwarded */
   forwardFrom?: string;
-  /** Attachment type if the message includes media */
-  mediaType?: 'photo' | 'video' | 'document' | 'audio' | 'sticker' | 'voice';
+  mediaType?:   'photo' | 'video' | 'document' | 'audio' | 'sticker' | 'voice';
 
-  replyToId?: string;
-  threadId?: string;
-  receivedAt: number;            // unix ms
+  // ─── Threading ───────────────────────────────────────────────────────────
+  replyToId?:   string;
+  threadId?:    string;
+
+  // ─── Timestamps ──────────────────────────────────────────────────────────
+  /** When Argos received the message (unix ms) */
+  receivedAt:   number;
+  /** Original send time from the channel (unix ms) — may differ from receivedAt */
+  timestamp?:   number;
+
+  // ─── Channel-specific extras ─────────────────────────────────────────────
+  /** Adapter-specific extras — e.g. Telegram message_id, Slack ts, Discord guild_id */
+  meta?:        Record<string, unknown>;
 }
 
 // ─── After anonymization ──────────────────────────────────────────────────────
 export interface SanitizedMessage {
-  id: string;
-  originalId: string;
-  chatId: string;
-  partnerName?: string;          // NOT anonymized — not confidential per design
-  content: string;               // anonymized content
-  lookupTable: Record<string, string>; // PERSON_1 → "Alice"
+  id:           string;
+  originalId:   string;
+  /** Channel adapter identifier — carried from RawMessage */
+  channel?:     string;
+  chatId:       string;
+  chatName?:    string;
+  chatType?:    RawMessage['chatType'];
+  /** NOT anonymized — partner name is not confidential per design */
+  partnerName?: string;
+  /** Anonymized content — safe to store and forward to LLM */
+  content:      string;
+  /** placeholder → real value — exists only in local memory, never sent to LLM */
+  lookupTable:  Record<string, string>;
   /** URLs extracted from message — carried through for planner use (fetch-url skill) */
-  links: string[];
+  links:        string[];
   /** Message permalink — for audit trail and quick reference */
-  messageUrl?: string;
-  isForward?: boolean;
+  messageUrl?:  string;
+  isForward?:   boolean;
   forwardFrom?: string;
-  mediaType?: RawMessage['mediaType'];
-  receivedAt: number;
+  mediaType?:   RawMessage['mediaType'];
+  /** Original send time from the channel (unix ms) */
+  timestamp?:   number;
+  receivedAt:   number;
 }
 
 // ─── Context window: batch of messages from same chat ─────────────────────────
 export interface ContextWindow {
-  id: string;
-  chatId: string;
-  partnerName?: string;
+  id:               string;
+  /** Channel adapter identifier — derived from messages[0].channel */
+  channel?:         string;
+  chatId:           string;
+  chatName?:        string;
+  partnerName?:     string;
   /** Messages in this batch (the new incoming ones) */
-  messages: SanitizedMessage[];
+  messages:         SanitizedMessage[];
   /** Recent messages from the same chat BEFORE this window opened (read-only context) */
   previousMessages: SanitizedMessage[];
-  openedAt: number;
-  closedAt?: number;
-  status: 'open' | 'processing' | 'done';
+  /**
+   * Raw (pre-anonymization) content — only populated when privacy.storeRaw=true.
+   * NEVER send to cloud LLM. Local/privacy LLM only.
+   */
+  rawContent?:      string;
+  openedAt:         number;
+  closedAt?:        number;
+  status:           'open' | 'processing' | 'done';
 }
 
 // ─── Classification result from Claude ───────────────────────────────────────
@@ -126,17 +169,24 @@ export interface ClassificationResult {
 
 // ─── Memory entry ─────────────────────────────────────────────────────────────
 export interface MemoryEntry {
-  id: string;
-  content: string;               // anonymized summary
-  tags: string[];
-  category: MessageCategory;
-  sourceRef: string;             // reference to source message id
+  id:           string;
+  content:      string;          // anonymized summary
+  tags:         string[];
+  category:     MessageCategory;
+  sourceRef:    string;          // reference to source context window id
+  channel?:     string;          // originating channel adapter
   partnerName?: string;
-  chatId?: string;
-  importance: number;
-  archived: boolean;
-  expiresAt: number | null;      // null = permanent
-  createdAt: number;
+  chatId?:      string;
+  importance:   number;
+  archived:     boolean;
+  expiresAt:    number | null;   // null = permanent
+  createdAt:    number;
+  /**
+   * Raw (pre-anonymization) content — only present when privacy.storeRaw=true
+   * AND the caller explicitly requested it (includeRaw=true).
+   * NEVER pass to cloud LLM.
+   */
+  rawContent?:  string;
 }
 
 // ─── Task ─────────────────────────────────────────────────────────────────────

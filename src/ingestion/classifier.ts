@@ -139,10 +139,8 @@ export async function classify(
     openTasks:    openTasks.length,
   });
 
-  const classificationTemperature = (config as Config & { claude?: { classificationTemperature?: number } }).claude?.classificationTemperature ?? 0;
-
   const response = await llmCall(
-    { ...llmConfig, temperature: classificationTemperature },
+    { ...llmConfig, temperature: 0 },  // zero temp — deterministic classification
     [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: prompt },

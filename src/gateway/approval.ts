@@ -202,8 +202,10 @@ export async function handleCallback(
       }
       // ─────────────────────────────────────────────────────────────────────
 
-      db.prepare(`UPDATE proposals SET status = 'approved', approved_at = ? WHERE id = ?`).run(now, proposalId);
-      db.prepare(`UPDATE approvals SET status = 'approved', responded_at = ? WHERE proposal_id = ?`).run(now, proposalId);
+      db.transaction(() => {
+        db.prepare(`UPDATE proposals SET status = 'approved', approved_at = ? WHERE id = ?`).run(now, proposalId);
+        db.prepare(`UPDATE approvals SET status = 'approved', responded_at = ? WHERE proposal_id = ?`).run(now, proposalId);
+      })();
 
       log.info(`Proposal ${proposalId} APPROVED`);
       audit('proposal_approved', proposalId, 'proposal');
@@ -229,8 +231,10 @@ export async function handleCallback(
     }
 
     case 'reject': {
-      db.prepare(`UPDATE proposals SET status = 'rejected' WHERE id = ?`).run(proposalId);
-      db.prepare(`UPDATE approvals SET status = 'rejected', responded_at = ? WHERE proposal_id = ?`).run(now, proposalId);
+      db.transaction(() => {
+        db.prepare(`UPDATE proposals SET status = 'rejected' WHERE id = ?`).run(proposalId);
+        db.prepare(`UPDATE approvals SET status = 'rejected', responded_at = ? WHERE proposal_id = ?`).run(now, proposalId);
+      })();
       log.info(`Proposal ${proposalId} REJECTED`);
       audit('proposal_rejected', proposalId, 'proposal');
       return `❌ Rejected`;

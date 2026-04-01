@@ -84,6 +84,22 @@ export async function executeApprovedProposal(
           break;
         }
 
+        case 'draft_reply': {
+          // Route through workers/index.ts which has _sendDirectMessage bound
+          const { sendDirectReply } = await import('./index.js');
+          const { loadConfig } = await import('../config/index.js');
+          const cfg = loadConfig();
+          const r = await sendDirectReply(
+            String(input.to ?? ''),
+            String(input.chatId ?? input.to ?? ''),
+            String(input.content ?? ''),
+            cfg,
+          );
+          results.push(r.success ? `✅ ${r.output}` : `❌ ${r.output}`);
+          if (r.dryRun) log.warn('draft_reply: dryRun=true — MTProto not ready or readOnly');
+          break;
+        }
+
         default: {
           // Generic action — use LLM agent to figure out how to execute
           const result = await executeWithAgent(
@@ -128,7 +144,6 @@ async function executeWithAgent(prompt: string, llmConfig: LLMConfig): Promise<s
   const { BUILTIN_TOOLS, executeBuiltinTool } = await import('../llm/builtin-tools.js');
   const { getMcpTools, executeMcpTool } = await import('../mcp/client.js');
 
-  const notionKey = process.env.NOTION_API_KEY;
   const tools = [...BUILTIN_TOOLS, ...getMcpTools()];
 
   // Executor: approved actions execute DIRECTLY — no more proposals!
@@ -166,126 +181,4 @@ async function executeWithAgent(prompt: string, llmConfig: LLMConfig): Promise<s
 
   const response = await runToolLoop(llmConfig, messages[0].content, messages, tools, executor, callAnthropicBearerRaw);
   return response.content || 'Action completed (no output)';
-}
-
-async function executeNotionTool(
-  name: string,
-  input: Record<string, unknown>,
-  apiKey: string,
-): Promise<{ output: string; error?: boolean }> {
-  try {
-    const { Client } = await import('@notionhq/client');
-    const notion = new Client({ auth: apiKey });
-
-    switch (name) {
-      case 'notion_search': {
-        const results = await notion.search({
-          query: input.query as string,
-          page_size: 5,
-        });
-        const items = results.results.map((r: Record<string, unknown>) => {
-          const title = ((r as Record<string, unknown>).properties as Record<string, { title?: Array<{ plain_text: string }> }>)?.Name?.title?.[0]?.plain_text
-            ?? ((r as Record<string, unknown>).properties as Record<string, { title?: Array<{ plain_text: string }> }>)?.title?.title?.[0]?.plain_text
-            ?? r.id;
-          return `- ${title} (${r.object}: ${r.id})`;
-        });
-        return { output: items.length > 0 ? items.join('\n') : 'No results found.' };
-      }
-
-      case 'notion_create_database': {
-        const parentId = input.parent_page_id as string | undefined;
-        const title = input.title as string;
-        let properties: Record<string, unknown> = {
-          Name: { title: {} },
-          Status: { select: { options: [{ name: 'To Do' }, { name: 'In Progress' }, { name: 'Done' }] } },
-          Notes: { rich_text: {} },
-        };
-
-        if (input.properties) {
-          try { properties = { Name: { title: {} }, ...JSON.parse(input.properties as string) }; } catch { /* use default */ }
-        }
-
-        let resolvedParent = parentId;
-        if (!resolvedParent || resolvedParent === 'root' || resolvedParent === 'workspace') {
-          const searchResult = await notion.search({ page_size: 1 });
-          if (searchResult.results.length > 0) {
-            resolvedParent = searchResult.results[0].id;
-          } else {
-            return { output: 'No accessible Notion pages found. Share a page with the Argos integration first.', error: true };
-          }
-        }
-        const parent = { page_id: resolvedParent };
-
-        const db = await notion.databases.create({
-          parent: parent as { page_id: string },
-          title: [{ type: 'text', text: { content: title } }],
-          properties: properties as Parameters<typeof notion.databases.create>[0]['properties'],
-        });
-
-        return { output: `Database created: "${title}" (ID: ${db.id})` };
-      }
-
-      case 'notion_create_page': {
-        const parentId = input.parent_id as string;
-        const title = input.title as string;
-        const content = input.content as string | undefined;
-        const databaseId = input.database_id as string | undefined;
-
-        // If adding to a database, create a DB entry (not a page)
-        if (databaseId) {
-          const props: Record<string, unknown> = {
-            Name: { title: [{ text: { content: title } }] },
-          };
-          // Add optional properties
-          if (input.status) props.Status = { select: { name: input.status as string } };
-          if (input.priority) props.Priority = { select: { name: input.priority as string } };
-          if (input.due) props.Due = { date: { start: input.due as string } };
-
-          const page = await notion.pages.create({
-            parent: { database_id: databaseId },
-            properties: props as Parameters<typeof notion.pages.create>[0]['properties'],
-          });
-          return { output: `Entry added to database: "${title}" (ID: ${page.id})` };
-        }
-
-        // Regular page creation
-        let resolvedParentId = parentId;
-        if (!parentId || parentId === 'workspace' || parentId === 'root') {
-          const searchResult = await notion.search({ page_size: 1 });
-          if (searchResult.results.length > 0) {
-            resolvedParentId = searchResult.results[0].id;
-          } else {
-            return { output: 'No accessible Notion pages found.', error: true };
-          }
-        }
-
-        const page = await notion.pages.create({
-          parent: { page_id: resolvedParentId } as Parameters<typeof notion.pages.create>[0]['parent'],
-          properties: {
-            title: { title: [{ text: { content: title } }] },
-          },
-          ...(content && {
-            children: [{
-              object: 'block' as const,
-              type: 'paragraph' as const,
-              paragraph: { rich_text: [{ type: 'text' as const, text: { content } }] },
-            }],
-          }),
-        });
-
-        return { output: `Page created: "${title}" (ID: ${page.id})` };
-      }
-
-      case 'notion_archive_page': {
-        const pageId = input.page_id as string;
-        await notion.pages.update({ page_id: pageId, archived: true });
-        return { output: `Page archived: ${pageId}` };
-      }
-
-      default:
-        return { output: `Unknown Notion tool: ${name}`, error: true };
-    }
-  } catch (e) {
-    return { output: `Notion error: ${e instanceof Error ? e.message : String(e)}`, error: true };
-  }
 }

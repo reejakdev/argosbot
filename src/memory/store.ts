@@ -40,35 +40,41 @@ export function store(
   const expiresAt = now + ttlDays * 24 * 60 * 60 * 1000;
 
   const entry: MemoryEntry = {
-    id: ulid(),
-    content: summary,
-    tags: result.tags,
-    category: result.category,
-    sourceRef: window.id,
+    id:          ulid(),
+    content:     summary,
+    tags:        result.tags,
+    category:    result.category,
+    sourceRef:   window.id,
+    channel:     window.channel,
     partnerName: window.partnerName,
-    chatId: window.chatId,
-    importance: result.importance,
-    archived: shouldArchive,
-    expiresAt: shouldArchive ? null : expiresAt, // archived = no expiry
-    createdAt: now,
+    chatId:      window.chatId,
+    importance:  result.importance,
+    archived:    shouldArchive,
+    expiresAt:   shouldArchive ? null : expiresAt, // archived = no expiry
+    createdAt:   now,
   };
 
+  // NOTE: the `channel` column is added in a DB migration (see db/index.ts).
+  // Existing installs without the column will fall back gracefully via SQLite's
+  // lenient column handling when the migration has not yet run.
   db.prepare(`
-    INSERT INTO memories (id, content, tags, category, source_ref, partner_name, chat_id,
-                          importance, archived, expires_at, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO memories (id, content, tags, category, source_ref, channel, partner_name, chat_id,
+                          importance, archived, expires_at, created_at, raw_content)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     entry.id,
     entry.content,
     JSON.stringify(entry.tags),
     entry.category,
     entry.sourceRef,
+    entry.channel ?? null,
     entry.partnerName ?? null,
     entry.chatId,
     entry.importance,
     entry.archived ? 1 : 0,
     entry.expiresAt,
     entry.createdAt,
+    window.rawContent ?? null,
   );
 
   log.debug(`Stored memory ${entry.id}`, {
@@ -78,6 +84,9 @@ export function store(
     archived: entry.archived,
     expiresAt: entry.expiresAt ? new Date(entry.expiresAt).toISOString() : 'never',
   });
+
+  // Async vector index — fire-and-forget, failure won't affect the pipeline
+  setImmediate(() => { vectorizeMemoryAsync(entry).catch(() => {}); });
 
   audit('memory_stored', entry.id, 'memory', {
     category: entry.category,
@@ -138,15 +147,17 @@ export interface SearchOptions {
   category?: MessageCategory;
   limit?: number;
   includeExpired?: boolean;
+  /** Return raw_content field — only for privacy/local LLM paths. Never pass to cloud LLM. */
+  includeRaw?: boolean;
 }
 
 export function search(options: SearchOptions): MemoryEntry[] {
   const db = getDb();
   const now = Date.now();
-  const limit = options.limit ?? 10;
+  const limit = Math.min(options.limit ?? 10, 100);
 
-  // Build FTS query — escape special chars
-  const ftsQuery = options.query.replace(/['"*]/g, ' ').trim();
+  // Build FTS query — strip all FTS5 special chars (., +, -, ^, (, ), etc.)
+  const ftsQuery = options.query.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
   const rows = db.prepare(`
     SELECT m.*
@@ -169,7 +180,7 @@ export function search(options: SearchOptions): MemoryEntry[] {
     limit,
   ) as Array<Record<string, unknown>>;
 
-  return rows.map(rowToEntry);
+  return rows.map(row => rowToEntry(row, options.includeRaw));
 }
 
 // ─── Get recent memories for a partner / chat ─────────────────────────────────
@@ -178,6 +189,7 @@ export function getRecentForContext(
   chatId: string,
   partnerName?: string,
   limit = 5,
+  includeRaw = false,
 ): MemoryEntry[] {
   const db = getDb();
   const now = Date.now();
@@ -190,7 +202,7 @@ export function getRecentForContext(
     LIMIT ?
   `).all(chatId, partnerName ?? null, now, limit) as Array<Record<string, unknown>>;
 
-  return rows.map(rowToEntry);
+  return rows.map(row => rowToEntry(row, includeRaw));
 }
 
 // ─── Purge expired non-archived entries ───────────────────────────────────────
@@ -212,21 +224,60 @@ export function purgeExpired(): number {
   return count;
 }
 
+// ─── Async vector indexing for memories ──────────────────────────────────────
+
+/**
+ * Index a memory entry into LanceDB so it can be retrieved via semantic search.
+ * Called fire-and-forget — failures are silently swallowed (vector store is optional).
+ *
+ * sourceRef convention: "memory:<id>"
+ * Tags: ['memory', category, partnerName] — enables filtering by source or partner.
+ */
+async function vectorizeMemoryAsync(entry: MemoryEntry): Promise<void> {
+  try {
+    const { loadConfig } = await import('../config/index.js');
+    const config   = loadConfig();
+    const embCfg   = (config as unknown as { embeddings?: import('../config/schema.js').EmbeddingsConfig }).embeddings;
+    if (!embCfg?.enabled) return;
+
+    const { chunkText, indexChunks } = await import('../vector/store.js');
+    const tags = ['memory', entry.category, ...(entry.partnerName ? [entry.partnerName] : [])].filter(Boolean) as string[];
+    const chunks = chunkText(
+      entry.content,
+      `memory:${entry.id}`,
+      entry.partnerName ?? entry.category,
+      tags,
+      {
+        field1: entry.chatId,
+        field2: entry.partnerName,
+        field3: entry.category,
+      },
+    );
+    await indexChunks(chunks, embCfg);
+    log.debug(`Vectorized memory ${entry.id} (${chunks.length} chunk(s))`);
+  } catch {
+    // Vector store is optional — silently skip on any failure
+  }
+}
+
 // ─── Row mapper ───────────────────────────────────────────────────────────────
 
-function rowToEntry(row: Record<string, unknown>): MemoryEntry {
+function rowToEntry(row: Record<string, unknown>, includeRaw = false): MemoryEntry {
   return {
-    id: row.id as string,
-    content: row.content as string,
-    tags: JSON.parse(row.tags as string) as string[],
-    category: row.category as MessageCategory,
-    sourceRef: row.source_ref as string,
-    partnerName: row.partner_name as string | undefined,
-    chatId: row.chat_id as string | undefined,
-    importance: row.importance as number,
-    archived: Boolean(row.archived),
-    expiresAt: row.expires_at as number | null,
-    createdAt: row.created_at as number,
+    id:          row.id as string,
+    content:     row.content as string,
+    tags:        JSON.parse(row.tags as string) as string[],
+    category:    row.category as MessageCategory,
+    sourceRef:   row.source_ref as string,
+    channel:     (row.channel as string | null) ?? undefined,
+    partnerName: (row.partner_name as string | null) ?? undefined,
+    chatId:      (row.chat_id as string | null) ?? undefined,
+    importance:  row.importance as number,
+    archived:    Boolean(row.archived),
+    expiresAt:   row.expires_at as number | null,
+    createdAt:   row.created_at as number,
+    // raw_content only returned when explicitly requested — privacy LLM paths only
+    rawContent:  includeRaw ? ((row.raw_content as string | null) ?? undefined) : undefined,
   };
 }
 

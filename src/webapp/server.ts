@@ -26,6 +26,8 @@
 import express, { type Request, type Response } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
+import https from 'https';
+import { readFileSync } from 'fs';
 import { createLogger } from '../logger.js';
 import { getDb } from '../db/index.js';
 import { handleCallback } from '../gateway/approval.js';
@@ -208,7 +210,7 @@ function buildApi(
         mine: (db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE status='open' AND is_my_task=1`).get() as { c: number }).c,
       },
       proposals: {
-        pending: (db.prepare(`SELECT COUNT(*) as c FROM proposals WHERE status='proposed'`).get() as { c: number }).c,
+        pending: (db.prepare(`SELECT COUNT(*) as c FROM proposals WHERE status IN ('proposed', 'awaiting_approval')`).get() as { c: number }).c,
       },
       memories: {
         active: (db.prepare(`SELECT COUNT(*) as c FROM memories WHERE expires_at IS NULL OR expires_at > ?`).get(Date.now()) as { c: number }).c,
@@ -223,7 +225,7 @@ function buildApi(
       SELECT p.id, p.context_summary, p.plan, p.actions, p.draft_reply,
              p.status, p.created_at, p.expires_at
       FROM proposals p
-      WHERE p.status = 'proposed'
+      WHERE p.status IN ('proposed', 'awaiting_approval')
       ORDER BY p.created_at DESC
       LIMIT 20
     `).all() as Array<Record<string, unknown>>;
@@ -287,14 +289,27 @@ function buildApi(
         res.status(404).json({ error: 'Proposal not found' });
         return;
       }
-      if (proposal.status !== 'proposed') {
-        res.status(400).json({ error: `Proposal already ${proposal.status}` });
+      // Atomic status transition — AND status = 'proposed' prevents double-execution
+      // if two approval requests race (TOCTOU between the check above and the UPDATE).
+      const now = Date.now();
+      const approveResult = db.transaction(() => {
+        const r = db.prepare(
+          "UPDATE proposals SET status = 'approved', approved_at = ? WHERE id = ? AND status IN ('proposed', 'awaiting_approval')"
+        ).run(now, proposalId);
+        if (r.changes > 0) {
+          db.prepare(
+            "UPDATE approvals SET status = 'approved', responded_at = ? WHERE proposal_id = ? AND status = 'pending'"
+          ).run(now, proposalId);
+        }
+        return r;
+      })();
+
+      if (approveResult.changes === 0) {
+        // Another request already approved/rejected it
+        const fresh = db.prepare("SELECT status FROM proposals WHERE id = ?").get(proposalId) as { status: string } | undefined;
+        res.status(400).json({ error: `Proposal already ${fresh?.status ?? 'processed'}` });
         return;
       }
-
-      // Execute the actions
-      // Mark as approved first
-      db.prepare("UPDATE proposals SET status = 'approved', approved_at = ? WHERE id = ?").run(Date.now(), proposalId);
       broadcastEvent('proposal_updated', { id: proposalId, status: 'approved' });
 
       // Execute asynchronously — don't block the HTTP response
@@ -343,8 +358,13 @@ function buildApi(
       const db = getDb();
       const { reason } = req.body as { reason?: string };
       const proposal = db.prepare("SELECT plan FROM proposals WHERE id = ?").get(proposalId) as { plan: string } | undefined;
-      db.prepare("UPDATE proposals SET status = 'rejected', rejection_reason = ? WHERE id = ? AND status = 'proposed'")
-        .run(reason ?? null, proposalId);
+      const rejectNow = Date.now();
+      db.transaction(() => {
+        db.prepare("UPDATE proposals SET status = 'rejected', rejection_reason = ? WHERE id = ? AND status IN ('proposed', 'awaiting_approval')")
+          .run(reason ?? null, proposalId);
+        db.prepare("UPDATE approvals SET status = 'rejected', responded_at = ? WHERE proposal_id = ? AND status = 'pending'")
+          .run(rejectNow, proposalId);
+      })();
       broadcastEvent('proposal_updated', { id: proposalId, status: 'rejected' });
 
       // Notify via messaging channel
@@ -433,13 +453,13 @@ function buildApi(
   });
 
   // Plugins catalog — MCP catalog + enabled state from config
-  router.get('/plugins', (_req, res) => {
+  router.get('/plugins', async (_req, res) => {
     const cfg = getConfig() as unknown as import('../config/schema.js').Config;
     const enabled = new Set((cfg.mcpServers ?? []).filter(s => s.enabled).map(s => s.name));
     const skillEnabled = new Set((cfg.skills ?? []).filter(s => s.enabled !== false).map(s => s.name));
 
-    const { MCP_CATALOG: catalog }   = require('../mcp/index.js') as typeof import('../mcp/index.js');
-    const { SKILL_CATALOG: skills }  = require('../skills/registry.js') as typeof import('../skills/registry.js');
+    const { MCP_CATALOG: catalog }   = await import('../mcp/index.js');
+    const { SKILL_CATALOG: skills }  = await import('../skills/registry.js');
 
     res.json({
       mcpServers: catalog.map(s => ({ ...s, enabled: enabled.has(s.name) })),
@@ -1356,11 +1376,18 @@ export function startWebApp(options: WebAppOptions): void {
     next();
   });
 
-  // ── CORS — restrict to configured origin ──────────────────────────────────
-  const allowedOrigin = process.env.WEBAUTHN_ORIGIN ?? `http://localhost:${port}`;
+  // ── CORS — restrict to configured origins ────────────────────────────────
+  // Sources (merged): WEBAUTHN_ORIGIN env var + config.webapp.webauthnOrigin
+  const cfg = options.getConfig() as unknown as import('../config/schema.js').Config;
+  const configOrigin = cfg.webapp?.webauthnOrigin;
+  const allowedOrigins = new Set([
+    ...(process.env.WEBAUTHN_ORIGIN ?? '')
+      .split(',').map(o => o.trim()).filter(Boolean),
+    ...(configOrigin ? [configOrigin] : [`http://localhost:${port}`]),
+  ]);
   app.use((req, res, next) => {
     const origin = req.headers.origin;
-    if (origin && origin !== allowedOrigin) {
+    if (origin && !allowedOrigins.has(origin)) {
       res.status(403).json({ error: 'CORS: origin not allowed' });
       return;
     }
@@ -1432,7 +1459,16 @@ export function startWebApp(options: WebAppOptions): void {
     res.send(HTML_APP);
   });
 
-  const server = http.createServer(app);
+  // ── TLS / HTTPS support ──────────────────────────────────────────────────
+  const tlsCert = cfg.webapp?.tlsCert;
+  const tlsKey  = cfg.webapp?.tlsKey;
+  const isHttps = !!(tlsCert && tlsKey);
+
+  const server = isHttps
+    ? https.createServer({ cert: readFileSync(tlsCert!), key: readFileSync(tlsKey!) }, app)
+    : http.createServer(app);
+
+  const scheme = isHttps ? 'https' : 'http';
 
   // WebSocket — requires valid session cookie
   const wss = new WebSocketServer({ server, path: '/ws' });
@@ -1455,6 +1491,24 @@ export function startWebApp(options: WebAppOptions): void {
     pruneExpiredSessions();
   }, 10 * 60 * 1000);
 
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      log.error(`Port ${port} already in use — kill the old process: lsof -ti:${port} | xargs kill -9`);
+      process.exit(1);
+    } else {
+      throw err;
+    }
+  });
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      log.error(`Port ${port} already in use — run: lsof -ti:${port} | xargs kill -9`);
+      process.exit(1);
+    } else {
+      throw err;
+    }
+  });
+
   server.listen(port, '0.0.0.0', async () => {
     const { networkInterfaces } = await import('os');
     const localIp = Object.values(networkInterfaces())
@@ -1462,12 +1516,15 @@ export function startWebApp(options: WebAppOptions): void {
       .find(i => i?.family === 'IPv4' && !i.internal)
       ?.address ?? 'your-mac-ip';
 
-    log.info(`📱 Web app running:`);
-    log.info(`   Local:    http://localhost:${port}`);
-    log.info(`   Network:  http://${localIp}:${port}`);
+    log.info(`📱 Web app running (${isHttps ? 'HTTPS' : 'HTTP'}):`);
+    log.info(`   Local:    ${scheme}://localhost:${port}`);
+    log.info(`   Network:  ${scheme}://${localIp}:${port}`);
     if (!hasRegisteredKeys()) {
-      log.info(`   ⚠️  No YubiKey registered — visit http://${localIp}:${port}/setup`);
+      log.info(`   ⚠️  No YubiKey registered — visit ${scheme}://${localIp}:${port}/setup`);
     }
     log.info(`   RP ID: ${process.env.WEBAUTHN_RP_ID ?? 'localhost'} (set WEBAUTHN_RP_ID to match your access URL)`);
+    if (!isHttps) {
+      log.warn(`   ⚠️  HTTP only — WebAuthn requires HTTPS for non-localhost. Set tlsCert + tlsKey in config.`);
+    }
   });
 }

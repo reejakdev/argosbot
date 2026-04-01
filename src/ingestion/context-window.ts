@@ -43,13 +43,13 @@ export class ContextWindowManager {
 
   // ─── Add a message to the appropriate window ────────────────────────────────
 
-  add(message: RawMessage, sanitizedContent: string, lookup: Record<string, string>): void {
+  add(message: RawMessage, sanitizedContent: string, lookup: Record<string, string>, rawContent?: string): void {
     const existing = this.openWindows.get(message.chatId);
 
     if (existing) {
-      this.addToExisting(existing, message, sanitizedContent, lookup);
+      this.addToExisting(existing, message, sanitizedContent, lookup, rawContent);
     } else {
-      this.openNew(message, sanitizedContent, lookup);
+      this.openNew(message, sanitizedContent, lookup, rawContent);
     }
   }
 
@@ -63,28 +63,35 @@ export class ContextWindowManager {
 
   // ─── Internal ───────────────────────────────────────────────────────────────
 
-  private openNew(message: RawMessage, sanitizedContent: string, lookup: Record<string, string>): void {
+  private openNew(message: RawMessage, sanitizedContent: string, lookup: Record<string, string>, rawContent?: string): void {
     const windowId = ulid();
 
     const window: ContextWindow = {
-      id: windowId,
-      chatId: message.chatId,
+      id:          windowId,
+      channel:     message.channel,
+      chatId:      message.chatId,
+      chatName:    message.chatName,
       partnerName: message.partnerName,
       messages: [{
-        id: ulid(),
-        originalId: message.id,
-        chatId: message.chatId,
+        id:          ulid(),
+        originalId:  message.id,
+        channel:     message.channel,
+        chatId:      message.chatId,
+        chatName:    message.chatName,
+        chatType:    message.chatType,
         partnerName: message.partnerName,
-        content: sanitizedContent,
+        content:     sanitizedContent,
         lookupTable: lookup,
         links:       message.links,
         messageUrl:  message.messageUrl,
         isForward:   message.isForward,
         forwardFrom: message.forwardFrom,
         mediaType:   message.mediaType,
+        timestamp:   message.timestamp,
         receivedAt:  message.receivedAt,
       }],
       previousMessages: this.loadPreviousMessages(message.chatId, message.receivedAt),
+      rawContent:  rawContent,
       openedAt: Date.now(),
       status: 'open',
     };
@@ -108,23 +115,34 @@ export class ContextWindowManager {
     message: RawMessage,
     sanitizedContent: string,
     lookup: Record<string, string>,
+    rawContent?: string,
   ): void {
     const { window, timer } = state;
 
     window.messages.push({
-      id: ulid(),
-      originalId: message.id,
-      chatId: message.chatId,
+      id:          ulid(),
+      originalId:  message.id,
+      channel:     message.channel,
+      chatId:      message.chatId,
+      chatName:    message.chatName,
+      chatType:    message.chatType,
       partnerName: message.partnerName,
-      content: sanitizedContent,
+      content:     sanitizedContent,
       lookupTable: lookup,
       links:       message.links,
       messageUrl:  message.messageUrl,
       isForward:   message.isForward,
       forwardFrom: message.forwardFrom,
       mediaType:   message.mediaType,
+      timestamp:   message.timestamp,
       receivedAt:  message.receivedAt,
     });
+
+    if (rawContent) {
+      window.rawContent = window.rawContent
+        ? `${window.rawContent}\n---\n${rawContent}`
+        : rawContent;
+    }
 
     this.updateWindowInDb(window);
 
@@ -175,7 +193,8 @@ export class ContextWindowManager {
       window.status = 'done';
       this.updateWindowInDb(window);
     } catch (e) {
-      log.error(`Failed to process window ${window.id}`, e);
+      const err = e as Error & { code?: string };
+      log.error(`Failed to process window ${window.id}: [${err.code ?? 'ERR'}] ${err.message ?? String(e)}`);
       // Don't re-throw — window is logged, can be replayed from DB
     }
   }
@@ -205,7 +224,8 @@ export class ContextWindowManager {
         links:       [],
         receivedAt:  r.created_at,
       }));
-    } catch {
+    } catch (e) {
+      log.warn(`Failed to load previous messages for chat ${chatId}`, e);
       return [];
     }
   }

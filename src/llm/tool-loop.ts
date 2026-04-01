@@ -10,7 +10,7 @@ import { createLogger } from '../logger.js';
 
 const log = createLogger('tool-loop');
 
-const MAX_ITERATIONS = 10;
+const MAX_ITERATIONS = 6;
 
 export interface ToolDefinition {
   name: string;
@@ -62,8 +62,9 @@ export async function runToolLoop(
   let totalOutputTokens = 0;
   let finalText = '';
   let model = config.model;
+  let iterations = 0;
 
-  for (let i = 0; i < MAX_ITERATIONS; i++) {
+  for (let i = 0; i < MAX_ITERATIONS; i++, iterations++) {
     const body: Record<string, unknown> = {
       model: config.model,
       max_tokens: config.maxTokens ?? 4096,
@@ -130,6 +131,8 @@ export async function runToolLoop(
       })),
     });
   }
+
+  log.info(`Tool loop tokens: ${totalInputTokens}in / ${totalOutputTokens}out (${iterations} iteration${iterations > 1 ? 's' : ''})`);
 
   return {
     content: finalText,

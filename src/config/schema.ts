@@ -1,93 +1,259 @@
 import { z } from 'zod';
 
-const MonitoredChatSchema = z.object({
-  chatId: z.union([z.number(), z.string()]).transform(String),
-  name:   z.string(),
-  tags:   z.array(z.string()).default([]),
-  isGroup: z.boolean().default(false),
+// ─── Privacy ──────────────────────────────────────────────────────────────────
+// Première classe dans le core — pas un plugin.
+// Chaque rôle du pipeline peut être routé vers le LLM local (privacy) ou cloud (primary).
+
+const PrivacyRoleSchema = z.enum(['privacy', 'primary']);
+
+const PrivacySchema = z.object({
+  /**
+   * Provider local pour les rôles 'privacy' — ex: "ollama", "lmstudio"
+   * Doit correspondre à une clé dans llm.providers.
+   * Si absent, tous les rôles privacy tombent sur le primary.
+   */
+  provider: z.string().optional(),
+  /** Modèle à utiliser pour le provider privacy (défaut: premier modèle du provider) */
+  model:    z.string().optional(),
+  /**
+   * Routing par rôle — qui traite quoi.
+   *   'privacy' = modèle local (zéro cloud egress pour le contenu)
+   *   'primary' = modèle cloud (reçoit uniquement du contenu anonymisé)
+   */
+  roles: z.object({
+    /**
+     * Détection d'injection — envoie le contenu BRUT au LLM.
+     * 'privacy' (local) = zero cloud egress (recommandé si LLM local disponible).
+     * 'primary' (cloud) = plus fiable mais raw content part chez Anthropic.
+     */
+    sanitize:  PrivacyRoleSchema.default('privacy'),
+    /** Classification du message — contenu partenaire, local par défaut */
+    classify:  PrivacyRoleSchema.default('privacy'),
+    /** Triage inbox — contenu partenaire, local par défaut */
+    triage:    PrivacyRoleSchema.default('privacy'),
+    /** Anonymisation LLM second pass — local obligatoire */
+    llmAnon:   PrivacyRoleSchema.default('privacy'),
+    /** Planning/raisonnement complexe — cloud, contenu anonymisé uniquement */
+    plan:      PrivacyRoleSchema.default('primary'),
+  }).default({}),
+  /**
+   * Persiste le contenu brut (pré-anonymisation) dans la colonne raw_content de memories.
+   * Accessible uniquement via les fonctions de recherche avec includeRaw=true —
+   * à utiliser exclusivement pour les LLM locaux (rôle 'privacy').
+   * Désactivé par défaut — opt-in explicite requis.
+   */
+  storeRaw: z.boolean().default(false),
+}).default({});
+
+// ─── Triage ───────────────────────────────────────────────────────────────────
+// Core — channel-agnostic. Opère sur RawMessage peu importe la source.
+
+const TriageTeamSchema = z.object({
+  name:        z.string(),
+  handles:     z.array(z.string()).default([]),
+  keywords:    z.array(z.string()).default([]),
+  description: z.string().optional(),   // context hint for LLM routing
+  isOwnTeam:   z.boolean().default(false), // true = internal team (not a partner)
 });
 
+const TriageSchema = z.object({
+  enabled:           z.boolean().default(false),
+  /** Handles qui te désignent toi — @username, prénom, etc. */
+  myHandles:         z.array(z.string()).default([]),
+  /** Teams à surveiller pour le routage team_task */
+  watchedTeams:      z.array(TriageTeamSchema).default([]),
+  /** Mots-clés déclenchant un tx_whitelist */
+  whitelistKeywords: z.array(z.string()).default([
+    'whitelist', 'add address', 'ajouter adresse', 'whitelist address',
+    'can you add', 'pouvez-vous ajouter',
+  ]),
+  /** Si true : messages de l'équipe interne (isOwnTeam) ignorés sauf si @mention */
+  ignoreOwnTeam:     z.boolean().default(true),
+  /** Si true : triage uniquement si @mention explicite (pas de triage passif) */
+  mentionOnly:       z.boolean().default(false),
+  /** Database Notion cible pour les tâches créées (optionnel) */
+  notionTodoDatabaseId: z.string().optional(),
+}).default({});
+
+// ─── Channels ─────────────────────────────────────────────────────────────────
+// Séparation fondamentale : listener (sources non fiables) vs personal (owner-only).
+
 const ContextWindowSchema = z.object({
-  // How long to wait (ms) for follow-up messages before processing
-  waitMs: z.number().default(30_000),
-  // Maximum messages to batch in a single context window
-  maxMessages: z.number().default(5),
-  // Reset the timer on each new message in the window
+  waitMs:         z.number().default(30_000),
+  maxMessages:    z.number().default(5),
   resetOnMessage: z.boolean().default(true),
 });
 
-const TelegramSchema = z.object({
-  // MTProto credentials go in env vars (TELEGRAM_API_ID, TELEGRAM_API_HASH)
-  // Chats to monitor — each entry maps a chatId to a display name
-  monitoredChats: z.array(MonitoredChatSchema).default([]),
-  // Chats permanently ignored by the discovery system
-  ignoredChats: z.array(z.string()).default([]),
-  // Where approval proposals are sent — defaults to 'me' (Saved Messages)
-  approvalChatId: z.union([z.number(), z.string()]).transform(String).default('me'),
+// Telegram listener — peut être un user token MTProto (v1) ou un bot company (v2)
+const TelegramListenerSchema = z.object({
+  /**
+   * 'mtproto' = user token (ton propre compte Telegram, v1 solo)
+   * 'bot'     = company bot (invité dans les channels partenaires, v2 entreprise)
+   */
+  mode:          z.enum(['mtproto', 'bot']).default('mtproto'),
+  /** Token du bot si mode='bot' */
+  botToken:      z.string().optional(),
+  /** Chats à monitorer */
+  monitoredChats: z.array(z.object({
+    chatId:  z.union([z.number(), z.string()]).transform(String),
+    name:    z.string(),
+    tags:    z.array(z.string()).default([]),
+    isGroup: z.boolean().default(false),
+  })).default([]),
+  /** Chats ignorés (supprime les notifications de découverte) */
+  ignoredChats:  z.array(z.string()).default([]),
+  /** Paramètres de la fenêtre de contexte */
   contextWindow: ContextWindowSchema.default({}),
-});
+}).default({});
+
+// Telegram personal — toujours un bot, accessible uniquement par le owner
+const TelegramPersonalSchema = z.object({
+  /** Token du bot Telegram personal */
+  botToken:      z.string().optional(),
+  /** Telegram user IDs autorisés (doit contenir uniquement le owner) */
+  allowedUsers:  z.array(z.union([z.number(), z.string()]).transform(String)).default([]),
+  /** Chat où envoyer les notifications et proposals (défaut: Saved Messages) */
+  approvalChatId: z.union([z.number(), z.string()]).transform(String).default('me'),
+}).default({});
+
+const TelegramChannelSchema = z.object({
+  listener: TelegramListenerSchema,
+  personal: TelegramPersonalSchema,
+}).default({});
+
+const ChannelsSchema = z.object({
+  telegram: TelegramChannelSchema,
+  // slack, discord, whatsapp, gmail — à venir
+}).default({});
+
+// ─── Owner ────────────────────────────────────────────────────────────────────
 
 const OwnerSchema = z.object({
-  name: z.string(),
-  // Your Telegram user ID — used to filter "is this addressed to me"
+  name:           z.string(),
   telegramUserId: z.number().optional(),
-  // Your team memberships, used for task routing
-  // e.g. ['product', 'solution-engineer']
-  teams: z.array(z.string()).default([]),
-  // Your specific roles
-  roles: z.array(z.string()).default([]),
+  teams:          z.array(z.string()).default([]),
+  roles:          z.array(z.string()).default([]),
 });
 
-const ClaudeSchema = z.object({
-  model: z.string().default('claude-opus-4-6'),
-  maxTokens: z.number().default(4096),
-  // Temperature for classification (lower = more deterministic)
-  classificationTemperature: z.number().default(0),
-  // Temperature for planning (slightly higher for creativity)
-  planningTemperature: z.number().default(0.3),
+// ─── LLM providers ────────────────────────────────────────────────────────────
+
+const ModelProviderSchema = z.object({
+  name:    z.string().optional(),
+  api:     z.enum(['anthropic', 'openai']).default('openai'),
+  auth:    z.enum(['api-key', 'bearer']).default('api-key'),
+  apiKey:  z.string().optional(),
+  baseUrl: z.string().optional(),
+  models:  z.array(z.string()).default([]),
 });
+
+const LlmSchema = z.object({
+  activeProvider:  z.string().default('anthropic'),
+  activeModel:     z.string().default('claude-opus-4-6'),
+  thinking: z.object({
+    planner:   z.boolean().default(false),
+    chat:      z.boolean().default(false),
+    heartbeat: z.boolean().default(false),
+  }).default({}),
+  askOwner:        z.boolean().default(true),
+  fallbackProvider: z.string().optional(),
+  fallbackModel:    z.string().optional(),
+  providers: z.record(z.string(), ModelProviderSchema).default({
+    anthropic: {
+      name:   'Anthropic',
+      api:    'anthropic',
+      auth:   'api-key',
+      models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+    },
+  }),
+});
+
+// ─── Memory ───────────────────────────────────────────────────────────────────
 
 const MemorySchema = z.object({
-  defaultTtlDays: z.number().default(7),
-  archiveTtlDays: z.number().default(365),
-  // How often (hours) to run the TTL purge cron
-  purgeIntervalHours: z.number().default(24),
-  // Min importance score (0–10) to auto-archive instead of expire
+  defaultTtlDays:       z.number().default(7),
+  archiveTtlDays:       z.number().default(365),
+  purgeIntervalHours:   z.number().default(24),
   autoArchiveThreshold: z.number().default(8),
 });
 
+// ─── Anonymizer ───────────────────────────────────────────────────────────────
+
 const AnonymizerSchema = z.object({
-  // 'regex' = fast local anonymization, 'none' = skip (not recommended)
-  mode: z.enum(['regex', 'none']).default('regex'),
-  // Known personal names to always replace (populated from config)
-  knownPersons: z.array(z.string()).default([]),
-  // Known blockchain addresses to always replace
-  knownAddresses: z.array(z.string()).default([]),
-  // Replace exact amounts with buckets (<10k / 10k-100k / >100k)
-  bucketAmounts: z.boolean().default(true),
-  // Custom regex patterns to redact  { pattern: string, replacement: string }
-  customPatterns: z.array(z.object({
-    pattern: z.string(),
+  mode:            z.enum(['regex', 'none']).default('regex'),
+  knownPersons:    z.array(z.string()).default([]),
+  // knownAddresses removed — crypto addresses are pseudonymous and no longer anonymized.
+  bucketAmounts:   z.boolean().default(true),
+  customPatterns:  z.array(z.object({
+    pattern:     z.string(),
     replacement: z.string(),
   })).default([]),
 });
 
-// ─── MCP servers ─────────────────────────────────────────────────────────────
+// ─── Knowledge ────────────────────────────────────────────────────────────────
+
+const KnowledgeSourceSchema = z.discriminatedUnion('type', [
+  z.object({
+    type:         z.literal('notion'),
+    name:         z.string(),
+    pageId:       z.string(),
+    sourceType:   z.enum(['page', 'database', 'workspace']).default('page'),
+    refreshHours: z.number().default(24),
+  }),
+  z.object({
+    type:         z.literal('github'),
+    name:         z.string().optional(),
+    owner:        z.string(),
+    repo:         z.string(),
+    paths:        z.array(z.string()).default(['README.md']),
+    refreshHours: z.number().default(168),  // 7 jours
+  }),
+  z.object({
+    type:         z.literal('url'),
+    name:         z.string(),
+    url:          z.string(),
+    refreshHours: z.number().default(168),
+  }),
+  z.object({
+    type:         z.literal('linear'),
+    name:         z.string(),
+    teamId:       z.string(),
+    refreshHours: z.number().default(6),
+  }),
+  z.object({
+    type:         z.literal('google-drive'),
+    name:         z.string(),
+    folderId:     z.string(),
+    refreshHours: z.number().default(24),
+  }),
+  z.object({
+    type:         z.literal('file'),
+    name:         z.string(),
+    filePath:     z.string(),
+    refreshHours: z.number().default(168),
+  }),
+]);
+
+const KnowledgeSchema = z.object({
+  sources:      z.array(KnowledgeSourceSchema).default([]),
+  /**
+   * true  (défaut) → embeddings locaux (Ollama nomic-embed-text), zéro cloud
+   * false → embeddings OpenAI/Anthropic (opt-in explicite, user assume)
+   */
+  indexLocally: z.boolean().default(true),
+  /** Fréquence de refresh global en heures (override par source) */
+  refreshHours: z.number().default(6),
+}).default({});
+
+// ─── MCP servers ──────────────────────────────────────────────────────────────
 
 const McpServerSchema = z.object({
   name:               z.string(),
-  // 'url'   = remote SSE server (passed directly to Anthropic API)
-  // 'stdio' = local subprocess (Argos manages lifecycle)
   type:               z.enum(['url', 'stdio']),
-  // For type='url': the MCP server SSE endpoint
   url:                z.string().optional(),
-  // For type='stdio': command + args to launch the server
   command:            z.string().optional(),
   args:               z.array(z.string()).default([]),
   env:                z.record(z.string()).default({}),
-  // Optional Bearer token for 'url' servers
   authorizationToken: z.string().optional(),
-  // Human description shown in setup
   description:        z.string().optional(),
   enabled:            z.boolean().default(true),
 });
@@ -95,100 +261,29 @@ const McpServerSchema = z.object({
 // ─── Skills ───────────────────────────────────────────────────────────────────
 
 const SkillConfigSchema = z.object({
-  // Built-in skill name — must match registry key
   name:    z.string(),
   enabled: z.boolean().default(true),
-  // Per-skill config (API keys, options, etc.)
   config:  z.record(z.unknown()).default({}),
 });
 
-// ─── Context sources ──────────────────────────────────────────────────────────
-
-const ContextUrlSchema = z.object({
-  url:         z.string(),
-  name:        z.string(),                    // human label, used as memory tag
-  refreshDays: z.number().default(7),         // how often to re-fetch
-});
-
-const ContextGitHubSchema = z.object({
-  owner:       z.string(),                    // github.com/owner
-  repo:        z.string(),                    // /repo
-  // paths to fetch (default: README.md + top-level .md files)
-  paths:       z.array(z.string()).default(['README.md']),
-  name:        z.string().optional(),         // defaults to owner/repo
-  refreshDays: z.number().default(7),
-});
-
-const ContextNotionSchema = z.object({
-  pageId:      z.string(),                    // Notion page or database ID
-  name:        z.string(),
-  type:        z.enum(['page', 'database', 'workspace']).default('page'),
-  refreshDays: z.number().default(1),         // Notion content changes often
-});
-
-const ContextSourcesSchema = z.object({
-  urls:      z.array(ContextUrlSchema).default([]),
-  github:    z.array(ContextGitHubSchema).default([]),
-  notion:    z.array(ContextNotionSchema).default([]),
-}).default({});
+// ─── Notion ───────────────────────────────────────────────────────────────────
 
 const NotionSchema = z.object({
-  apiKey: z.string(),
-  // Agent workspace database (tasks, notes, tx reviews)
+  apiKey:          z.string(),
   agentDatabaseId: z.string(),
-  // Owner's personal workspace database (todos, personal notes)
-  // When set, Argos can create/update items in YOUR workspace directly
   ownerDatabaseId: z.string().optional(),
-  // 'agent'  = only write to agent workspace (default, safest)
-  // 'owner'  = only write to owner workspace
-  // 'both'   = can write to both
-  mode: z.enum(['agent', 'owner', 'both']).default('agent'),
+  mode:            z.enum(['agent', 'owner', 'both']).default('agent'),
 });
+
+// ─── Calendar ─────────────────────────────────────────────────────────────────
 
 const CalendarSchema = z.object({
   credentials: z.object({
-    clientId: z.string(),
+    clientId:     z.string(),
     clientSecret: z.string(),
     refreshToken: z.string(),
   }),
   calendarId: z.string().default('primary'),
-});
-
-// ─── LLM model providers (multi-provider like OpenClaw) ──────────────────────
-
-const ModelProviderSchema = z.object({
-  /** Display name */
-  name:     z.string().optional(),
-  /** API type: anthropic (native SDK) | openai-compatible (OpenAI chat completions) */
-  api:      z.enum(['anthropic', 'openai']).default('openai'),
-  /** Auth method: api-key → x-api-key/Authorization key header, bearer → Authorization: Bearer (OAuth) */
-  auth:     z.enum(['api-key', 'bearer']).default('api-key'),
-  /** API key or OAuth token (stored here, not in .env) */
-  apiKey:   z.string().optional(),
-  /** Base URL for the API (required for non-default endpoints) */
-  baseUrl:  z.string().optional(),
-  /** Available models from this provider */
-  models:   z.array(z.string()).default([]),
-});
-
-const LlmSchema = z.object({
-  /** Active provider key — must match a key in `providers` */
-  activeProvider: z.string().default('anthropic'),
-  /** Active model from the active provider */
-  activeModel:    z.string().default('claude-opus-4-6'),
-  /** Fallback provider key — used when activeProvider fails (500, rate-limit, timeout) */
-  fallbackProvider: z.string().optional(),
-  /** Fallback model — defaults to first model in the fallback provider */
-  fallbackModel:    z.string().optional(),
-  /** Provider definitions — key is a unique slug */
-  providers:      z.record(z.string(), ModelProviderSchema).default({
-    anthropic: {
-      name: 'Anthropic',
-      api: 'anthropic',
-      auth: 'api-key',
-      models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
-    },
-  }),
 });
 
 // ─── Web app ──────────────────────────────────────────────────────────────────
@@ -201,69 +296,132 @@ const WebAppSchema = z.object({
   tlsKey:         z.string().optional(),
 });
 
-// ─── Secrets (flat key-value — injected into process.env at startup) ──────────
+// ─── Embeddings ───────────────────────────────────────────────────────────────
 
-const SecretsSchema = z.record(z.string()).default({});
+const EmbeddingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  baseUrl: z.string().default('http://localhost:11434'),
+  model:   z.string().default('nomic-embed-text'),
+  apiKey:  z.string().optional(),
+}).default({});
+
+// ─── Heartbeat ────────────────────────────────────────────────────────────────
 
 const HeartbeatSchema = z.object({
-  // Enable proactive heartbeat
   enabled:         z.boolean().default(false),
-  // How often to pulse (minutes) — min 5, default 60
   intervalMinutes: z.number().min(5).default(60),
-  // Custom instructions injected into every heartbeat prompt
-  // e.g. "Focus on open tx_request tasks older than 24h"
   prompt:          z.string().optional(),
 });
 
+// ─── Approval ─────────────────────────────────────────────────────────────────
+
 const ApprovalSchema = z.object({
-  // Default TTL for approval requests (ms)
-  defaultExpiryMs: z.number().default(30 * 60 * 1000),       // 30min
-  // TTL for high-risk actions
-  criticalExpiryMs: z.number().default(10 * 60 * 1000),      // 10min
-  // Require double confirmation for high-risk actions
+  defaultExpiryMs:   z.number().default(30 * 60 * 1000),
+  criticalExpiryMs:  z.number().default(10 * 60 * 1000),
   doubleTapCritical: z.boolean().default(true),
 });
 
-export const ConfigSchema = z.object({
-  // LLM provider config
-  llm: LlmSchema.default({}),
-  // Web app (port, WebAuthn, TLS)
-  webapp: WebAppSchema.default({}),
-  // Secrets — API keys, tokens. Injected into process.env at startup.
-  // Stored in ~/.argos/config.json (chmod 600) — never in project .env.
-  secrets: SecretsSchema,
-  owner: OwnerSchema,
-  telegram: TelegramSchema,
-  claude: ClaudeSchema.default({}),
-  memory: MemorySchema.default({}),
-  anonymizer: AnonymizerSchema.default({}),
-  approval: ApprovalSchema.default({}),
-  notion: NotionSchema.optional(),
-  calendar: CalendarSchema.optional(),
-  // Persistent context sources — loaded at startup, used by planner
-  context: ContextSourcesSchema,
-  // MCP servers — tools made available to Claude in the planner
-  mcpServers: z.array(McpServerSchema).default([]),
-  // Built-in skills to enable
-  skills: z.array(SkillConfigSchema).default([]),
-  // Proactive heartbeat — Argos wakes up and checks if anything needs doing
-  heartbeat: HeartbeatSchema.default({}),
-  logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('debug'),
-  // Local data directory (DB, logs)
-  dataDir: z.string().default('~/.argos'),
-  // Read-only mode: workers never execute writes (draft only)
-  readOnly: z.boolean().default(true),
+// ─── Claude (legacy — gardé pour compat, préférer llm.*) ──────────────────────
+
+const ClaudeSchema = z.object({
+  model:                     z.string().default('claude-opus-4-6'),
+  maxTokens:                 z.number().default(4096),
+  classificationTemperature: z.number().default(0),
+  planningTemperature:       z.number().default(0.3),
 });
 
-export type Config = z.infer<typeof ConfigSchema>;
-export type MonitoredChat = z.infer<typeof MonitoredChatSchema>;
-/** @deprecated use MonitoredChat */
-export type PartnerChannel = MonitoredChat;
-export type OwnerConfig = z.infer<typeof OwnerSchema>;
+// ─── Secrets ──────────────────────────────────────────────────────────────────
+
+const SecretsSchema = z.record(z.string()).default({});
+
+// ─── Root config ──────────────────────────────────────────────────────────────
+
+export const ConfigSchema = z.object({
+  // Channels — listener (sources non fiables) + personal (owner-only)
+  channels:   ChannelsSchema,
+  // Privacy — première classe, routing LLM par rôle
+  privacy:    PrivacySchema,
+  // Triage — core, channel-agnostic
+  triage:     TriageSchema,
+  // Heartbeat — proactivité générique
+  heartbeat:  HeartbeatSchema.default({}),
+  // Knowledge — sources internes de l'entreprise
+  knowledge:  KnowledgeSchema,
+  // LLM providers
+  llm:        LlmSchema.default({}),
+  // Web app
+  webapp:     WebAppSchema.default({}),
+  // Secrets — injectés dans process.env au démarrage
+  secrets:    SecretsSchema,
+  owner:      OwnerSchema,
+  claude:     ClaudeSchema.default({}),
+  memory:     MemorySchema.default({}),
+  anonymizer: AnonymizerSchema.default({}),
+  approval:   ApprovalSchema.default({}),
+  notion:     NotionSchema.optional(),
+  calendar:   CalendarSchema.optional(),
+  // MCP servers — tools externes disponibles au planner
+  mcpServers: z.array(McpServerSchema).default([]),
+  // Skills built-in
+  skills:     z.array(SkillConfigSchema).default([]),
+  // Embeddings (local, pour vector search)
+  embeddings: EmbeddingsSchema,
+  logLevel:   z.enum(['debug', 'info', 'warn', 'error']).default('debug'),
+  dataDir:    z.string().default('~/.argos'),
+  readOnly:   z.boolean().default(true),
+
+  // ─── Backward compat ───────────────────────────────────────────────────────
+  // Gardé temporairement pour éviter de casser les configs existantes.
+  // À supprimer en v2.
+
+  /** @deprecated utiliser channels.telegram.listener.monitoredChats */
+  telegram: z.object({
+    monitoredChats: z.array(z.object({
+      chatId:  z.union([z.number(), z.string()]).transform(String),
+      name:    z.string(),
+      tags:    z.array(z.string()).default([]),
+      isGroup: z.boolean().default(false),
+    })).optional(),
+    ignoredChats:   z.array(z.string()).optional(),
+    approvalChatId: z.union([z.number(), z.string()]).transform(String).optional(),
+    contextWindow:  ContextWindowSchema.optional(),
+    triage:         z.unknown().optional(),   // ignoré, utiliser root triage
+  }).optional(),
+
+  /** @deprecated utiliser knowledge.sources */
+  context: z.object({
+    urls:   z.array(z.unknown()).default([]),
+    github: z.array(z.unknown()).default([]),
+    notion: z.array(z.unknown()).default([]),
+  }).optional(),
+});
+
+// ─── Types exportés ───────────────────────────────────────────────────────────
+
+export type Config          = z.infer<typeof ConfigSchema>;
+export type PrivacyConfig   = z.infer<typeof PrivacySchema>;
+export type PrivacyRole     = z.infer<typeof PrivacyRoleSchema>;
+export type TriageConfig    = z.infer<typeof TriageSchema>;
+export type TriageTeam      = z.infer<typeof TriageTeamSchema>;
+export type ChannelsConfig  = z.infer<typeof ChannelsSchema>;
+export type KnowledgeSource = z.infer<typeof KnowledgeSourceSchema>;
+export type KnowledgeConfig = z.infer<typeof KnowledgeSchema>;
+export type McpServer       = z.infer<typeof McpServerSchema>;
+export type SkillConfig     = z.infer<typeof SkillConfigSchema>;
+export type EmbeddingsConfig = z.infer<typeof EmbeddingsSchema>;
 export type AnonymizerConfig = z.infer<typeof AnonymizerSchema>;
-export type ContextSources = z.infer<typeof ContextSourcesSchema>;
-export type ContextUrl = z.infer<typeof ContextUrlSchema>;
-export type ContextGitHub = z.infer<typeof ContextGitHubSchema>;
-export type ContextNotion = z.infer<typeof ContextNotionSchema>;
-export type McpServer = z.infer<typeof McpServerSchema>;
-export type SkillConfig = z.infer<typeof SkillConfigSchema>;
+
+// Legacy — gardé pour compat avec le code existant
+/** @deprecated utiliser ChannelsConfig */
+export type MonitoredChat   = { chatId: string; name: string; tags: string[]; isGroup: boolean };
+/** @deprecated */
+export type PartnerChannel  = MonitoredChat;
+export type OwnerConfig     = z.infer<typeof OwnerSchema>;
+
+// Compat — certains imports utilisent encore ces types de context/
+/** @deprecated utiliser KnowledgeSource avec type='url' */
+export type ContextUrl    = { url: string; name: string; refreshDays: number };
+/** @deprecated utiliser KnowledgeSource avec type='github' */
+export type ContextGitHub = { owner: string; repo: string; paths: string[]; name?: string; refreshDays: number };
+/** @deprecated utiliser KnowledgeSource avec type='notion' */
+export type ContextNotion = { pageId: string; name: string; type: string; refreshDays: number };

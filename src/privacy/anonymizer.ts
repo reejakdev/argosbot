@@ -1,7 +1,10 @@
 /**
  * Regex-based anonymizer — no LLM dependency, runs locally.
- * Handles crypto-specific patterns: ETH/BTC/Solana addresses, tx hashes,
- * ENS names, plus generic PII: emails, phone numbers, names from config.
+ * Handles PII: emails, phone numbers, IPs, secrets, names from config.
+ * Amounts are bucketed into ranges (e.g. [AMT_100K-1M_USDC]).
+ *
+ * Crypto addresses (ETH, BTC, SOL, ENS, tx hashes) are pseudonymous by design
+ * and are NOT anonymized — Claude can reason about them directly.
  *
  * Returns anonymized text + a lookup table to re-identify locally.
  */
@@ -25,44 +28,9 @@ type PatternEntry = {
 
 // ─── Pattern registry ─────────────────────────────────────────────────────────
 
-const CRYPTO_PATTERNS: PatternEntry[] = [
-  // Ethereum / EVM addresses (0x + 40 hex chars)
-  {
-    key: 'ETH_ADDR',
-    regex: /\b0x[0-9a-fA-F]{40}\b/g,
-    label: i => `[ADDR_${i}]`,
-  },
-  // Transaction hashes (0x + 64 hex chars)
-  {
-    key: 'TX_HASH',
-    regex: /\b0x[0-9a-fA-F]{64}\b/g,
-    label: i => `[TXHASH_${i}]`,
-  },
-  // ENS names (.eth domains)
-  {
-    key: 'ENS',
-    regex: /\b[\w-]+\.eth\b/gi,
-    label: i => `[ENS_${i}]`,
-  },
-  // Bitcoin legacy addresses (1... or 3...)
-  {
-    key: 'BTC_LEGACY',
-    regex: /\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b/g,
-    label: i => `[BTC_${i}]`,
-  },
-  // Bitcoin bech32 (bc1...)
-  {
-    key: 'BTC_BECH32',
-    regex: /\bbc1[a-zA-HJ-NP-Z0-9]{6,87}\b/g,
-    label: i => `[BTC_${i}]`,
-  },
-  // Solana addresses (base58, 32-44 chars, starting with common prefixes)
-  {
-    key: 'SOL_ADDR',
-    regex: /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g,
-    label: i => `[SOL_${i}]`,
-  },
-];
+// Crypto addresses (ETH, BTC, SOL, ENS, tx hashes) are pseudonymous by design
+// and carry no real-world identity — we leave them as-is so Claude can reason
+// about them directly (whitelist checks, tx review, etc.).
 
 const PII_PATTERNS: PatternEntry[] = [
   // Email addresses
@@ -118,7 +86,7 @@ export class Anonymizer {
   private counters: Record<string, number> = {};
   private seenValues: Map<string, string> = new Map(); // value → placeholder
 
-  constructor(private config: Pick<AnonymizerConfig, 'mode' | 'knownPersons' | 'knownAddresses' | 'bucketAmounts' | 'customPatterns'>) {}
+  constructor(private config: Pick<AnonymizerConfig, 'mode' | 'knownPersons' | 'bucketAmounts' | 'customPatterns'>) {}
 
   anonymize(text: string): AnonymizedResult {
     if (this.config.mode === 'none') {
@@ -128,14 +96,7 @@ export class Anonymizer {
     const lookup: Record<string, string> = {};
     let result = text;
 
-    // 0. Replace known addresses from config first (most specific)
-    for (const addr of this.config.knownAddresses) {
-      if (!addr) continue;
-      const placeholder = this.getOrCreate(addr, 'KNOWN_ADDR', lookup);
-      result = result.split(addr).join(placeholder);
-    }
-
-    // 1. Replace known persons from config
+    // 0. Known persons from config
     for (const name of this.config.knownPersons) {
       if (!name) continue;
       const regex = new RegExp(`\\b${escapeRegex(name)}\\b`, 'gi');
@@ -145,16 +106,7 @@ export class Anonymizer {
       });
     }
 
-    // 2. Crypto patterns — run before generic PII to avoid partial overlap
-    for (const entry of CRYPTO_PATTERNS) {
-      result = result.replace(entry.regex, (match) => {
-        // Skip Solana false positives — too short
-        if (entry.key === 'SOL_ADDR' && match.length < 32) return match;
-        return this.getOrCreate(match, entry.key, lookup);
-      });
-    }
-
-    // 3. PII patterns
+    // 2. PII patterns
     for (const entry of PII_PATTERNS) {
       result = result.replace(entry.regex, (match) => {
         return this.getOrCreate(match, entry.key, lookup);

@@ -202,15 +202,24 @@ export class EmailChannel implements Channel {
     const content = `Subject: ${subject}\nFrom: ${senderName}\n\n${body}`.slice(0, 4000);
 
     const raw: RawMessage = {
-      id:         `email_${msg.uid}`,
-      source:     'email' as const,
-      chatId:     from?.address ?? 'email',
+      id:          `email_${msg.uid}`,
+      channel:     'email',
+      source:      'email' as const,
+      chatId:      from?.address ?? 'unknown',
+      chatName:    senderName,    // sender name as "chat" label
+      chatType:    'dm',          // email is always 1:1 by nature
       partnerName: from?.address ?? undefined,
       senderName,
-      senderId:   from?.address,
+      senderId:    from?.address,
       content,
-      links:      [],
-      receivedAt: date.getTime(),
+      links:       extractLinks(content),
+      receivedAt:  Date.now(),
+      timestamp:   date.getTime(),
+      meta: {
+        email_uid:        msg.uid,
+        email_message_id: msgId,
+        email_subject:    subject,
+      },
     };
 
     log.info(`Processing email from ${senderName}: ${subject.slice(0, 60)}`);
@@ -221,6 +230,14 @@ export class EmailChannel implements Channel {
       log.error('Email processing failed', e);
     }
   }
+}
+
+// ─── Link extraction ──────────────────────────────────────────────────────────
+
+const URL_REGEX = /https?:\/\/[^\s<>"')\]]+/g;
+
+function extractLinks(text: string): string[] {
+  return [...new Set(text.match(URL_REGEX) ?? [])];
 }
 
 // ─── HTML stripping ────────────────────────────────────────────────────────────

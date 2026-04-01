@@ -165,14 +165,17 @@ export async function sanitize(
       taggedContent: tagged,
     };
   } catch (e) {
-    log.error('LLM sanitizer error — defaulting to safe', e);
+    // Fail CLOSED — if the LLM scanner errors we cannot confirm safety, so block the content.
+    // Rationale: fail-open would let injections through whenever the LLM is unavailable.
+    log.error('LLM sanitizer error — failing closed (safe=false)', e);
+    audit('sanitizer_error', source, 'message', { error: String(e) });
     return {
-      safe: true,
+      safe: false,
       injectionDetected: false,
-      injectionPatterns: [],
+      injectionPatterns: ['llm_scan_failed'],
       llmAssessed: false,
-      risk: 'low',
-      reason: 'llm assessment failed',
+      risk: 'medium',
+      reason: 'llm assessment failed — blocked for safety',
       taggedContent: tagged,
     };
   }

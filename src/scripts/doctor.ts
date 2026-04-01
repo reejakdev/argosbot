@@ -236,11 +236,10 @@ function checkConfig(): void {
   pass('Config', configPath);
 }
 
-function checkOptionalIntegrations(): void {
+async function checkOptionalIntegrations(): Promise<void> {
   // WhatsApp
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require.resolve('@whiskeysockets/baileys');
+    await import('@whiskeysockets/baileys');
     if (process.env.WHATSAPP_ENABLED === 'true') pass('WhatsApp', 'Baileys installed + enabled');
     else skip('WhatsApp', 'installed but not enabled  (set WHATSAPP_ENABLED=true)');
   } catch {
@@ -360,17 +359,15 @@ async function main(): Promise<void> {
     console.log(rule('Optional integrations'));
     console.log();
   }
-  checkOptionalIntegrations();
+  await checkOptionalIntegrations();
   await checkYubiKey();
 
   if (jsonOutput) {
     console.log(JSON.stringify(results, null, 2));
   } else {
-    if (!jsonOutput) {
-      console.log();
-      console.log(rule('Results'));
-      console.log();
-    }
+    console.log();
+    console.log(rule('Results'));
+    console.log();
     for (const r of results) printResult(r, showFix);
     printSummary();
   }

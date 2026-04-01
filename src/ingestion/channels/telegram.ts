@@ -189,16 +189,27 @@ export class TelegramChannel implements Channel {
       return;
     }
 
+    // $ prefix anywhere (Saved Messages or monitored channel) → direct todo capture
+    // The owner uses this to annotate conversations without going through the full pipeline.
+    // e.g. "$follow up with partner about deposit" or "$check contract address"
+    if (isSelf && msg.text?.startsWith('$')) {
+      await this.captureTodo(msg.text, chatId);
+      return;
+    }
+
     // Skip own messages in group chats
     if (isSelf && !isSavedMessages) return;
 
+    log.info(`[listener] message received — chatId=${chatId} senderId=${senderId} isSelf=${isSelf}`);
+
     // Resolve monitored chat from config
-    const monitored = config.telegram.monitoredChats.find(
+    const monitored = config.channels.telegram.listener.monitoredChats.find(
       c => c.chatId === chatId || c.chatId === `-100${chatId}`,
     );
 
     // Unknown chat — notify owner proactively (once per chat, with cooldown)
     if (!monitored) {
+      log.info(`[listener] unmonitored chat=${chatId} (monitored: ${config.channels.telegram.listener.monitoredChats.map(c => c.chatId).join(', ')})`);
       await this.notifyUnknownChat(chatId, msg);
       return;
     }
@@ -208,8 +219,11 @@ export class TelegramChannel implements Channel {
 
     const rawMessage: RawMessage = {
       id:          ulid(),
+      channel:     'telegram',
       source:      'telegram',
       chatId,
+      chatName:    monitored.name,
+      chatType:    resolveChatType(chatId, msg),
       partnerName: monitored.name,
       senderId,
       senderName:  await this.resolveSenderName(msg),
@@ -220,7 +234,15 @@ export class TelegramChannel implements Channel {
       forwardFrom: resolveForwardSource(msg),
       mediaType:   resolveMediaType(msg),
       replyToId:   msg.replyTo?.replyToMsgId ? String(msg.replyTo.replyToMsgId) : undefined,
-      receivedAt:  (msg.date ?? 0) * 1000 || Date.now(),
+      threadId:    (msg.replyTo as unknown as { replyToTopId?: number })?.replyToTopId
+                     ? String((msg.replyTo as unknown as { replyToTopId?: number }).replyToTopId)
+                     : undefined,
+      receivedAt:  Date.now(),
+      timestamp:   msg.date ? msg.date * 1000 : undefined,
+      meta: {
+        telegram_message_id: msgId,
+        telegram_chat_id:    chatId,
+      },
     };
 
     log.debug(`Message from ${monitored.name}`, {
@@ -342,7 +364,49 @@ export class TelegramChannel implements Channel {
 
   async sendToApprovalChat(text: string): Promise<void> {
     const config = getConfig();
-    await this.sendMessage(config.telegram.approvalChatId ?? 'me', text);
+    await this.sendMessage(config.channels.telegram.personal.approvalChatId ?? 'me', text);
+  }
+
+  // ─── $ todo capture ───────────────────────────────────────────────────────────
+  // Owner sends "$<text>" in any monitored channel or Saved Messages.
+  // Saved directly to tasks DB — bypasses classify/plan/approve (owner intent, low-risk).
+
+  private async captureTodo(raw: string, chatId: string): Promise<void> {
+    // Strip leading $ and optional whitespace
+    const title = raw.replace(/^\$+\s*/, '').trim();
+    if (!title) return;
+
+    const { getDb, audit } = await import('../../db/index.js');
+    const { monotonicFactory } = await import('ulid');
+    const ulid = monotonicFactory();
+    const db = getDb();
+
+    const config = getConfig();
+    const monitored = config.channels.telegram.listener.monitoredChats.find(
+      c => c.chatId === chatId || c.chatId === `-100${chatId}`,
+    );
+
+    const id = ulid();
+    const now = Date.now();
+
+    db.prepare(`
+      INSERT INTO tasks (id, title, category, source_ref, partner_name, chat_id, is_my_task, status, detected_at)
+      VALUES (?, ?, 'task', ?, ?, ?, 1, 'open', ?)
+    `).run(
+      id,
+      title,
+      `telegram:${chatId}`,
+      monitored?.name ?? null,
+      chatId,
+      now,
+    );
+
+    audit('todo_captured', id, 'task', { title, chatId, source: 'dollar_prefix' });
+    log.info(`Todo captured: "${title.slice(0, 60)}"${monitored ? ` [${monitored.name}]` : ''}`);
+
+    // Confirm in Saved Messages — one line, unobtrusive
+    const context = monitored ? ` · ${monitored.name}` : '';
+    await this.sendMessage('me', `📋 \`${id.slice(-6)}\` ${title}${context}`).catch(() => {});
   }
 
   // ─── Saved Messages todo board ────────────────────────────────────────────────
@@ -405,10 +469,22 @@ export class TelegramChannel implements Channel {
         if (args.length > 0) await this.addTodo(args.join(' '), 'task');
         break;
 
-      case '/done':
-        await this.clearDoneTodos();
-        await this.sendMessage('me', '✅ Done todos cleared from Saved Messages');
+      case '/todos': {
+        await this.sendMessage('me', this.getTodosMessage());
         break;
+      }
+
+      case '/done': {
+        const shortId = args[0];
+        if (shortId) {
+          // /done <id> — mark a specific todo complete
+          await this.completeTodo(shortId);
+        } else {
+          await this.clearDoneTodos();
+          await this.sendMessage('me', '✅ Done todos cleared from Saved Messages');
+        }
+        break;
+      }
 
       case '/ignore-chat': {
         const targetId = args[0];
@@ -424,6 +500,160 @@ export class TelegramChannel implements Channel {
 
       default:
         await this.sendMessage('me', `Unknown command: ${cmd}\n\n${HELP_TEXT}`);
+    }
+  }
+
+  // ─── /add_chat — list dialogs or add by number/id ─────────────────────────────
+  // Called by TelegramBot (bot token side) which can't call getDialogs() itself.
+
+  // In-memory cache of last /add_chat listing (number → {chatId, name, isGroup})
+  dialogCache: Array<{ chatId: string; name: string; isGroup: boolean }> = [];
+
+  async handleAddChat(
+    args: string[],
+    sendFn: (text: string) => Promise<void>,
+    sendWithKeyboard?: (text: string, keyboard: Array<Array<{ text: string; callback_data: string }>>) => Promise<void>,
+  ): Promise<void> {
+    const { addMonitoredChat } = await import('../../config/index.js');
+
+    // /add_chat <number|chatId> [name] — add from previous listing or by raw ID
+    if (args.length > 0) {
+      const ref = args[0];
+      const customName = args.slice(1).join(' ');
+
+      // Numeric index from last listing
+      const idx = parseInt(ref, 10);
+      if (!isNaN(idx) && this.dialogCache[idx - 1]) {
+        const { chatId, name, isGroup } = this.dialogCache[idx - 1];
+        addMonitoredChat(chatId, customName || name, isGroup);
+        await sendFn(`✅ *${customName || name}* ajouté aux chats surveillés\n\`${chatId}\``);
+        return;
+      }
+
+      // Raw chatId
+      const label = customName || ref;
+      const isGroup = ref.startsWith('-');
+      addMonitoredChat(ref, label, isGroup);
+      await sendFn(`✅ \`${ref}\` ajouté aux chats surveillés sous le nom *${label}*`);
+      return;
+    }
+
+    // No args → fetch dialog list
+    await sendFn('⏳ Récupération de tes chats…');
+
+    try {
+      const dialogs = await this.client.getDialogs({ limit: 50 });
+      const config  = getConfig();
+      const already = new Set(config.channels.telegram.listener.monitoredChats.map(c => c.chatId));
+
+      this.dialogCache = [];
+      const entries: Array<{ chatId: string; name: string; isGroup: boolean; monitored: boolean }> = [];
+
+      for (const d of dialogs) {
+        const entity = d.entity as unknown as {
+          id?: bigint | number;
+          title?: string;
+          firstName?: string;
+          lastName?: string;
+          username?: string;
+          className?: string;
+        } | undefined;
+        if (!entity) continue;
+
+        const rawId   = entity.id ? BigInt(entity.id.toString()) : null;
+        if (!rawId) continue;
+
+        const className = entity.className ?? '';
+        const isGroup   = className === 'Channel' || className === 'Chat' || className === 'ChatForbidden' || className === 'ChannelForbidden';
+        // Telegram supergroups/channels have negative IDs prefixed with -100
+        const chatId    = isGroup ? `-100${rawId.toString()}` : rawId.toString();
+        const name      = entity.title
+          ?? [entity.firstName, entity.lastName].filter(Boolean).join(' ')
+          ?? entity.username
+          ?? chatId;
+
+        const monitored = already.has(chatId) || already.has(rawId.toString());
+        this.dialogCache.push({ chatId, name, isGroup });
+        entries.push({ chatId, name, isGroup, monitored });
+      }
+
+      if (sendWithKeyboard) {
+        // Send as inline keyboard — each dialog = one button row
+        // callback_data: "add_chat:<chatId>" (name looked up from dialogCache on click)
+        const keyboard = entries.map(({ chatId, name, monitored }) => {
+          const label  = monitored ? `✅ ${name}` : name;
+          const cbData = `add_chat:${chatId}`;
+          return [{ text: label.slice(0, 64), callback_data: cbData.slice(0, 64) }];
+        });
+
+        // Telegram allows max ~100 buttons; split into chunks of 50
+        const CHUNK = 50;
+        for (let i = 0; i < keyboard.length; i += CHUNK) {
+          const slice   = keyboard.slice(i, i + CHUNK);
+          const header  = i === 0 ? '📋 *Tes chats Telegram* — clique pour en surveiller un' : '📋 _(suite…)_';
+          await sendWithKeyboard(header, slice);
+        }
+        if (entries.length === 0) await sendFn('📭 Aucun chat trouvé.');
+      } else {
+        // Fallback: plain text list
+        const lines: string[] = ['📋 *Tes chats Telegram* — réponds `/add_chat <n>` pour en surveiller un\n'];
+        entries.forEach(({ chatId, name, monitored }, i) => {
+          lines.push(`${i + 1}. ${name}${monitored ? ' ✅' : ''}  \`${chatId}\``);
+        });
+        lines.push(`\n_/add_chat <n>  pour ajouter · /remove_chat <chatId>  pour retirer_`);
+
+        const full = lines.join('\n');
+        if (full.length < 4096) {
+          await sendFn(full);
+        } else {
+          const chunks: string[][] = [[]];
+          for (const l of lines) {
+            if (chunks[chunks.length - 1].length >= 30) chunks.push([]);
+            chunks[chunks.length - 1].push(l);
+          }
+          for (const chunk of chunks) await sendFn(chunk.join('\n'));
+        }
+      }
+    } catch (e) {
+      await sendFn(`❌ Erreur lors de la récupération des dialogs: ${(e as Error).message}`);
+    }
+  }
+
+  // ─── /chats — list currently monitored chats ──────────────────────────────────
+
+  async handleListMonitored(sendFn: (text: string) => Promise<void>): Promise<void> {
+    const config   = getConfig();
+    const chats    = config.channels.telegram.listener.monitoredChats;
+    if (chats.length === 0) {
+      await sendFn('📭 Aucun chat surveillé.\n\nUtilise `/add_chat` pour en ajouter.');
+      return;
+    }
+    const lines = [`📡 *Chats surveillés (${chats.length})*\n`];
+    for (const c of chats) {
+      const tags = c.tags?.length ? `  [${c.tags.join(', ')}]` : '';
+      lines.push(`• *${c.name}*  \`${c.chatId}\`${tags}`);
+    }
+    lines.push(`\n_/remove-chat <chatId>  pour retirer_`);
+    await sendFn(lines.join('\n'));
+  }
+
+  // ─── /remove-chat — remove from monitored ─────────────────────────────────────
+
+  async handleRemoveChat(chatId: string, sendFn: (text: string) => Promise<void>): Promise<void> {
+    const { patchConfig } = await import('../../config/index.js');
+    const config = getConfig();
+    const before = config.channels.telegram.listener.monitoredChats.length;
+    patchConfig(cfg => {
+      cfg.channels.telegram.listener.monitoredChats =
+        cfg.channels.telegram.listener.monitoredChats.filter(
+          c => c.chatId !== chatId,
+        );
+    });
+    const after = getConfig().channels.telegram.listener.monitoredChats.length;
+    if (after < before) {
+      await sendFn(`✅ \`${chatId}\` retiré des chats surveillés`);
+    } else {
+      await sendFn(`❌ Chat \`${chatId}\` pas trouvé dans la liste surveillée`);
     }
   }
 
@@ -481,6 +711,42 @@ export class TelegramChannel implements Channel {
       .join('\n');
   }
 
+  private getTodosMessage(): string {
+    const db = getDb();
+    const todos = db.prepare(`
+      SELECT id, title, partner_name, detected_at FROM tasks
+      WHERE is_my_task = 1 AND status = 'open' AND source_ref LIKE 'telegram:%'
+      ORDER BY detected_at DESC LIMIT 20
+    `).all() as Array<{ id: string; title: string; partner_name: string | null; detected_at: number }>;
+
+    if (todos.length === 0) return '📋 No open todos — use $<text> to capture one';
+
+    const lines = [`📋 *Open todos (${todos.length})*`, ``];
+    for (const t of todos) {
+      const ctx = t.partner_name ? ` · ${t.partner_name}` : '';
+      lines.push(`• \`${t.id.slice(-6)}\` ${t.title}${ctx}`);
+    }
+    lines.push(``, `_/done <id> to complete · /done to clear all_`);
+    return lines.join('\n');
+  }
+
+  private async completeTodo(shortId: string): Promise<void> {
+    const db = getDb();
+    const row = db.prepare(`SELECT id, title FROM tasks WHERE id LIKE ? AND status = 'open'`)
+      .get(`%${shortId}`) as { id: string; title: string } | undefined;
+
+    if (!row) {
+      await this.sendMessage('me', `❌ Todo \`${shortId}\` not found`);
+      return;
+    }
+
+    db.prepare(`UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?`)
+      .run(Date.now(), row.id);
+
+    await this.sendMessage('me', `✅ Done: ${row.title}`);
+    log.info(`Todo completed: ${row.id} — ${row.title}`);
+  }
+
   private getPendingProposals(): string {
     const db = getDb();
     const proposals = db.prepare(`
@@ -528,6 +794,26 @@ function buildTelegramMessageUrl(chatId: string, msgId: number, chatName?: strin
   // not the numeric ID, to build the link. Leave undefined (no false links).
   void chatName;
   return undefined;
+}
+
+// ─── Chat type ────────────────────────────────────────────────────────────────
+// Best-effort from peerId — no extra API call needed.
+// Supergroups and broadcast channels both have channelId in peerId; we'd need
+// to fetch the entity to distinguish them, so we map channelId → 'group'.
+// Forum topics (replyToTopId set) → 'thread'.
+
+function resolveChatType(chatId: string, msg: Api.Message): RawMessage['chatType'] {
+  const replyTo = msg.replyTo as unknown as { replyToTopId?: number } | undefined;
+  if (replyTo?.replyToTopId) return 'thread';
+
+  const peer = msg.peerId as unknown as { userId?: bigint; channelId?: bigint; chatId?: bigint } | undefined;
+  if (peer?.userId)    return 'dm';
+  if (peer?.chatId)    return 'group';    // PeerChat — basic group
+  if (peer?.channelId) return 'group';   // PeerChannel — supergroup or broadcast channel
+
+  // Fallback: infer from chatId sign (shouldn't reach here with valid peerId)
+  if (chatId.startsWith('-')) return 'group';
+  return 'dm';
 }
 
 // ─── Forward source ───────────────────────────────────────────────────────────
@@ -589,13 +875,21 @@ const HELP_TEXT = `🔭 *Argos — Commands* (in Saved Messages)
 /memory — Active memories
 /status — System overview
 
-*Partner management*
-/ignore-chat <chatId> — Ignore discovery notifications for a chat
-_(To add a partner, approve the proposal in the web app)_
+*Todos*
+$<text> — Capture a todo from any monitored channel or here
+/todos — List open todos
+/done <id> — Mark a todo complete
+/done — Clear all done todos from Saved Messages
 
-*Utilities*
-/todo <text> — Add a todo
-/done — Clear completed todos
+*Partner management*
+/add_chat — List all your chats to pick which ones to monitor
+/add_chat <n> — Add chat n° from the last listing
+/add_chat <chatId> [name] — Add by raw Telegram ID
+/chats — Show currently monitored chats
+/remove-chat <chatId> — Remove a chat from monitoring
+/ignore-chat <chatId> — Suppress discovery notifications for a chat
+
+*Help*
 /help — This message
 
-_Write commands in your Saved Messages chat._`;
+_Write commands or $todos in your Saved Messages._`;

@@ -50,6 +50,11 @@ function runMigrations(db: Database.Database): void {
   const migrations: Array<{ version: number; sql: string }> = [
     { version: 1, sql: MIGRATION_1 },
     { version: 2, sql: MIGRATION_2 },
+    { version: 3, sql: MIGRATION_3 },
+    { version: 4, sql: MIGRATION_4 },
+    { version: 5, sql: MIGRATION_5 },
+    { version: 6, sql: MIGRATION_6 },
+    { version: 7, sql: MIGRATION_7 },
   ];
 
   for (const migration of migrations) {
@@ -277,6 +282,44 @@ const MIGRATION_2 = `
     expires_at  TEXT NOT NULL,
     method      TEXT NOT NULL DEFAULT 'totp'
   );
+`;
+
+// ─── Migration 3: vector store for semantic search ───────────────────────────
+const MIGRATION_3 = `
+  CREATE TABLE IF NOT EXISTS vector_chunks (
+    id          TEXT PRIMARY KEY,
+    source_ref  TEXT NOT NULL,      -- e.g. "github:owner/repo" or "url:https://..."
+    source_name TEXT NOT NULL,      -- human label
+    chunk_index INTEGER NOT NULL,
+    content     TEXT NOT NULL,      -- raw text of this chunk
+    line_start  INTEGER,            -- first line (1-based, optional)
+    line_end    INTEGER,            -- last line (inclusive, optional)
+    embedding   BLOB NOT NULL,      -- Float32Array serialized as BLOB
+    created_at  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_vector_chunks_source ON vector_chunks(source_ref);
+`;
+
+// ─── Migration 4: channel field on memories ───────────────────────────────────
+const MIGRATION_4 = `
+  ALTER TABLE memories ADD COLUMN channel TEXT;
+  CREATE INDEX IF NOT EXISTS idx_memories_channel ON memories(channel);
+`;
+
+// ─── Migration 5: raw content storage (opt-in, privacy LLM only) ─────────────
+const MIGRATION_5 = `
+  ALTER TABLE memories ADD COLUMN raw_content TEXT;
+`;
+
+// ─── Migration 6: channel field on messages ───────────────────────────────────
+const MIGRATION_6 = `
+  ALTER TABLE messages ADD COLUMN channel TEXT;
+  CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel);
+`;
+
+const MIGRATION_7 = `
+  ALTER TABLE tasks ADD COLUMN channel TEXT;
+  CREATE INDEX IF NOT EXISTS idx_tasks_channel ON tasks(channel);
 `;
 
 // ─── Audit helper ─────────────────────────────────────────────────────────────

@@ -12,6 +12,18 @@ import { createLogger } from '../logger.js';
 
 const log = createLogger('llm');
 
+// ─── OAuth concurrency guard ──────────────────────────────────────────────────
+// Anthropic OAuth (bearer) tokens can only serve one request at a time.
+// We serialize all bearer-mode calls to prevent silent hangs.
+
+let _bearerQueue: Promise<unknown> = Promise.resolve();
+
+function withBearerQueue<T>(fn: () => Promise<T>): Promise<T> {
+  const next = _bearerQueue.then(() => fn(), () => fn());
+  _bearerQueue = next.then(() => {}, () => {});
+  return next;
+}
+
 // ─── Provider config ──────────────────────────────────────────────────────────
 
 export type LLMProvider = 'anthropic' | 'openai' | 'compatible';
@@ -40,6 +52,8 @@ export interface LLMConfig {
   _onTokenRefresh?: (tokens: OAuthTokens) => void;
   /** MCP servers to include in API calls (Anthropic native MCP support) */
   mcpServers?: Array<{ type: 'url'; name: string; url: string; authorization_token?: string }>;
+  /** Fallback provider config — used automatically by llmCall on 5xx/429/timeout */
+  fallback?: LLMConfig;
 }
 
 export interface LLMMessage {
@@ -123,26 +137,32 @@ export function llmConfigFromEnv(overrides: Partial<LLMConfig> = {}): LLMConfig 
   return { provider, model, apiKey, authMode, baseUrl, ...overrides };
 }
 
+
 /**
  * Build LLMConfig directly from a config object (used at startup after loadConfig).
  */
-export function llmConfigFromConfig(cfg: {
-  llm: { activeProvider: string; activeModel: string; providers: Record<string, {
+type LlmCfgShape = {
+  activeProvider: string;
+  activeModel: string;
+  fallbackProvider?: string;
+  fallbackModel?: string;
+  providers: Record<string, {
     api?: string; auth?: string; apiKey?: string; baseUrl?: string;
     oauthAccess?: string; oauthRefresh?: string; oauthExpires?: number;
-  }> };
-}, overrides: Partial<LLMConfig> = {}): LLMConfig {
-  const providerKey = cfg.llm.activeProvider;
-  const providerDef = cfg.llm.providers[providerKey];
-  if (!providerDef) {
-    log.warn(`LLM provider "${providerKey}" not found in config, falling back to env`);
-    return llmConfigFromEnv(overrides);
-  }
+    models?: string[];
+  }>;
+};
+
+function buildProviderConfig(
+  providerKey: string,
+  model: string,
+  providers: LlmCfgShape['providers'],
+): LLMConfig | null {
+  const providerDef = providers[providerKey];
+  if (!providerDef) return null;
 
   const provider: LLMProvider = providerDef.api === 'anthropic' ? 'anthropic' : 'compatible';
-  const authMode: AuthMode = (providerDef.auth as AuthMode) ?? 'api-key';
-
-  // Build OAuth tokens if present
+  const authMode: AuthMode    = (providerDef.auth as AuthMode) ?? 'api-key';
   const oauthTokens: OAuthTokens | undefined =
     providerDef.oauthAccess && providerDef.oauthRefresh && providerDef.oauthExpires
       ? { access: providerDef.oauthAccess, refresh: providerDef.oauthRefresh, expires: providerDef.oauthExpires }
@@ -150,13 +170,37 @@ export function llmConfigFromConfig(cfg: {
 
   return {
     provider,
-    model:    cfg.llm.activeModel,
-    apiKey:   providerDef.oauthAccess ?? providerDef.apiKey ?? '',
+    model,
+    apiKey:  providerDef.oauthAccess ?? providerDef.apiKey ?? '',
     authMode,
-    baseUrl:  providerDef.baseUrl,
+    baseUrl: providerDef.baseUrl,
     oauthTokens,
-    ...overrides,
   };
+}
+
+export function llmConfigFromConfig(cfg: { llm: LlmCfgShape }, overrides: Partial<LLMConfig> = {}): LLMConfig {
+  const primary = buildProviderConfig(cfg.llm.activeProvider, cfg.llm.activeModel, cfg.llm.providers);
+  if (!primary) {
+    log.warn(`LLM provider "${cfg.llm.activeProvider}" not found in config, falling back to env`);
+    return llmConfigFromEnv(overrides);
+  }
+
+  // Build fallback config if configured — auto-used by llmCall on 5xx/429/timeout
+  let fallback: LLMConfig | undefined;
+  if (cfg.llm.fallbackProvider) {
+    const fbModel = cfg.llm.fallbackModel
+      ?? cfg.llm.providers[cfg.llm.fallbackProvider]?.models?.[0 as never] as string | undefined
+      ?? primary.model;
+    const fb = buildProviderConfig(cfg.llm.fallbackProvider, fbModel, cfg.llm.providers);
+    if (fb) {
+      fallback = fb;
+      log.debug(`Fallback LLM configured: ${cfg.llm.fallbackProvider}/${fbModel}`);
+    } else {
+      log.warn(`Fallback provider "${cfg.llm.fallbackProvider}" not found in config — ignored`);
+    }
+  }
+
+  return { ...primary, fallback, ...overrides };
 }
 
 // ─── Anthropic client ─────────────────────────────────────────────────────────
@@ -473,7 +517,7 @@ async function callOpenAICompat(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
+      ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -515,10 +559,31 @@ async function callProvider(
   }
 }
 
-/** Whether the error is retryable on a fallback (server error, rate limit, timeout) */
+/** Whether the error is retryable (server error, rate limit, timeout, network) */
 function isRetryableError(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : String(e);
   return /\b(5\d\d|429|rate.limit|timeout|overloaded|ECONNREFUSED)/i.test(msg);
+}
+
+/** Retry fn up to maxAttempts times with exponential backoff on retryable errors. */
+async function withRetry<T>(
+  fn:           () => Promise<T>,
+  maxAttempts:  number = 3,
+  baseDelayMs:  number = 1000,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastError = e;
+      if (!isRetryableError(e) || attempt === maxAttempts - 1) throw e;
+      const delay = baseDelayMs * (2 ** attempt); // 1s → 2s → 4s
+      log.warn(`LLM call failed (attempt ${attempt + 1}/${maxAttempts}), retrying in ${delay}ms — ${(e as Error).message}`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastError;
 }
 
 export async function llmCall(
@@ -526,32 +591,38 @@ export async function llmCall(
   messages: LLMMessage[],
   fallbackConfig?: LLMConfig,
 ): Promise<LLMResponse> {
-  log.debug(`Calling ${config.provider}/${config.model}`, {
+  // Use embedded fallback if no explicit one passed
+  const effectiveFallback = fallbackConfig ?? config.fallback;
+  log.debug(`Calling ${config.provider}/${config.model}${effectiveFallback ? ` (fallback: ${effectiveFallback.provider}/${effectiveFallback.model})` : ''}`, {
     messages: messages.length,
     maxTokens: config.maxTokens,
   });
 
   const start = Date.now();
 
-  try {
-    const response = await callProvider(config, messages);
-    log.debug(`LLM response in ${Date.now() - start}ms`, {
-      model: response.model,
-      tokens: `${response.inputTokens}in / ${response.outputTokens}out`,
-    });
-    return response;
-  } catch (e) {
-    if (fallbackConfig && isRetryableError(e)) {
-      log.warn(`Primary LLM failed (${(e as Error).message}), falling back to ${fallbackConfig.provider}/${fallbackConfig.model}`);
-      const response = await callProvider(fallbackConfig, messages);
-      log.debug(`Fallback LLM response in ${Date.now() - start}ms`, {
+  const run = async () => {
+    try {
+      const response = await withRetry(() => callProvider(config, messages));
+      log.debug(`LLM response in ${Date.now() - start}ms`, {
         model: response.model,
         tokens: `${response.inputTokens}in / ${response.outputTokens}out`,
       });
       return response;
+    } catch (e) {
+      if (effectiveFallback && isRetryableError(e)) {
+        log.warn(`Primary LLM failed (${(e as Error).message}), falling back to ${effectiveFallback.provider}/${effectiveFallback.model}`);
+        const response = await withRetry(() => callProvider(effectiveFallback, messages));
+        log.debug(`Fallback LLM response in ${Date.now() - start}ms`, {
+          model: response.model,
+          tokens: `${response.inputTokens}in / ${response.outputTokens}out`,
+        });
+        return response;
+      }
+      throw e;
     }
-    throw e;
-  }
+  };
+
+  return config.authMode === 'bearer' ? withBearerQueue(run) : run();
 }
 
 // ─── JSON extraction helper ───────────────────────────────────────────────────

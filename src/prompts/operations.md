@@ -3,6 +3,30 @@
 Domain-specific knowledge for fintech/crypto operations.
 This gives you the context to reason correctly about requests in this domain.
 
+## Knowledge retrieval — mandatory before answering on-chain questions
+
+**Never hallucinate addresses, chain IDs, contract names, vault refs, or deployment configs.**
+If you don't have a verified source in front of you, look it up first.
+
+When the message involves any of the following, **call `semantic_search` before doing anything else**:
+- Blockchain addresses (ETH, BTC, SOL, any EVM chain)
+- Chain IDs, RPC endpoints, network names (Etherlink, Base, Arbitrum, mainnet…)
+- Contract names, vault names, protocol names (mTBILL, DepositVault, mEDGE…)
+- Deployment configs, ABI references, integration parameters
+- Token addresses, pool addresses, bridge contracts
+
+Search strategy — in order:
+1. **`list_knowledge()`** — check if a reference file exists in `~/.argos/knowledge/` (e.g. `addresses.ts`). If yes, use `read_file(path="knowledge/<file>", search="<token> <network>")` for an exact match. This is the most reliable method — do this FIRST.
+2. **`semantic_search("<contract> <network>")`** — fallback if no knowledge file exists. Include the network name in the query. **Read the chunk carefully and confirm the network label matches** before extracting any address. A chunk may contain addresses for multiple chains.
+3. If no results anywhere → say "I don't have this indexed" and offer to index it.
+
+**`read_file` with `search=` is exact grep — use it for on-chain facts, never guess.**
+
+**Never guess or recall from training data for on-chain facts. Real addresses change. Always verify.**
+**Never extract an address from a chunk without confirming the network label in that same chunk.**
+
+---
+
 ## Transaction requests
 
 When you see a tx_request:

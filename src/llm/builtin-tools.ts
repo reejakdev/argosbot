@@ -56,6 +56,34 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'index_content',
+    description: 'Fetch and index content into the vector store for semantic search. Supports GitHub files, URLs, and raw text. Use this to ingest docs, contract files, job specs, or any reference content so it can be retrieved later with semantic_search.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        type:    { type: 'string', enum: ['github', 'url', 'text'], description: 'Source type' },
+        source:  { type: 'string', description: 'For github: "owner/repo/path/to/file.json". For url: full URL. Not needed for text.' },
+        content: { type: 'string', description: 'For type=text: the raw text to index.' },
+        name:    { type: 'string', description: 'Human label for this content (e.g. "Etherlink deployments", "Job spec Q2", "Partner brief")' },
+        tags:    { type: 'array', items: { type: 'string' }, description: 'Optional tags for filtering later (e.g. ["contracts", "etherlink"])' },
+      },
+      required: ['type', 'name'],
+    },
+  },
+  {
+    name: 'semantic_search',
+    description: 'Semantic search over indexed context sources (GitHub files, URLs, Notion). Use this to find specific information in large files that may not appear in memory_search results.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query:  { type: 'string', description: 'What you are looking for (natural language)' },
+        top_k:  { type: 'number', description: 'Max results to return (default 5)' },
+        source: { type: 'string', description: 'Optional: restrict to a source ref prefix. "github:midas-apps/contracts" matches all files in that repo. Exact file: "github:midas-apps/contracts/config/constants/addresses.ts"' },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'current_time',
     description: 'Get the current date and time.',
     input_schema: { type: 'object', properties: {} },
@@ -105,12 +133,18 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'list_knowledge',
+    description: 'List all files in ~/.argos/knowledge/ — the local knowledge base. Use this to discover available reference files (addresses, configs, docs) before reading them.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'read_file',
-    description: 'Read a file from the Argos data directory (~/.argos/).',
+    description: 'Read a file from ~/.argos/ or ~/.argos/knowledge/. For large files (addresses, configs), pass a `search` term to extract only the matching lines ±10 lines of context instead of the full file.',
     input_schema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Relative path within ~/.argos/ (e.g. user.md, config.json)' },
+        path:   { type: 'string', description: 'Relative path within ~/.argos/ (e.g. "knowledge/addresses.ts", "user.md")' },
+        search: { type: 'string', description: 'Optional: return only lines containing this string (case-insensitive) ±10 lines context. Use this on large files to find a specific contract/network.' },
       },
       required: ['path'],
     },
@@ -143,10 +177,26 @@ export const executeBuiltinTool: ToolExecutor = async (name, input) => {
       return await toolMemorySearch(input.query as string, input.limit as number | undefined);
     case 'memory_store':
       return await toolMemoryStore(input.content as string, input.category as string | undefined);
+    case 'index_content':
+      return await toolIndexContent(
+        input.type as string,
+        input.source as string | undefined,
+        input.content as string | undefined,
+        input.name as string,
+        input.tags as string[] | undefined,
+      );
+    case 'semantic_search':
+      return await toolSemanticSearch(
+        input.query as string,
+        input.top_k as number | undefined,
+        input.source as string | undefined,
+      );
     case 'current_time':
       return { output: new Date().toISOString() };
+    case 'list_knowledge':
+      return toolListKnowledge();
     case 'read_file':
-      return toolReadFile(input.path as string);
+      return toolReadFile(input.path as string, input.search as string | undefined);
     case 'write_file':
       return await toolWriteFileProposal(input.path as string, input.content as string, input.reason as string | undefined);
     case 'cancel_proposals':
@@ -161,6 +211,53 @@ export const executeBuiltinTool: ToolExecutor = async (name, input) => {
       return { output: `Unknown tool: ${name}`, error: true };
   }
 };
+
+// ─── SSRF guard ───────────────────────────────────────────────────────────────
+// Shared check for all outbound fetches (fetch_url, index_content, api_call).
+// Blocks cloud metadata endpoints, private IP ranges, IPv6 mapped addresses.
+
+function ssrfBlock(rawUrl: string): string | null {
+  let parsed: URL;
+  try { parsed = new URL(rawUrl); } catch { return `Invalid URL: ${rawUrl}`; }
+
+  const h = parsed.hostname.toLowerCase();
+
+  // Reject non-HTTP(S) schemes
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    return `Blocked scheme: ${parsed.protocol}`;
+  }
+
+  // Cloud metadata endpoints (AWS, GCP, Azure, DigitalOcean, Alibaba)
+  const metadataHosts = [
+    '169.254.169.254',      // AWS / GCP / Azure / generic link-local
+    'metadata.google.internal',
+    'fd00:ec2::254',        // AWS IPv6 metadata
+    '100.100.100.200',      // Alibaba Cloud
+  ];
+  if (metadataHosts.includes(h)) return `Blocked: cloud metadata endpoint (${h})`;
+
+  // Private / loopback / link-local ranges
+  if (
+    h === 'localhost' ||
+    h === '0.0.0.0' ||
+    h === '::1' ||
+    h.endsWith('.localhost') ||
+    // IPv4 loopback
+    /^127\./.test(h) ||
+    // RFC-1918 private ranges
+    /^10\./.test(h) ||
+    /^192\.168\./.test(h) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
+    // Link-local
+    /^169\.254\./.test(h) ||
+    // IPv6 mapped IPv4 (::ffff:192.168.x.x)
+    /^::ffff:(0a|7f|a9fe|ac1[0-9a-f]|c0a8)/i.test(h.replace(/:/g, ''))
+  ) {
+    return `Blocked: private/internal network (${h})`;
+  }
+
+  return null; // safe
+}
 
 // ─── Tool implementations ─────────────────────────────────────────────────────
 
@@ -199,6 +296,9 @@ async function toolWebSearch(query: string): Promise<{ output: string; error?: b
 }
 
 async function toolFetchUrl(url: string): Promise<{ output: string; error?: boolean }> {
+  const blocked = ssrfBlock(url);
+  if (blocked) return { output: `Security: ${blocked}`, error: true };
+
   try {
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Argos/1.0)' },
@@ -221,6 +321,31 @@ async function toolFetchUrl(url: string): Promise<{ output: string; error?: bool
     }
 
     const text = await res.text();
+
+    // Large raw GitHub files — auto-index into vector store so semantic_search works
+    // Pattern: raw.githubusercontent.com/owner/repo/branch/path/to/file
+    const rawGhMatch = url.match(/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/[^/]+\/(.+)/);
+    if (rawGhMatch && text.length > 8000) {
+      const [, owner, repo, filePath] = rawGhMatch;
+      const sourceRef  = `github:${owner}/${repo}/${filePath}`;
+      const sourceName = `${owner}/${repo}/${filePath.split('/').pop()}`;
+      try {
+        const { chunkText, indexChunks } = await import('../vector/store.js');
+        const { getEmbeddingsConfig } = await import('../config/index.js');
+        const embCfg = getEmbeddingsConfig();
+        if (embCfg) {
+          const chunks = chunkText(text, sourceRef, sourceName);
+          await indexChunks(chunks, embCfg);
+          return {
+            output:
+              `File is ${text.length} chars — auto-indexed ${chunks.length} chunks.\n` +
+              `Use semantic_search with source="${sourceRef}" to query it.\n\n` +
+              `--- First 3000 chars preview ---\n${text.slice(0, 3000)}`,
+          };
+        }
+      } catch { /* embeddings not configured — fall through to truncation */ }
+    }
+
     return { output: text.slice(0, 8000) };
   } catch (e) {
     return { output: `Fetch failed: ${e instanceof Error ? e.message : String(e)}`, error: true };
@@ -237,6 +362,140 @@ async function toolMemorySearch(query: string, limit?: number): Promise<{ output
     };
   } catch (e) {
     return { output: `Memory search failed: ${e instanceof Error ? e.message : String(e)}`, error: true };
+  }
+}
+
+async function toolIndexContent(
+  type:     string,
+  source:   string | undefined,
+  content:  string | undefined,
+  name:     string,
+  tags:     string[] | undefined,
+): Promise<{ output: string; error?: boolean }> {
+  try {
+    const { loadConfig } = await import('../config/index.js');
+    const config = loadConfig();
+
+    if (!config.embeddings.enabled) {
+      return { output: 'Embeddings not enabled. Set embeddings.enabled = true in config.', error: true };
+    }
+
+    const { chunkText, indexChunks } = await import('../vector/store.js');
+
+    let text = '';
+    let sourceRef = '';
+
+    if (type === 'github') {
+      if (!source) return { output: 'source is required for type=github (e.g. "owner/repo/path/file.json")', error: true };
+      // source format: "owner/repo/path/to/file.json"
+      const parts   = source.split('/');
+      const owner   = parts[0];
+      const repo    = parts[1];
+      const path    = parts.slice(2).join('/');
+      if (!owner || !repo || !path) return { output: 'Invalid github source. Use "owner/repo/path/to/file.json"', error: true };
+
+      const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+      const headers: Record<string, string> = {
+        'Accept': 'application/vnd.github.v3.raw',
+        'User-Agent': 'Argos/1.0',
+      };
+      if (process.env.GITHUB_TOKEN) headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
+
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+      if (!res.ok) return { output: `GitHub fetch failed: HTTP ${res.status} for ${source}`, error: true };
+
+      const body = await res.text();
+      try {
+        const json = JSON.parse(body);
+        text = json.encoding === 'base64' && json.content
+          ? Buffer.from(json.content, 'base64').toString('utf8')
+          : body;
+      } catch { text = body; }
+
+      sourceRef = `github:${owner}/${repo}/${path}`;
+
+    } else if (type === 'url') {
+      if (!source) return { output: 'source is required for type=url', error: true };
+
+      const blocked = ssrfBlock(source);
+      if (blocked) return { output: `Security: ${blocked}`, error: true };
+
+      const res = await fetch(source, {
+        headers: { 'User-Agent': 'Argos/1.0' },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) return { output: `URL fetch failed: HTTP ${res.status}`, error: true };
+
+      const raw = await res.text();
+      // Strip HTML tags if HTML response
+      const ct = res.headers.get('content-type') ?? '';
+      text = ct.includes('text/html')
+        ? raw.replace(/<[^>]+>/g, ' ').replace(/\s{3,}/g, '\n').trim()
+        : raw;
+
+      sourceRef = `url:${source}`;
+
+    } else if (type === 'text') {
+      if (!content) return { output: 'content is required for type=text', error: true };
+      text      = content;
+      sourceRef = `text:${name.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`;
+
+    } else {
+      return { output: `Unknown type "${type}". Use github, url, or text.`, error: true };
+    }
+
+    // Add tags as header so they appear in chunks and aid retrieval
+    const tagHeader = tags?.length ? `[tags: ${tags.join(', ')}]\n\n` : '';
+    const chunks = chunkText(tagHeader + text, sourceRef, name);
+
+    if (chunks.length === 0) return { output: 'Content too short to index.', error: true };
+
+    await indexChunks(chunks, config.embeddings);
+
+    return {
+      output: `Indexed "${name}" — ${chunks.length} chunks.\nsourceRef: "${sourceRef}"\nQuery with: semantic_search(query="...", source="${sourceRef}")`,
+    };
+  } catch (e) {
+    return { output: `index_content failed: ${e instanceof Error ? e.message : String(e)}`, error: true };
+  }
+}
+
+async function toolSemanticSearch(
+  query:     string,
+  topK?:     number,
+  sourceRef?: string,
+): Promise<{ output: string; error?: boolean }> {
+  try {
+    const { loadConfig } = await import('../config/index.js');
+    const config = loadConfig();
+
+    if (!config.embeddings.enabled) {
+      return { output: 'Semantic search is not enabled. Set embeddings.enabled = true in config.', error: true };
+    }
+
+    const { semanticSearch, getIndexedSources } = await import('../vector/store.js');
+    const results = await semanticSearch(query, config.embeddings, {
+      topK:      topK ?? 5,
+      sourceRef,
+    });
+
+    if (results.length === 0) {
+      const sources = await getIndexedSources();
+      if (sources.length === 0) {
+        return { output: 'No content indexed yet. Context sources will be indexed on next boot.' };
+      }
+      return {
+        output: `No results for "${query}". Indexed sources: ${sources.map(s => `${s.sourceName} (${s.chunks} chunks)`).join(', ')}`,
+      };
+    }
+
+    const formatted = results.map((r, i) =>
+      `[${i + 1}] ${r.chunk.sourceName}${r.chunk.lineStart ? ` (lines ${r.chunk.lineStart}–${r.chunk.lineEnd})` : ''} — similarity: ${(r.similarity * 100).toFixed(0)}%\nsourceRef: ${r.chunk.sourceRef}\n${r.chunk.content}`,
+    ).join('\n\n---\n\n');
+
+    return { output: formatted };
+  } catch (e) {
+    return { output: `Semantic search failed: ${e instanceof Error ? e.message : String(e)}`, error: true };
   }
 }
 
@@ -281,24 +540,9 @@ async function toolApiCall(input: Record<string, unknown>): Promise<{ output: st
   const url = input.url as string;
   if (!url) return { output: 'URL is required', error: true };
 
-  // Security: block calls to localhost/internal networks
-  try {
-    const parsed = new URL(url);
-    const hostname = parsed.hostname;
-    if (
-      hostname === 'localhost' ||
-      hostname === '127.0.0.1' ||
-      hostname === '0.0.0.0' ||
-      hostname === '::1' ||
-      hostname.startsWith('192.168.') ||
-      hostname.startsWith('10.') ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
-    ) {
-      return { output: 'Security: internal network calls blocked', error: true };
-    }
-  } catch {
-    return { output: `Invalid URL: ${url}`, error: true };
-  }
+  // Security: block SSRF (cloud metadata, private ranges, etc.)
+  const blocked = ssrfBlock(url);
+  if (blocked) return { output: `Security: ${blocked}`, error: true };
 
   try {
     // Inject secrets via {{PLACEHOLDER}} syntax — only whitelisted keys
@@ -338,10 +582,10 @@ async function toolCancelProposals(proposalId?: string): Promise<{ output: strin
     const { getDb } = await import('../db/index.js');
     const db = getDb();
     if (proposalId) {
-      db.prepare("UPDATE proposals SET status = 'rejected', rejection_reason = 'Cancelled by Argos' WHERE id = ? AND status = 'proposed'").run(proposalId);
+      db.prepare("UPDATE proposals SET status = 'rejected', rejection_reason = 'Cancelled by Argos' WHERE id = ? AND status IN ('proposed', 'awaiting_approval')").run(proposalId);
       return { output: `Proposal ${proposalId.slice(-8)} cancelled.` };
     }
-    const result = db.prepare("UPDATE proposals SET status = 'rejected', rejection_reason = 'Cancelled by Argos' WHERE status = 'proposed'").run();
+    const result = db.prepare("UPDATE proposals SET status = 'rejected', rejection_reason = 'Cancelled by Argos' WHERE status IN ('proposed', 'awaiting_approval')").run();
     return { output: `${result.changes} pending proposal(s) cancelled.` };
   } catch (e) {
     return { output: `Error: ${e instanceof Error ? e.message : String(e)}`, error: true };
@@ -352,7 +596,7 @@ async function toolListProposals(): Promise<{ output: string; error?: boolean }>
   try {
     const { getDb } = await import('../db/index.js');
     const db = getDb();
-    const rows = db.prepare("SELECT id, plan, status, created_at FROM proposals WHERE status = 'proposed' ORDER BY created_at DESC LIMIT 10")
+    const rows = db.prepare("SELECT id, plan, status, created_at FROM proposals WHERE status IN ('proposed', 'awaiting_approval') ORDER BY created_at DESC LIMIT 10")
       .all() as Array<{ id: string; plan: string; status: string; created_at: number }>;
     if (rows.length === 0) return { output: 'No pending proposals.' };
     return {
@@ -418,7 +662,28 @@ function getDataDir(): string {
   return dir.startsWith('~') ? path.join(os.homedir(), dir.slice(1)) : dir;
 }
 
-function toolReadFile(relPath: string): { output: string; error?: boolean } {
+function toolListKnowledge(): { output: string; error?: boolean } {
+  const knowledgeDir = path.join(getDataDir(), 'knowledge');
+  try {
+    if (!fs.existsSync(knowledgeDir)) return { output: 'Knowledge directory is empty. Drop files in ~/.argos/knowledge/ to make them available.' };
+    const files = fs.readdirSync(knowledgeDir, { recursive: true }) as string[];
+    const listed = files
+      .filter(f => !f.startsWith('.'))
+      .map(f => {
+        try {
+          const size = fs.statSync(path.join(knowledgeDir, f)).size;
+          return `knowledge/${f}  (${Math.round(size / 1024)}KB)`;
+        } catch { return `knowledge/${f}`; }
+      });
+    return listed.length > 0
+      ? { output: `Files in ~/.argos/knowledge/:\n${listed.join('\n')}\n\nUse read_file(path="knowledge/<file>") to read. For large files pass search="<keyword>" to get only matching lines.` }
+      : { output: 'Knowledge directory is empty. Drop files in ~/.argos/knowledge/ to make them available.' };
+  } catch (e) {
+    return { output: `list_knowledge failed: ${e instanceof Error ? e.message : String(e)}`, error: true };
+  }
+}
+
+function toolReadFile(relPath: string, search?: string): { output: string; error?: boolean } {
   // Security: prevent path traversal
   const normalized = path.normalize(relPath);
   if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
@@ -426,7 +691,43 @@ function toolReadFile(relPath: string): { output: string; error?: boolean } {
   }
   const fullPath = path.join(getDataDir(), normalized);
   try {
-    return { output: fs.readFileSync(fullPath, 'utf8') };
+    const content = fs.readFileSync(fullPath, 'utf8');
+
+    // No search term — return full file (up to 20k chars, warn if truncated)
+    if (!search) {
+      if (content.length > 20000) {
+        return { output: `${content.slice(0, 20000)}\n\n[TRUNCATED — file is ${content.length} chars. Use search="<keyword>" to find specific sections.]` };
+      }
+      return { output: content };
+    }
+
+    // Search mode — return matching lines ±10 lines of context
+    const lines = content.split('\n');
+    const needle = search.toLowerCase();
+    const matchedRanges: Array<[number, number]> = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].toLowerCase().includes(needle)) {
+        const start = Math.max(0, i - 10);
+        const end   = Math.min(lines.length - 1, i + 10);
+        // Merge with previous range if overlapping
+        if (matchedRanges.length > 0 && matchedRanges[matchedRanges.length - 1][1] >= start - 1) {
+          matchedRanges[matchedRanges.length - 1][1] = end;
+        } else {
+          matchedRanges.push([start, end]);
+        }
+      }
+    }
+
+    if (matchedRanges.length === 0) {
+      return { output: `No matches for "${search}" in ${relPath}` };
+    }
+
+    const excerpts = matchedRanges.map(([s, e]) =>
+      `[lines ${s + 1}–${e + 1}]\n${lines.slice(s, e + 1).join('\n')}`
+    ).join('\n\n---\n\n');
+
+    return { output: `Search results for "${search}" in ${relPath}:\n\n${excerpts}` };
   } catch {
     return { output: `File not found: ${relPath}`, error: true };
   }

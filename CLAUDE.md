@@ -143,6 +143,13 @@ src/
 ├── db/
 │   └── index.ts                # SQLite init, migrations, audit()
 │
+├── core/
+│   ├── pipeline.ts             # Main pipeline orchestrator (ingestMessage + processWindow)
+│   ├── privacy.ts              # LLM routing per role (cloud vs local)
+│   ├── triage.ts               # Fast pre-screen classifier
+│   ├── triage-sink.ts          # Routes triage results to tasks/proposals
+│   └── heartbeat.ts            # Proactive monitoring (runHeartbeat, runProactivePlan)
+│
 ├── ingestion/
 │   ├── channels/
 │   │   ├── registry.ts         # Channel registry pattern
@@ -157,13 +164,28 @@ src/
 │   ├── sanitizer.ts            # Injection detection (regex + Claude)
 │   ├── anonymizer.ts           # Regex PII/crypto redaction
 │   ├── chat-guard.ts           # Content filtering
-│   └── llm-anonymizer.ts       # LLM-assisted anonymization
+│   └── llm-anonymizer.ts       # LLM-assisted anonymization (local model)
 │
 ├── llm/
 │   ├── index.ts                # Multi-provider abstraction (Anthropic/OpenAI/compatible)
 │   ├── tool-loop.ts            # Tool use loop with streaming
 │   ├── builtin-tools.ts        # Built-in tools (web_search, fetch_url, api_call, etc.)
 │   └── compaction.ts           # Conversation summarization
+│
+├── embeddings/
+│   └── index.ts                # Embedding provider (OpenAI-compatible /v1/embeddings)
+│
+├── vector/
+│   └── store.ts                # LanceDB semantic search (chunkText, indexChunks, semanticSearch)
+│
+├── knowledge/
+│   ├── index.ts                # Knowledge layer — load + refresh sources
+│   ├── indexer.ts              # Upsert docs into SQLite + LanceDB
+│   ├── types.ts                # KnowledgeDocument, KnowledgeConnector interfaces
+│   └── connectors/
+│       ├── url.ts              # URL connector (fetch + HTML strip)
+│       ├── github.ts           # GitHub connector (file paths via API)
+│       └── notion.ts           # Notion connector (page + database)
 │
 ├── planner/
 │   └── index.ts                # Proposal generation (tool use: draft_reply, calendar, etc.)
@@ -179,13 +201,13 @@ src/
 │   ├── calendar.ts             # Google Calendar
 │   ├── notion.ts               # Notion workspace
 │   ├── tx-prep.ts              # Transaction review packs (read-only)
-│   └── proposal-executor.ts    # Execute approved proposals
+│   └── proposal-executor.ts    # Execute approved proposals (LLM agent)
 │
 ├── scheduler/
 │   └── index.ts                # Cron jobs + event chaining
 │
 ├── skills/
-│   ├── registry.ts             # Skill tool registry
+│   ├── registry.ts             # Skill tool registry (opt-in via config)
 │   └── builtins/               # memory-search, notion-search, web-search, crypto-price, fetch-url
 │
 ├── mcp/
@@ -198,19 +220,20 @@ src/
 │   └── totp.ts                 # TOTP 2FA backup
 │
 ├── auth/
-│   └── anthropic-oauth.ts      # Anthropic OAuth token management
-│
-├── context/
-│   └── index.ts                # External context sources (URLs, GitHub, Notion)
-│
-├── heartbeat/
-│   └── index.ts                # Proactive monitoring
+│   └── anthropic-oauth.ts      # Anthropic OAuth PKCE flow
 │
 ├── plugins/
-│   └── telegram.ts             # Telegram command handler
+│   ├── registry.ts             # Plugin lifecycle (onBoot, onMessage, onShutdown)
+│   ├── heartbeat/index.ts      # Heartbeat plugin (wires core/heartbeat.ts into plugin system)
+│   ├── telegram/index.ts       # Telegram tools (add_chat, ignore_chat, list_chats)
+│   └── examples/
+│       └── raw-forwarder.ts    # Example: inject arbitrary messages into the pipeline
 │
 ├── prompts/
-│   └── index.ts                # System prompt builder (.md templates)
+│   └── index.ts                # System prompt builder (.md templates, role-based)
+│
+├── heartbeat/
+│   └── index.ts                # Shim → core/heartbeat.ts (backward compat)
 │
 └── scripts/
     ├── setup.ts                # Interactive setup wizard

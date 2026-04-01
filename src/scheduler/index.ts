@@ -33,6 +33,10 @@ export function registerHandler(name: string, handler: CronHandler): void {
   log.debug(`Registered cron handler: ${name}`);
 }
 
+export function validateCronSchedule(schedule: string): boolean {
+  return cron.validate(schedule);
+}
+
 // ─── Active cron tasks ────────────────────────────────────────────────────────
 
 const activeTasks = new Map<string, cron.ScheduledTask>();
