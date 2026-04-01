@@ -195,6 +195,37 @@ The full catalog is in `src/mcp/index.ts`.
 
 ---
 
+## Local model for anonymization (recommended)
+
+Before any message reaches a cloud LLM (Claude, GPT-4o, etc.), Argos runs a regex-based anonymizer to strip addresses, amounts, and known PII. For stronger privacy, you should also run a **local LLM as a second anonymization pass** — it catches patterns the regex misses (implicit references, context-dependent identifiers).
+
+This is the most important privacy safeguard: your raw messages never leave your machine.
+
+```bash
+ollama pull qwen2.5:7b   # or llama3.2:3b, mistral:7b — any instruction-following model works
+ollama serve
+```
+
+Then set the `llmAnonymizer` role in config:
+
+```json
+"llm": {
+  "activeProvider": "anthropic",
+  "activeModel": "claude-sonnet-4-6",
+  "roles": {
+    "llmAnonymizer": {
+      "provider": "ollama",
+      "model": "qwen2.5:7b",
+      "baseUrl": "http://localhost:11434"
+    }
+  }
+}
+```
+
+With this setup: **local model anonymizes → anonymized text sent to Claude**. Claude never sees raw names, addresses, amounts, or any identifying data.
+
+---
+
 ## Local embeddings (Ollama)
 
 Vector search requires Ollama running with `nomic-embed-text`:
