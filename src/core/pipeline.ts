@@ -103,7 +103,9 @@ export async function ingestMessage(
   let anon = anonymizer.anonymize(msg.content);
 
   // LLM second pass — catches what regex missed (names, companies, project names…)
-  // Only runs if llmAnon role is configured (typically a local model via Ollama)
+  // ONLY runs if a local privacy provider is configured for the llmAnon role.
+  // Never runs with the primary (cloud) LLM — sending raw content to a cloud model
+  // to "anonymize" it defeats the entire privacy model.
   const llmAnonConfig = llmForRole('llmAnon', llmConfig, privacyConfig, config);
   if (llmAnonConfig !== llmConfig) {
     try {
