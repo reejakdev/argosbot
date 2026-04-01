@@ -79,7 +79,7 @@ export class BrowserActionWorker {
     let credential: Awaited<ReturnType<typeof resolveCredential>> | null = null;
     if (credentialRef) {
       try {
-        credential = await resolveCredential(credentialRef);
+        credential = await resolveCredential(credentialRef, this.config.secrets ?? {});
         log.info(`Credential resolved for browser action: ${JSON.stringify(redactCredential(credential))}`);
       } catch (e) {
         return { success: false, dryRun: false, output: `Credential error: ${(e as Error).message}` };

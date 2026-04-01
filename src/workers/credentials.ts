@@ -41,7 +41,12 @@ export interface ResolvedCredential {
 
 // ─── Resolver ─────────────────────────────────────────────────────────────────
 
-export async function resolveCredential(ref: string): Promise<ResolvedCredential> {
+/**
+ * @param configSecrets - config.secrets from the loaded config. Required for
+ *   "config:" refs — only keys present in this object are accessible.
+ *   Prevents arbitrary process.env leakage (e.g. ANTHROPIC_API_KEY, PATH, etc.)
+ */
+export async function resolveCredential(ref: string, configSecrets: Record<string, string> = {}): Promise<ResolvedCredential> {
   if (!ref) throw new Error('credential_ref is required');
 
   // op:// secret reference — fetch a specific field
@@ -54,9 +59,9 @@ export async function resolveCredential(ref: string): Promise<ResolvedCredential
     return resolveVaultItem(ref.slice('vault:'.length));
   }
 
-  // config: — read from config.secrets / process.env
+  // config: — ONLY keys defined in config.secrets, never arbitrary process.env
   if (ref.startsWith('config:')) {
-    return resolveConfigSecret(ref.slice('config:'.length));
+    return resolveConfigSecret(ref.slice('config:'.length), configSecrets);
   }
 
   throw new Error(`Unknown credential ref format: "${ref}". Use vault:ItemName, op://vault/item/field, or config:KEY`);
@@ -133,9 +138,10 @@ async function resolveOpRef(ref: string): Promise<ResolvedCredential> {
 
 // ─── Config / env secret ──────────────────────────────────────────────────────
 
-function resolveConfigSecret(key: string): ResolvedCredential {
-  const value = process.env[key];
-  if (!value) throw new Error(`config secret "${key}" not found in secrets or environment`);
+function resolveConfigSecret(key: string, configSecrets: Record<string, string>): ResolvedCredential {
+  // Only allow keys explicitly declared in config.secrets — never arbitrary process.env
+  const value = configSecrets[key];
+  if (!value) throw new Error(`config secret "${key}" not found in config.secrets`);
   log.debug(`Credential resolved: config:${key}`);
   return { value };
 }

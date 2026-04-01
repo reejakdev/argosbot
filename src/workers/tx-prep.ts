@@ -119,7 +119,7 @@ const RISK_CHECKERS: Array<{
 ];
 
 export class TxPrepWorker {
-  prepare(input: Record<string, unknown>, readOnly: boolean): WorkerResult {
+  prepare(input: Record<string, unknown>, _readOnly: boolean): WorkerResult {
     const operation = (input.operation as string) ?? 'other';
     const chain = (input.chain as string) ?? 'unknown';
     const vaultRef = (input.vault_ref as string) ?? 'VAULT_?';

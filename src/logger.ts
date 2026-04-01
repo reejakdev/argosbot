@@ -73,9 +73,9 @@ function log(level: LogLevel, module: string, msg: string, data?: unknown) {
 
   if (data !== undefined) {
     const safe = sanitizeLogData(data);
-    console.log(`${prefix} ${msg}`, typeof safe === 'object' ? JSON.stringify(safe, null, 2) : safe);
+    console.log(`${prefix} ${msg}`, typeof safe === 'object' ? JSON.stringify(safe, null, 2) : safe); // eslint-disable-line no-console
   } else {
-    console.log(`${prefix} ${msg}`);
+    console.log(`${prefix} ${msg}`); // eslint-disable-line no-console
   }
 
   auditCallback?.(level, module, msg, data);

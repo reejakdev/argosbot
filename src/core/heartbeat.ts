@@ -13,14 +13,12 @@
  * Proposals produced here still go through the normal approval gateway.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import { monotonicFactory } from 'ulid';
 import { getDb, audit } from '../db/index.js';
 import { createLogger } from '../logger.js';
 import { getSkillToolDefinitions, executeSkill } from '../skills/registry.js';
-import { buildAnthropicMcpConfig } from '../mcp/index.js';
 import { requestApproval } from '../gateway/approval.js';
-import { llmConfigFromConfig, callAnthropicBearerRaw } from '../llm/index.js';
+import { llmConfigFromConfig, callWithTools, buildToolResultMessages } from '../llm/index.js';
 import type { Config } from '../config/schema.js';
 import type { Proposal, ProposedAction, WorkerType } from '../types.js';
 
@@ -136,38 +134,24 @@ export async function runProactivePlan(
   const label = opts.label ?? 'heartbeat';
   log.info(`Proactive plan: ${label}`);
 
-  // Resolve LLM config via the multi-provider abstraction — same as planner.
-  // Heartbeat uses Anthropic tool format, so we need an Anthropic provider.
-  let llmCfg = llmConfigFromConfig(config);
-  if (llmCfg.provider !== 'anthropic') {
-    if (llmCfg.fallback?.provider === 'anthropic') {
-      log.warn('Primary LLM is not Anthropic — using fallback for heartbeat');
-      llmCfg = llmCfg.fallback;
-    } else {
-      log.warn(`Heartbeat requires Anthropic provider. Active: ${llmCfg.provider}. Skipping.`);
-      return;
-    }
-  }
-  const useBearerMode = llmCfg.authMode === 'bearer';
-  const client = useBearerMode ? null : new Anthropic({ apiKey: llmCfg.apiKey });
+  // Provider-agnostic tool loop — works with Anthropic, OpenAI, Groq, Ollama, etc.
+  const llmCfg = { ...llmConfigFromConfig(config), temperature: 0.2, maxTokens: 2048 };
 
   const stateSnapshot = buildStateSnapshot();
 
-  const skillTools = getSkillToolDefinitions(config.skills) as unknown as Anthropic.Tool[];
-  const mcpServers = buildAnthropicMcpConfig(config.mcpServers ?? []);
-  const useMcp = mcpServers.length > 0;
+  type ToolDef = { name: string; description: string; input_schema: unknown };
+  const skillTools = getSkillToolDefinitions(config.skills) as ToolDef[];
 
-  // Proposal tools — same subset as the planner (no create_cron_job here to avoid recursion)
-  const PROPOSAL_TOOLS: Anthropic.Tool[] = [
+  const PROPOSAL_TOOLS: ToolDef[] = [
     {
       name: 'draft_reply',
       description: 'Prepare a draft reply or message for the owner to review and send',
       input_schema: {
         type: 'object',
         properties: {
-          to:       { type: 'string', description: 'Recipient' },
-          content:  { type: 'string', description: 'Message content' },
-          urgency:  { type: 'string', enum: ['low', 'medium', 'high'] },
+          to:              { type: 'string', description: 'Recipient' },
+          content:         { type: 'string', description: 'Message content' },
+          urgency:         { type: 'string', enum: ['low', 'medium', 'high'] },
           notes_for_owner: { type: 'string', description: 'Why this reply is needed' },
         },
         required: ['to', 'content', 'urgency'],
@@ -202,74 +186,45 @@ export async function runProactivePlan(
     },
   ];
 
-  const allTools = [...PROPOSAL_TOOLS, ...skillTools];
+  const allTools: ToolDef[] = [...PROPOSAL_TOOLS, ...skillTools];
   const systemPrompt = buildHeartbeatSystemPrompt(config, opts.prompt);
   const userMsg = `${stateSnapshot}\n\nReview the above and decide if any proactive action is needed. If yes, use the tools. If not, say so briefly.`;
 
-  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: userMsg }];
+  const messages: unknown[] = [{ role: 'user', content: userMsg }];
   const actions: ProposedAction[] = [];
   let planText = '';
   let iterations = 0;
 
   while (iterations++ < 5) {
-    const response = useMcp
-      ? await (client.beta.messages.create as Function)({
-          model:       config.claude.model,
-          max_tokens:  2048,
-          temperature: 0.2,
-          system:      systemPrompt,
-          tools:       allTools,
-          mcp_servers: mcpServers,
-          messages,
-          betas:       ['mcp-client-2025-04-04'],
-        })
-      : await client.messages.create({
-          model:       config.claude.model,
-          max_tokens:  2048,
-          temperature: 0.2,
-          system:      systemPrompt,
-          tools:       allTools,
-          messages,
-        });
+    const step = await callWithTools(llmCfg, systemPrompt, messages, allTools);
 
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    if (step.text) planText += (planText ? '\n' : '') + step.text;
 
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        planText += (planText ? '\n' : '') + block.text;
+    const feedbacks: Array<{ id: string; content: string }> = [];
+
+    for (const call of step.toolCalls) {
+      if (skillTools.some(t => t.name === call.name)) {
+        const result = await executeSkill(call.name, call.input, config.skills);
+        feedbacks.push({ id: call.id, content: result.output });
         continue;
       }
-      if (block.type === 'tool_use') {
-        // Skill → execute immediately
-        if (skillTools.some(t => t.name === block.name)) {
-          const result = await executeSkill(block.name, block.input as Record<string, unknown>, config.skills);
-          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result.output });
-          continue;
-        }
-        // Proposal → queue
-        const workerType: WorkerType =
-          block.name.includes('calendar') ? 'calendar' :
-          block.name.includes('notion')   ? 'notion'   :
-          block.name.includes('reminder') || block.name.includes('cron') ? 'scheduler' :
-          'reply';
-        actions.push({
-          type: workerType,
-          description: `[${label}] ${block.name}: ${JSON.stringify(block.input).slice(0, 80)}`,
-          risk: 'low',
-          payload: { tool: block.name, input: block.input as Record<string, unknown> },
-          requiresApproval: true,
-        });
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: block.id,
-          content: JSON.stringify({ status: 'queued_for_approval' }),
-        });
-      }
+      const workerType: WorkerType =
+        call.name.includes('calendar') ? 'calendar' :
+        call.name.includes('notion')   ? 'notion'   :
+        call.name.includes('reminder') || call.name.includes('cron') ? 'scheduler' :
+        'reply';
+      actions.push({
+        type: workerType,
+        description: `[${label}] ${call.name}: ${JSON.stringify(call.input).slice(0, 80)}`,
+        risk: 'low',
+        payload: { tool: call.name, input: call.input },
+        requiresApproval: true,
+      });
+      feedbacks.push({ id: call.id, content: JSON.stringify({ status: 'queued_for_approval' }) });
     }
 
-    if (response.stop_reason !== 'tool_use') break;
-    messages.push({ role: 'assistant', content: response.content });
-    messages.push({ role: 'user', content: toolResults });
+    if (step.done) break;
+    messages.push(...buildToolResultMessages(llmCfg, step._rawAssistant, feedbacks));
   }
 
   // Nothing actionable → log and move on

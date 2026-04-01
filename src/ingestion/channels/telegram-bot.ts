@@ -9,7 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { createLogger } from '../../logger.js';
-import type { LLMConfig, LLMMessage } from '../../llm/index.js';
+import type { LLMConfig } from '../../llm/index.js';
 import type { Config } from '../../config/schema.js';
 import type { CompactableHistory } from '../../llm/compaction.js';
 import type { TelegramChannel } from './telegram.js';
@@ -890,7 +890,6 @@ You are meeting this user for the first time. You MUST:
     if (userMsg.length < 20) return;
 
     try {
-      const { store } = await import('../../memory/store.js');
       const { llmCall } = await import('../../llm/index.js');
       const { getAnonymizer } = await import('../../privacy/anonymizer.js');
       const anonConfig = this.argosConfig?.anonymizer ?? { mode: 'regex' as const, bucketAmounts: true, knownPersons: [], customPatterns: [] };

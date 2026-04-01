@@ -27,4 +27,13 @@ export default [
       'no-var': 'error',
     },
   },
+  {
+    // Scripts are CLI tools — console.log is intentional output, not debug noise
+    // test-*.ts are ad-hoc debug scripts — unused vars expected
+    files: ['src/scripts/**/*.ts'],
+    rules: {
+      'no-console': 'off',
+      '@typescript-eslint/no-unused-vars': 'off',
+    },
+  },
 ];

@@ -262,7 +262,7 @@ export class ContextWindowManager {
   // ─── Replay pending windows from DB on startup ───────────────────────────────
   // If the process crashed with open windows, re-queue them
 
-  static async replayPending(onReady: WindowReadyCallback): Promise<void> {
+  static async replayPending(_onReady: WindowReadyCallback): Promise<void> {
     const db = getDb();
     const pending = db.prepare(`
       SELECT * FROM context_windows WHERE status = 'open' OR status = 'processing'

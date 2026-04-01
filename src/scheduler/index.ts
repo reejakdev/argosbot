@@ -17,7 +17,7 @@ import cron from 'node-cron';
 import { monotonicFactory } from 'ulid';
 import { getDb, audit } from '../db/index.js';
 import { createLogger } from '../logger.js';
-import type { CronJob, ChainEvent } from '../types.js';
+import type { CronJob } from '../types.js';
 
 const ulid = monotonicFactory();
 const log = createLogger('scheduler');

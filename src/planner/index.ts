@@ -26,7 +26,7 @@ import { createLogger } from '../logger.js';
 import { search as memorySearch } from '../memory/store.js';
 import { getSkillToolDefinitions, executeSkill } from '../skills/registry.js';
 import { buildSystemPrompt } from '../prompts/index.js';
-import { llmConfigFromConfig, callAnthropicBearerRaw } from '../llm/index.js';
+import { llmConfigFromConfig, callWithTools, buildToolResultMessages } from '../llm/index.js';
 import type {
   ContextWindow,
   ClassificationResult,
@@ -34,7 +34,6 @@ import type {
   ProposedAction,
   WorkerType,
 } from '../types.js';
-import type { LLMConfig } from '../llm/index.js';
 import type { Config } from '../config/schema.js';
 
 const ulid = monotonicFactory();
@@ -361,35 +360,18 @@ export async function plan(
     `[${new Date(m.createdAt).toLocaleDateString()}] ${m.content}`
   ).join('\n');
 
-  // ─── Anthropic tool use loop ───────────────────────────────────────────────
-  // Resolve credentials via the multi-provider LLMConfig abstraction instead
-  // of reading ANTHROPIC_API_KEY directly — supports both api-key and OAuth bearer modes.
-  let llmCfg = llmConfigFromConfig(config);
-  // Tool use requires Anthropic (SDK + tool format are Anthropic-specific).
-  // If primary is not Anthropic but fallback is, use fallback.
-  if (llmCfg.provider !== 'anthropic') {
-    if (llmCfg.fallback?.provider === 'anthropic') {
-      log.warn(`Primary LLM is not Anthropic — using fallback for planner`);
-      llmCfg = llmCfg.fallback;
-    } else {
-      throw new Error(
-        `Planner requires an Anthropic provider (tool use). ` +
-        `Active provider: ${llmCfg.provider}. ` +
-        `Set llm.activeProvider or llm.fallbackProvider to an Anthropic provider.`
-      );
-    }
-  }
-  const useBearerMode = llmCfg.authMode === 'bearer';
-  const client = useBearerMode ? null : new Anthropic({ apiKey: llmCfg.apiKey });
+  // ─── Provider-agnostic tool use loop ─────────────────────────────────────────
+  // Works with any provider that supports tool use: Anthropic, OpenAI, Groq,
+  // Ollama (with function-calling models like Qwen 2.5, Llama 3.3), etc.
+  const llmCfg = llmConfigFromConfig(config);
 
   const systemPrompt = buildSystemPrompt('planner', config);
   const userPrompt = buildUserPrompt(window, result, memoryContext);
 
-  // Merge proposal tools + enabled skill tools
-  // Note: MCP tools are NOT included here — they are chat-only and would waste
-  // thousands of tokens on every automated planner call.
-  const skillTools = getSkillToolDefinitions(config.skills) as unknown as Anthropic.Tool[];
-  const allTools: Anthropic.Tool[] = [...TOOLS, ...skillTools];
+  // Skill tools + proposal tools. MCP excluded — too many tokens per call.
+  type ToolDef = { name: string; description: string; input_schema: unknown };
+  const skillTools = getSkillToolDefinitions(config.skills) as ToolDef[];
+  const allTools: ToolDef[] = [...(TOOLS as unknown as ToolDef[]), ...skillTools];
 
   let planText = '';
   const actions: ProposedAction[] = [];
@@ -397,90 +379,48 @@ export async function plan(
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
 
-  const messages: Anthropic.MessageParam[] = [
-    { role: 'user', content: userPrompt },
-  ];
+  // For Anthropic only: extended thinking (OpenAI providers ignore this)
+  const useThinking = llmCfg.provider === 'anthropic' && (config.llm?.thinking?.planner ?? false);
+  const effectiveCfg = useThinking
+    ? { ...llmCfg, temperature: undefined, thinking: { enabled: true, budgetTokens: 1024 } }
+    : { ...llmCfg, temperature: llmCfg.temperature ?? config.claude.planningTemperature };
 
-  // Agentic loop — Claude may use multiple tools in sequence
+  const messages: unknown[] = [{ role: 'user', content: userPrompt }];
+
   let iterations = 0;
-  const MAX_ITERATIONS = 5; // reduced from 8 — most plans need ≤3 tool calls
+  const MAX_ITERATIONS = 5;
 
   while (iterations < MAX_ITERATIONS) {
     iterations++;
 
-    const useThinking = config.llm?.thinking?.planner ?? false;
-    const callBody = {
-      model:      llmCfg.model || config.claude.model,
-      max_tokens: config.claude.maxTokens,
-      ...(useThinking
-        ? { thinking: { type: 'enabled', budget_tokens: 1024 } }
-        : { temperature: config.claude.planningTemperature }),
-      system: systemPrompt,
-      tools:  allTools,
-      messages,
-    };
+    const step = await callWithTools(effectiveCfg, systemPrompt, messages, allTools);
+    totalInputTokens  += step.inputTokens;
+    totalOutputTokens += step.outputTokens;
 
-    // Bearer (OAuth) path — uses raw fetch via callAnthropicBearerRaw
-    // API-key path — uses Anthropic SDK (avoids bearer-specific header issues)
-    const response: Anthropic.Message = useBearerMode
-      ? await callAnthropicBearerRaw(llmCfg, callBody as Record<string, unknown>) as unknown as Anthropic.Message
-      : await (client!.messages.create as Function)(callBody) as Anthropic.Message;
+    if (step.text) planText += (planText ? '\n' : '') + step.text;
 
-    totalInputTokens  += response.usage.input_tokens;
-    totalOutputTokens += response.usage.output_tokens;
+    const feedbacks: Array<{ id: string; content: string }> = [];
 
-    // Collect text from this turn
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
-
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        planText += (planText ? '\n' : '') + block.text;
+    for (const call of step.toolCalls) {
+      // Skill — execute immediately
+      if (skillTools.some(t => t.name === call.name)) {
+        log.debug(`Executing skill: ${call.name}`, call.input);
+        const skillResult = await executeSkill(call.name, call.input, config.skills);
+        feedbacks.push({ id: call.id, content: skillResult.output });
         continue;
       }
 
-      if (block.type === 'tool_use') {
-        const toolName = block.name;
-        const toolInput = block.input as Record<string, unknown>;
-
-        // Skill tool — execute immediately (read-only by design)
-        if (skillTools.some((t) => t.name === toolName)) {
-          log.debug(`Executing skill: ${toolName}`, toolInput);
-          const skillResult = await executeSkill(toolName, toolInput, config.skills);
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: block.id,
-            content: skillResult.output,
-          });
-          continue;
-        }
-
-        // Proposal tool — queue for approval
-        const action = toolCallToAction(toolName, toolInput);
-        actions.push(action);
-        log.debug(`Tool proposed: ${toolName}`, toolInput);
-
-        if (toolName === 'draft_reply') {
-          draftReply = (toolInput as { content?: string }).content;
-        }
-
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: block.id,
-          content: JSON.stringify({ status: 'queued_for_approval', message: 'Action added to proposal — awaiting owner approval before execution' }),
-        });
-      }
+      // Proposal — queue for approval
+      const action = toolCallToAction(call.name, call.input);
+      actions.push(action);
+      log.debug(`Tool proposed: ${call.name}`, call.input);
+      if (call.name === 'draft_reply') draftReply = (call.input as { content?: string }).content;
+      feedbacks.push({ id: call.id, content: JSON.stringify({ status: 'queued_for_approval' }) });
     }
 
-    // If Claude didn't use tools or said stop, we're done
-    if (response.stop_reason === 'end_turn' || response.stop_reason === 'stop_sequence') {
-      break;
-    }
-    if (response.stop_reason !== 'tool_use') {
-      break;
-    }
+    if (step.done) break;
 
-    messages.push({ role: 'assistant', content: response.content });
-    messages.push({ role: 'user', content: toolResults });
+    messages.push(...buildToolResultMessages(effectiveCfg, step._rawAssistant, feedbacks));
   }
 
   log.info(`Planner tokens: ${totalInputTokens}in / ${totalOutputTokens}out (${iterations} iteration${iterations > 1 ? 's' : ''})`);

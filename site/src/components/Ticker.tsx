@@ -1,0 +1,52 @@
+const phrases = [
+  '// READ BY DEFAULT',
+  '◆ SANITIZE BEFORE MEMORY',
+  '// APPROVE BEFORE ACTION',
+  '◆ LOCAL-FIRST ARCHITECTURE',
+  '// PII ANONYMIZED BEFORE LLM',
+  '◆ 15+ LLM PROVIDERS',
+  '// WEBAUTHN APPROVAL',
+  '◆ MIT LICENSE',
+  '// ZERO RAW DATA STORED',
+  '◆ PASSKEY + YUBIKEY SUPPORT',
+  '// PLUGIN API IN TYPESCRIPT',
+  '◆ LANCEDB VECTOR SEARCH',
+  '// 5 MESSAGING CHANNELS',
+  '◆ OPEN SOURCE',
+  '// END-TO-END PRIVACY',
+  '◆ HUMAN IN THE LOOP',
+]
+
+export default function Ticker() {
+  const doubled = [...phrases, ...phrases]
+
+  return (
+    <div className="relative border-y border-[rgba(0,212,255,0.12)] bg-bg2/60 py-3 overflow-hidden">
+      {/* Left fade */}
+      <div
+        className="absolute left-0 top-0 bottom-0 w-20 z-10 pointer-events-none"
+        style={{ background: 'linear-gradient(to right, var(--bg2), transparent)' }}
+      />
+      {/* Right fade */}
+      <div
+        className="absolute right-0 top-0 bottom-0 w-20 z-10 pointer-events-none"
+        style={{ background: 'linear-gradient(to left, var(--bg2), transparent)' }}
+      />
+
+      <div className="marquee-container">
+        <div className="marquee-track">
+          {doubled.map((phrase, i) => (
+            <span
+              key={i}
+              className={`inline-block mx-6 font-mono text-xs tracking-widest ${
+                phrase.startsWith('◆') ? 'text-cyan' : 'text-text2'
+              }`}
+            >
+              {phrase}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -23,15 +23,13 @@
  *   WebAuthn requires HTTPS for non-localhost — use a local cert or Tailscale HTTPS.
  */
 
-import express, { type Request, type Response } from 'express';
+import express, { type Request } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
 import https from 'https';
 import { readFileSync } from 'fs';
 import { createLogger } from '../logger.js';
 import { getDb } from '../db/index.js';
-import { handleCallback } from '../gateway/approval.js';
-import { executeProposal } from '../workers/index.js';
 import {
   hasRegisteredKeys,
   requireAuth,
@@ -43,11 +41,9 @@ import {
   completeElevatedAuth,
   listCredentials,
   revokeSession,
-  revokeAll,
   pruneExpiredChallenges,
   pruneExpiredSessions,
 } from './webauthn.js';
-import type { Proposal, ProposedAction } from '../types.js';
 
 const log = createLogger('webapp');
 

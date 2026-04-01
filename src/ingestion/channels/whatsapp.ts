@@ -100,7 +100,7 @@ export class WhatsAppChannel implements Channel {
       sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
         if (qr) {
           log.info('WhatsApp QR code displayed in terminal — scan with WhatsApp app');
-          console.log('\n  \x1b[33m▸ Scan this QR code with WhatsApp → Linked Devices → Link a Device\x1b[0m\n');
+          console.log('\n  \x1b[33m▸ Scan this QR code with WhatsApp → Linked Devices → Link a Device\x1b[0m\n'); // eslint-disable-line no-console
         }
 
         if (connection === 'close') {

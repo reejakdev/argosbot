@@ -1,16 +1,12 @@
 {
-  "_comment": "Copy to ~/.argos/config.json and fill in your values. Remove all _comment fields.",
-
   "owner": {
     "name": "Your Name",
-    "telegramUserId": 0,
-    "_comment": "Find your Telegram user ID at https://t.me/userinfobot"
+    "telegramUserId": 0
   },
 
   "llm": {
     "activeProvider": "anthropic",
     "activeModel": "claude-sonnet-4-6",
-    "_comment_providers": "Supported: anthropic, anthropic-oauth, openai, gemini, groq, deepseek, mistral, xai, qwen, together, perplexity, cohere, ollama, lmstudio, custom",
     "fallbackProvider": "ollama",
     "fallbackModel": "qwen2.5:7b",
     "providers": {
@@ -61,7 +57,6 @@
   },
 
   "secrets": {
-    "_comment": "All keys here are injected into process.env at startup",
     "TELEGRAM_API_ID": "12345678",
     "TELEGRAM_API_HASH": "your_hash_here",
     "TELEGRAM_BOT_TOKEN": "123456789:ABC...",
@@ -148,7 +143,6 @@
   },
 
   "notion": {
-    "_comment": "Optional — remove block if not using Notion",
     "apiKey": "secret_...",
     "agentDatabaseId": "your-database-id",
     "ownerDatabaseId": "your-owner-database-id",
@@ -156,7 +150,6 @@
   },
 
   "calendar": {
-    "_comment": "Optional — remove block if not using Google Calendar",
     "credentials": {
       "clientId": "your-client-id.apps.googleusercontent.com",
       "clientSecret": "your-client-secret",
@@ -166,7 +159,6 @@
   },
 
   "smtp": {
-    "_comment": "Optional — remove block if not sending emails",
     "host": "smtp.gmail.com",
     "port": 587,
     "secure": false,

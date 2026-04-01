@@ -64,11 +64,11 @@ registerSkill({
       const change = vals[`${vs}_24h_change`];
       const mcap = vals[`${vs}_market_cap`];
 
-      const changeStr = change != null
+      const changeStr = change !== null && change !== undefined
         ? ` (${change >= 0 ? '+' : ''}${change.toFixed(2)}% 24h)`
         : '';
 
-      const mcapStr = mcap != null
+      const mcapStr = mcap !== null && mcap !== undefined
         ? ` | MCap: ${formatLargeNumber(mcap, vs)}`
         : '';
 
@@ -82,7 +82,7 @@ registerSkill({
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatPrice(price: number | undefined, currency: string): string {
-  if (price == null) return 'N/A';
+  if (price === null || price === undefined) return 'N/A';
   const symbol = CURRENCY_SYMBOLS[currency] ?? currency.toUpperCase() + ' ';
   if (price >= 1000) return `${symbol}${price.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
   if (price >= 1) return `${symbol}${price.toFixed(4)}`;

@@ -218,7 +218,7 @@ export async function triage(
   // privacy role (local) → contenu brut, zéro cloud egress
   // primary (cloud)      → anonymise d'abord
   const triageRole  = config.privacy.roles.triage ?? 'privacy';
-  const usePrivacy  = triageRole === 'privacy' && privacyLlmConfig != null;
+  const usePrivacy  = triageRole === 'privacy' && privacyLlmConfig !== null;
   const activeLlm  = usePrivacy ? privacyLlmConfig! : llmConfig;
 
   let anonymizer: import('../privacy/anonymizer.js').Anonymizer | null = null;

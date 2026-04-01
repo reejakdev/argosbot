@@ -50,6 +50,8 @@ export interface LLMConfig {
   oauthTokens?: OAuthTokens;
   /** Called when tokens are refreshed — persist to config */
   _onTokenRefresh?: (tokens: OAuthTokens) => void;
+  /** Extended thinking (Anthropic only) — budget_tokens controls depth */
+  thinking?: { enabled: boolean; budgetTokens?: number };
   /** MCP servers to include in API calls (Anthropic native MCP support) */
   mcpServers?: Array<{ type: 'url'; name: string; url: string; authorization_token?: string }>;
   /** Fallback provider config — used automatically by llmCall on 5xx/429/timeout */
@@ -545,6 +547,182 @@ async function callOpenAICompat(
     inputTokens: data.usage.prompt_tokens,
     outputTokens: data.usage.completion_tokens,
     provider: config.provider,
+  };
+}
+
+// ─── Provider-agnostic tool use ──────────────────────────────────────────────
+//
+// Supports Anthropic tool format AND OpenAI-compatible tool format (OpenAI,
+// Groq, Ollama + any model with function calling).
+//
+// Usage:
+//   const messages: unknown[] = [{ role: 'user', content: prompt }];
+//   while (true) {
+//     const step = await callWithTools(cfg, system, messages, tools);
+//     // handle step.toolCalls ...
+//     if (step.done) break;
+//     messages.push(...buildToolResultMessages(cfg, step._rawAssistant, feedbacks));
+//   }
+
+export interface NormalizedToolCall {
+  id:    string;
+  name:  string;
+  input: Record<string, unknown>;
+}
+
+export interface ToolStepResult {
+  text:         string;
+  toolCalls:    NormalizedToolCall[];
+  /** true = LLM stopped tool-calling, loop should end */
+  done:         boolean;
+  inputTokens:  number;
+  outputTokens: number;
+  /** Opaque — pass as-is to buildToolResultMessages */
+  _rawAssistant: unknown;
+}
+
+/** Call LLM with tool use. Tools always passed in Anthropic format — converted internally for OpenAI. */
+export async function callWithTools(
+  config:   LLMConfig,
+  system:   string,
+  messages: unknown[],
+  tools:    Array<{ name: string; description: string; input_schema: unknown }>,
+): Promise<ToolStepResult> {
+  if (config.provider === 'anthropic') {
+    return _callAnthropicWithTools(config, system, messages, tools);
+  }
+  return _callOpenAIWithTools(config, system, messages, tools);
+}
+
+/** Build messages to append after a tool step (provider-specific format). */
+export function buildToolResultMessages(
+  config:       LLMConfig,
+  rawAssistant: unknown,
+  results:      Array<{ id: string; content: string }>,
+): unknown[] {
+  if (config.provider === 'anthropic') {
+    const blocks = results.map(r => ({ type: 'tool_result', tool_use_id: r.id, content: r.content }));
+    return [
+      { role: 'assistant', content: rawAssistant },
+      { role: 'user',      content: blocks },
+    ];
+  }
+  // OpenAI: assistant message (with tool_calls) + individual tool messages
+  const toolMessages = results.map(r => ({ role: 'tool', tool_call_id: r.id, content: r.content }));
+  return [rawAssistant as Record<string, unknown>, ...toolMessages];
+}
+
+// ─── Anthropic tool step ─────────────────────────────────────────────────────
+
+async function _callAnthropicWithTools(
+  config:   LLMConfig,
+  system:   string,
+  messages: unknown[],
+  tools:    Array<{ name: string; description: string; input_schema: unknown }>,
+): Promise<ToolStepResult> {
+  const body = {
+    model:      config.model,
+    max_tokens: config.maxTokens ?? 4096,
+    // Extended thinking: temperature must be omitted when enabled (Anthropic requirement)
+    ...(config.thinking?.enabled
+      ? { thinking: { type: 'enabled', budget_tokens: config.thinking.budgetTokens ?? 1024 } }
+      : config.temperature !== undefined ? { temperature: config.temperature } : {}),
+    system,
+    tools,
+    messages,
+  };
+
+  const { default: AnthropicSDK } = await import('@anthropic-ai/sdk');
+  const raw = config.authMode === 'bearer'
+    ? await callAnthropicBearerRaw(config, body as Record<string, unknown>)
+    : await (new AnthropicSDK({ apiKey: config.apiKey })).messages.create(body as unknown as Parameters<InstanceType<typeof AnthropicSDK>['messages']['create']>[0]);
+
+  const content = (raw as { content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }> }).content;
+  const stopReason = (raw as { stop_reason: string }).stop_reason;
+  const usage = (raw as { usage: { input_tokens: number; output_tokens: number } }).usage;
+
+  const text = content.filter(b => b.type === 'text').map(b => b.text ?? '').join('');
+  const toolCalls: NormalizedToolCall[] = content
+    .filter(b => b.type === 'tool_use')
+    .map(b => ({ id: b.id!, name: b.name!, input: (b.input ?? {}) as Record<string, unknown> }));
+
+  return {
+    text,
+    toolCalls,
+    done:         stopReason !== 'tool_use',
+    inputTokens:  usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    _rawAssistant: content,
+  };
+}
+
+// ─── OpenAI-compatible tool step ─────────────────────────────────────────────
+
+async function _callOpenAIWithTools(
+  config:   LLMConfig,
+  system:   string,
+  messages: unknown[],
+  tools:    Array<{ name: string; description: string; input_schema: unknown }>,
+): Promise<ToolStepResult> {
+  const openAITools = tools.map(t => ({
+    type: 'function',
+    function: { name: t.name, description: t.description, parameters: t.input_schema },
+  }));
+
+  // System prompt as first message — not stored in history between iterations
+  const allMessages = [{ role: 'system', content: system }, ...messages];
+
+  const baseURL = config.baseUrl ?? 'https://api.openai.com/v1';
+  const res = await fetch(`${baseURL}/chat/completions`, {
+    method:  'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      model:       config.model,
+      max_tokens:  config.maxTokens ?? 4096,
+      ...(config.temperature !== undefined && { temperature: config.temperature }),
+      tools:       openAITools,
+      tool_choice: 'auto',
+      messages:    allMessages,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`OpenAI tool call error ${res.status}: ${text.slice(0, 300)}`);
+  }
+
+  const data = await res.json() as {
+    choices: Array<{
+      message: {
+        role: string;
+        content: string | null;
+        tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+      };
+      finish_reason: string;
+    }>;
+    usage: { prompt_tokens: number; completion_tokens: number };
+    model: string;
+  };
+
+  const message = data.choices[0].message;
+  const finishReason = data.choices[0].finish_reason;
+
+  const toolCalls: NormalizedToolCall[] = (message.tool_calls ?? []).map(tc => ({
+    id:    tc.id,
+    name:  tc.function.name,
+    input: (() => { try { return JSON.parse(tc.function.arguments) as Record<string, unknown>; } catch { return {}; } })(),
+  }));
+
+  return {
+    text:         message.content ?? '',
+    toolCalls,
+    done:         finishReason !== 'tool_calls',
+    inputTokens:  data.usage.prompt_tokens,
+    outputTokens: data.usage.completion_tokens,
+    _rawAssistant: { role: 'assistant', content: message.content ?? null, tool_calls: message.tool_calls ?? [] },
   };
 }
 

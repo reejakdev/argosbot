@@ -219,11 +219,11 @@ Once enabled, knowledge sources (GitHub repos, URLs, local files) are chunked an
 
 ## Memory TTL
 
-Default: 30 days. Configurable:
+Default: 7 days. Configurable:
 
 ```json
 "memory": {
-  "defaultTtlDays": 30,
+  "defaultTtlDays": 7,
   "archiveTtlDays": 365,
   "autoArchiveThreshold": 8
 }
@@ -277,8 +277,10 @@ openssl req -x509 -newkey rsa:4096 -keyout ~/.argos/tls/key.pem \
 | Notion | `mcpServers` → notion-mcp | Official Notion MCP server |
 | Google Calendar | `secrets.GOOGLE_CLIENT_ID/SECRET` | OAuth2 |
 | Gmail | `mcpServers` → gmail | Read, draft, send |
+| Outlook | `mcpServers` → outlook | Read, draft, send via Graph API |
 | 1Password | `mcpServers` → 1password | Read vault secrets |
 | Browser | `mcpServers` → puppeteer | Local headless browser for scraping |
+| Local files | `knowledge.sources` | `.txt`, `.md`, `.docx`, `.xlsx`, `.json`, `.csv` |
 
 ---
 
