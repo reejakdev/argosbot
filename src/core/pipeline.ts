@@ -27,7 +27,7 @@
 
 import { createLogger } from '../logger.js';
 import { getDb, audit } from '../db/index.js';
-import { sanitize } from '../privacy/sanitizer.js';
+import { fastScreen, deepSanitize } from '../privacy/sanitizer.js';
 import { classify } from '../ingestion/classifier.js';
 import { store as storeMemory, saveTask } from '../memory/store.js';
 import { plan } from '../planner/index.js';
@@ -85,21 +85,16 @@ export async function ingestMessage(
     contentHash, msg.receivedAt,
   );
 
-  // Injection check — routing via privacy layer (fail-closed)
-  const sanitizerConfig = llmForRole('sanitize', llmConfig, privacyConfig, config);
-  const sanitized = await sanitize(msg.content, msg.channel, sanitizerConfig);
-  if (!sanitized.safe) {
-    const scanError = sanitized.injectionPatterns.includes('llm_scan_failed');
-    if (scanError) {
-      log.warn(`Sanitizer LLM error — message blocked from ${msg.chatId} (fail-closed)`);
-    } else {
-      log.warn(`Injection blocked from ${msg.chatId}`, { patterns: sanitized.injectionPatterns });
-    }
+  // ── Phase 1: fast regex injection screen on RAW content (no LLM, no privacy risk) ──
+  const fast = fastScreen(msg.content);
+  if (!fast.safe) {
+    log.warn(`Injection blocked from ${msg.chatId}`, { patterns: fast.patterns });
+    audit('injection_detected', msg.chatId, 'message', { patterns: fast.patterns, preview: msg.content.slice(0, 200) });
     db.prepare(`UPDATE messages SET status = 'blocked', processed_at = ? WHERE id = ?`).run(Date.now(), msg.id);
     return;
   }
 
-  // Anonymize — regex pass first
+  // ── Phase 2: anonymize (regex pass) ──────────────────────────────────────────
   let anon = anonymizer.anonymize(msg.content);
 
   // LLM second pass — catches what regex missed (names, companies, project names…)
@@ -120,6 +115,24 @@ export async function ingestMessage(
     }
   }
 
+  // ── Phase 3: LLM deep injection scan on ANONYMIZED text ──────────────────────
+  // Now safe to use any LLM provider — PII has already been stripped.
+  // Only runs for longer messages where regex alone isn't sufficient.
+  if (anon.text.length > 500) {
+    const sanitizerConfig = llmForRole('sanitize', llmConfig, privacyConfig, config);
+    const deep = await deepSanitize(anon.text, msg.channel, sanitizerConfig);
+    if (!deep.safe) {
+      const scanError = deep.injectionPatterns.includes('llm_scan_failed');
+      if (scanError) {
+        log.warn(`Sanitizer LLM error — message blocked from ${msg.chatId} (fail-closed)`);
+      } else {
+        log.warn(`LLM injection detected from ${msg.chatId}`, { patterns: deep.injectionPatterns });
+      }
+      db.prepare(`UPDATE messages SET status = 'blocked', processed_at = ? WHERE id = ?`).run(Date.now(), msg.id);
+      return;
+    }
+  }
+
   // Populate anonText so plugins and triage have access to the anonymized version
   msg.anonText = anon.text;
 
@@ -128,7 +141,9 @@ export async function ingestMessage(
   // then persisted in memories.raw_content (accessible to privacy LLM only).
   const rawForWindow = config.privacy.storeRaw ? msg.content : undefined;
   windowManager.add(msg, anon.text, anon.lookup, rawForWindow);
-  db.prepare(`UPDATE messages SET status = 'windowed' WHERE id = ?`).run(msg.id);
+  // Persist lookup so it survives restarts — used to de-anonymize approved replies
+  db.prepare(`UPDATE messages SET status = 'windowed', anon_lookup = ? WHERE id = ?`)
+    .run(JSON.stringify(anon.lookup), msg.id);
 
   // Plugin hooks — non-blocking, after sanitize+anonymize
   // msg.content = raw (injection-safe), msg.anonText = anonymized

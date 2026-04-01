@@ -214,8 +214,14 @@ const MemorySchema = z.object({
 const AnonymizerSchema = z.object({
   mode:            z.enum(['regex', 'none']).default('regex'),
   knownPersons:    z.array(z.string()).default([]),
-  // knownAddresses removed — crypto addresses are pseudonymous and no longer anonymized.
   bucketAmounts:   z.boolean().default(true),
+  /**
+   * Anonymize blockchain-style identifiers (ETH/BTC addresses, tx hashes, ENS names).
+   * Default: false — identifiers are kept so Claude can reason about them for
+   * whitelisting and review. Set to true for privacy-first deployments
+   * where you don't need identifier-level reasoning.
+   */
+  anonymizeCryptoAddresses: z.boolean().default(false),
   customPatterns:  z.array(z.object({
     pattern:     z.string(),
     replacement: z.string(),
@@ -378,6 +384,44 @@ const ClaudeSchema = z.object({
   planningTemperature:       z.number().default(0.3),
 });
 
+// ─── Wallet ───────────────────────────────────────────────────────────────────
+
+const ChainConfigSchema = z.union([
+  // EVM chain (has chainId)
+  z.object({
+    rpc:      z.string(),
+    chainId:  z.number(),
+    symbol:   z.string().default('ETH'),
+    explorer: z.string().optional(),
+  }),
+  // Solana / non-EVM (no chainId)
+  z.object({
+    rpc:    z.string(),
+    symbol: z.string().default('SOL'),
+  }),
+]);
+
+const WalletSchema = z.object({
+  /** Enable the bot hot wallet */
+  enabled: z.boolean().default(false),
+  /**
+   * AES-256-GCM key derivation secret.
+   * Generate: openssl rand -base64 32
+   * Treat like a private key — never commit, never log.
+   */
+  encryptionSecret: z.string(),
+  /** Chain configs. Key = chain name used in propose_tx tool (e.g. "ethereum", "base"). */
+  chains: z.record(ChainConfigSchema).default({}),
+  limits: z.object({
+    /** Max value per tx in native token ("1.0" = 1 ETH). No limit if unset. */
+    maxTxValueNative: z.string().optional(),
+    /** Max cumulative daily spend in native token. No limit if unset. */
+    dailyLimitNative: z.string().optional(),
+    /** Require elevated YubiKey auth for every signing (default: true). */
+    requireElevatedAuth: z.boolean().default(true),
+  }).default({}),
+});
+
 // ─── Secrets ──────────────────────────────────────────────────────────────────
 
 const SecretsSchema = z.record(z.string()).default({});
@@ -393,7 +437,7 @@ export const ConfigSchema = z.object({
   triage:     TriageSchema,
   // Heartbeat — proactivité générique
   heartbeat:  HeartbeatSchema.default({}),
-  // Knowledge — sources internes de l'entreprise
+  // Knowledge — sources de l'espace de travail
   knowledge:  KnowledgeSchema,
   // LLM providers
   llm:        LlmSchema.default({}),
@@ -408,6 +452,7 @@ export const ConfigSchema = z.object({
   approval:   ApprovalSchema.default({}),
   notion:     NotionSchema.optional(),
   calendar:   CalendarSchema.optional(),
+  wallet:     WalletSchema.optional(),
   smtp:       SmtpSchema.optional(),
   // MCP servers — tools externes disponibles au planner
   mcpServers: z.array(McpServerSchema).default([]),

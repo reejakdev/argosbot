@@ -53,15 +53,17 @@ export function tagExternalContent(content: string, source: string): string {
 }
 
 // ─── Fast pre-screen ──────────────────────────────────────────────────────────
+// Exported so the pipeline can run it on raw content before anonymization,
+// without involving any LLM (zero privacy risk).
 
-function fastScreen(content: string): { detected: boolean; patterns: string[] } {
+export function fastScreen(content: string): { safe: boolean; patterns: string[] } {
   const triggered: string[] = [];
   for (const p of INJECTION_PATTERNS) {
     if (p.regex.test(content)) {
       triggered.push(p.name);
     }
   }
-  return { detected: triggered.length > 0, patterns: triggered };
+  return { safe: triggered.length === 0, patterns: triggered };
 }
 
 // ─── LLM deep assessment ──────────────────────────────────────────────────────
@@ -105,7 +107,51 @@ Respond with JSON:
   }
 }
 
-// ─── Main sanitize function ───────────────────────────────────────────────────
+// ─── LLM deep scan — call ONLY on already-anonymized content ─────────────────
+// This is the privacy-safe path: by the time this runs, PII has been stripped.
+// Safe to call with any LLM provider (primary or privacy).
+
+export async function deepSanitize(
+  anonContent: string,
+  source: string,
+  llmConfig: LLMConfig,
+): Promise<SanitizationResult> {
+  const tagged = tagExternalContent(anonContent, source);
+
+  try {
+    const assessment = await llmAssess(anonContent, llmConfig);
+
+    if (assessment.injected) {
+      log.warn(`LLM detected injection from ${source}`, assessment);
+      audit('injection_detected_llm', source, 'message', { assessment, preview: anonContent.slice(0, 200) });
+    }
+
+    return {
+      safe: !assessment.injected,
+      injectionDetected: assessment.injected,
+      injectionPatterns: assessment.injected ? ['llm_detected'] : [],
+      llmAssessed: true,
+      risk: assessment.risk,
+      reason: assessment.reason,
+      taggedContent: tagged,
+    };
+  } catch (e) {
+    log.error('LLM sanitizer error — failing closed (safe=false)', e);
+    audit('sanitizer_error', source, 'message', { error: String(e) });
+    return {
+      safe: false,
+      injectionDetected: false,
+      injectionPatterns: ['llm_scan_failed'],
+      llmAssessed: false,
+      risk: 'medium',
+      reason: 'llm assessment failed — blocked for safety',
+      taggedContent: tagged,
+    };
+  }
+}
+
+// ─── Legacy combined function (kept for compatibility) ────────────────────────
+// Prefer using fastScreen + deepSanitize separately in new code.
 
 export async function sanitize(
   content: string,
@@ -115,10 +161,9 @@ export async function sanitize(
 ): Promise<SanitizationResult> {
   const tagged = tagExternalContent(content, source);
 
-  // Fast path
-  const { detected, patterns } = fastScreen(content);
+  const { safe: fastSafe, patterns } = fastScreen(content);
 
-  if (detected) {
+  if (!fastSafe) {
     log.warn(`Injection patterns detected from ${source}`, { patterns });
     audit('injection_detected', source, 'message', { patterns, preview: content.slice(0, 200) });
 
@@ -133,50 +178,10 @@ export async function sanitize(
     };
   }
 
-  // Deep scan for longer or complex content
   const shouldDeepScan = options.deepScan ?? (content.length > 500);
-
   if (!shouldDeepScan) {
-    return {
-      safe: true,
-      injectionDetected: false,
-      injectionPatterns: [],
-      llmAssessed: false,
-      risk: 'none',
-      taggedContent: tagged,
-    };
+    return { safe: true, injectionDetected: false, injectionPatterns: [], llmAssessed: false, risk: 'none', taggedContent: tagged };
   }
 
-  try {
-    const assessment = await llmAssess(content, llmConfig);
-
-    if (assessment.injected) {
-      log.warn(`LLM detected injection from ${source}`, assessment);
-      audit('injection_detected_llm', source, 'message', { assessment, preview: content.slice(0, 200) });
-    }
-
-    return {
-      safe: !assessment.injected,
-      injectionDetected: assessment.injected,
-      injectionPatterns: assessment.injected ? ['llm_detected'] : [],
-      llmAssessed: true,
-      risk: assessment.risk,
-      reason: assessment.reason,
-      taggedContent: tagged,
-    };
-  } catch (e) {
-    // Fail CLOSED — if the LLM scanner errors we cannot confirm safety, so block the content.
-    // Rationale: fail-open would let injections through whenever the LLM is unavailable.
-    log.error('LLM sanitizer error — failing closed (safe=false)', e);
-    audit('sanitizer_error', source, 'message', { error: String(e) });
-    return {
-      safe: false,
-      injectionDetected: false,
-      injectionPatterns: ['llm_scan_failed'],
-      llmAssessed: false,
-      risk: 'medium',
-      reason: 'llm assessment failed — blocked for safety',
-      taggedContent: tagged,
-    };
-  }
+  return deepSanitize(content, source, llmConfig);
 }

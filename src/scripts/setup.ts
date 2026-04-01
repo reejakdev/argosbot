@@ -375,7 +375,7 @@ function printBanner(): void {
     '',
     `${c.bold}${c.cyan}    🔭  A R G O S${c.reset}`,
     '',
-    `${c.gray}    Local-first AI assistant for fintech & crypto${c.reset}`,
+    `${c.gray}    Local-first AI assistant for professionals${c.reset}`,
     '',
     `${c.dim}    Read by default · Sanitize before memory · Approve before action${c.reset}`,
     '',
@@ -1211,7 +1211,7 @@ async function stepAiConfiguration(total: number): Promise<object> {
       maxTokens: 1024,
     };
 
-    const prompt = `You are configuring Argos, a local-first AI assistant for fintech/crypto.
+    const prompt = `You are configuring Argos, a local-first AI assistant for operations.
 Based on the user's answers, produce a JSON config object.
 
 User answers:

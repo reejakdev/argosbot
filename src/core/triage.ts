@@ -127,7 +127,7 @@ async function llmExtract(
   const hints: string[] = [];
   if (pre.mentionsMe)             hints.push('the owner is directly mentioned or tagged');
   if (pre.mentionedTeams.length)  hints.push(`teams mentioned: ${pre.mentionedTeams.join(', ')}`);
-  if (pre.isWhitelistReq)         hints.push('message may contain a whitelist / address-add request — only route tx_whitelist if a blockchain address is explicitly involved, otherwise use my_task');
+  if (pre.isWhitelistReq)         hints.push('message may contain a whitelist / add request — only route tx_whitelist if a specific identifier needs to be whitelisted, otherwise use my_task');
   if (pre.isFromOwnTeam)          hints.push('message from an internal team member');
   if (pre.isExternal && !pre.mentionsMe && !pre.mentionedTeams.length)
                                   hints.push('message from an external partner — no explicit mention, classify by content');
@@ -140,19 +140,19 @@ async function llmExtract(
   const response = await llmCall(llmConfig, [
     {
       role: 'system',
-      content: `You are a triage classifier for a fintech/crypto operations team.
+      content: `You are a triage classifier for an operations team.
 Your job: read a partner message and decide what action it requires.
 
 KEY RULE — External partner messages (no @mention):
 - If the partner is making a request, asking a question, or needs something → create a task
 - If the owner or their team is implicitly concerned (topic matches their role) → my_task or team_task
 - If the message is purely informational, a status update, or casual chat → skip
-- If a blockchain address needs whitelisting → tx_whitelist
+- If an identifier needs whitelisting → tx_whitelist
 
 Routes:
 - my_task      = owner needs to DO something or REPLY (explicitly tagged OR topic clearly in their scope)
 - team_task    = a team member is tagged or topic belongs to a specific team
-- tx_whitelist = partner wants to whitelist a blockchain address — create a tx review pack
+- tx_whitelist = partner wants to whitelist an identifier — create a review pack
 - skip         = purely informational, status update, casual, no action required
 
 Respond ONLY with valid JSON, no markdown:

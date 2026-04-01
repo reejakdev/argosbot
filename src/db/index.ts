@@ -55,6 +55,7 @@ function runMigrations(db: Database.Database): void {
     { version: 5, sql: MIGRATION_5 },
     { version: 6, sql: MIGRATION_6 },
     { version: 7, sql: MIGRATION_7 },
+    { version: 8, sql: MIGRATION_8 },
   ];
 
   for (const migration of migrations) {
@@ -320,6 +321,12 @@ const MIGRATION_6 = `
 const MIGRATION_7 = `
   ALTER TABLE tasks ADD COLUMN channel TEXT;
   CREATE INDEX IF NOT EXISTS idx_tasks_channel ON tasks(channel);
+`;
+
+// anon_lookup: persists the placeholder→realValue map so it survives restarts.
+// Stored as JSON. Never sent to any LLM — only used locally for de-anonymization.
+const MIGRATION_8 = `
+  ALTER TABLE messages ADD COLUMN anon_lookup TEXT;
 `;
 
 // ─── Audit helper ─────────────────────────────────────────────────────────────

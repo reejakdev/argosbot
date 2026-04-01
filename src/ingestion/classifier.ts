@@ -63,7 +63,7 @@ function buildPrompt(
     ? `Owner teams: ${ownerTeams.join(', ')}\nOwner roles: ${ownerRoles.join(', ')}`
     : 'Owner teams: not specified';
 
-  return `You are a message classifier for a fintech/crypto company assistant.
+  return `You are a message classifier for an operations assistant.
 You receive anonymized messages (placeholders like [ADDR_1], [PERSON_1] are redacted — never guess them).
 
 ${teamContext}
@@ -98,7 +98,7 @@ Respond ONLY with valid JSON — no prose, no markdown fences:
 Classification guide:
 - "task": something that needs to be done (deploy, review, process, send)
 - "client_request": external party asking for something
-- "tx_request": deposit/withdrawal/swap/bridge/approve on-chain
+- "tx_request": a formal request requiring review and approval (transfer, submission, approval)
 - "reminder": date/deadline/follow-up signal
 - "info": useful info, no immediate action
 - "ignore": noise, social, irrelevant

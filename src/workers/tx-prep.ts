@@ -1,11 +1,11 @@
 /**
  * Transaction Prep Worker — READ-ONLY.
  *
- * Produces a structured transaction review pack for the owner to review
- * before manually executing in Fordefi or any custody solution.
+ * Produces a structured operation review pack for the owner to review
+ * before manually executing in any external system.
  *
- * Never connects to any blockchain directly.
- * Never signs, submits, or simulates transactions.
+ * Never connects to any external system directly.
+ * Never signs, submits, or simulates operations.
  * Purely documentation and due-diligence structure.
  *
  * Output format mirrors what a compliance officer would want to see:

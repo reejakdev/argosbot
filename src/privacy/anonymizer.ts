@@ -29,8 +29,42 @@ type PatternEntry = {
 // ─── Pattern registry ─────────────────────────────────────────────────────────
 
 // Crypto addresses (ETH, BTC, SOL, ENS, tx hashes) are pseudonymous by design
-// and carry no real-world identity — we leave them as-is so Claude can reason
+// and carry no real-world identity — left as-is by default so Claude can reason
 // about them directly (whitelist checks, tx review, etc.).
+// Set anonymizeCryptoAddresses=true in config for max-privacy deployments.
+
+const CRYPTO_PATTERNS: PatternEntry[] = [
+  // ETH tx hashes (64 hex) — checked before addresses (40 hex) to avoid partial match
+  {
+    key: 'TX_HASH',
+    regex: /\b0x[0-9a-fA-F]{64}\b/g,
+    label: i => `[TX_HASH_${i}]`,
+  },
+  // ETH/EVM addresses (40 hex)
+  {
+    key: 'ETH_ADDR',
+    regex: /\b0x[0-9a-fA-F]{40}\b/g,
+    label: i => `[ETH_ADDR_${i}]`,
+  },
+  // BTC bech32 (native segwit: bc1...)
+  {
+    key: 'BTC_ADDR',
+    regex: /\bbc1[a-z0-9]{6,87}\b/g,
+    label: i => `[BTC_ADDR_${i}]`,
+  },
+  // BTC legacy (P2PKH: 1..., P2SH: 3...)
+  {
+    key: 'BTC_ADDR',
+    regex: /\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b/g,
+    label: i => `[BTC_ADDR_${i}]`,
+  },
+  // ENS names (*.eth)
+  {
+    key: 'ENS',
+    regex: /\b[a-z0-9-]{3,}\.eth\b/gi,
+    label: i => `[ENS_${i}]`,
+  },
+];
 
 const PII_PATTERNS: PatternEntry[] = [
   // Email addresses
@@ -82,11 +116,15 @@ function bucketAmount(raw: string): string {
 
 // ─── Main anonymizer ──────────────────────────────────────────────────────────
 
+// Cap on tracked values — prevents unbounded memory growth on long-running instances.
+// When reached, seenValues is cleared (counters kept, so placeholders stay unique).
+const MAX_SEEN_VALUES = 10_000;
+
 export class Anonymizer {
   private counters: Record<string, number> = {};
   private seenValues: Map<string, string> = new Map(); // value → placeholder
 
-  constructor(private config: Pick<AnonymizerConfig, 'mode' | 'knownPersons' | 'bucketAmounts' | 'customPatterns'>) {}
+  constructor(private config: Pick<AnonymizerConfig, 'mode' | 'knownPersons' | 'bucketAmounts' | 'anonymizeCryptoAddresses' | 'customPatterns'>) {}
 
   anonymize(text: string): AnonymizedResult {
     if (this.config.mode === 'none') {
@@ -104,6 +142,15 @@ export class Anonymizer {
         const ph = this.getOrCreate(name, 'PERSON', lookup);
         return ph;
       });
+    }
+
+    // 1. Crypto addresses — opt-in (default off: needed for whitelist checks)
+    if (this.config.anonymizeCryptoAddresses) {
+      for (const entry of CRYPTO_PATTERNS) {
+        result = result.replace(entry.regex, (match) => {
+          return this.getOrCreate(match, entry.key, lookup);
+        });
+      }
     }
 
     // 2. PII patterns
@@ -147,6 +194,11 @@ export class Anonymizer {
       const ph = this.seenValues.get(normalized)!;
       lookup[ph] = value;
       return ph;
+    }
+    // Prevent unbounded growth — clear cache when limit hit (counters kept for unique IDs)
+    if (this.seenValues.size >= MAX_SEEN_VALUES) {
+      log.warn(`Anonymizer seenValues cap reached (${MAX_SEEN_VALUES}) — clearing cache`);
+      this.seenValues.clear();
     }
     this.counters[key] = (this.counters[key] ?? 0) + 1;
     const placeholder = `[${key}_${this.counters[key]}]`;

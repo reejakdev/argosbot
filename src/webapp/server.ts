@@ -27,8 +27,14 @@ import express, { type Request } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
 import https from 'https';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { createLogger } from '../logger.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// React build output (produced by `npm run build:client`)
+const CLIENT_DIST = path.resolve(__dirname, '../../dist/client');
 import { getDb } from '../db/index.js';
 import {
   hasRegisteredKeys,
@@ -1434,26 +1440,33 @@ export function startWebApp(options: WebAppOptions): void {
   // WebAuthn routes + authenticated API
   app.use('/api', buildApi(options.sendToApprovalChat, options.getConfig));
 
-  // Setup page — served without auth (needed to register first key)
-  app.get('/setup', (_req, res) => {
-    res.setHeader('Content-Type', 'text/html');
-    res.send(SETUP_PAGE);
-  });
-
-  // Main app — redirect to /setup if no auth configured yet
-  app.get('/', async (_req, res) => {
-    let totpConfigured = false;
-    try {
-      const { hasTotpConfigured } = await import('./totp.js');
-      totpConfigured = hasTotpConfigured();
-    } catch { /* */ }
-    if (!hasRegisteredKeys() && !totpConfigured) {
-      res.redirect('/setup');
-      return;
-    }
-    res.setHeader('Content-Type', 'text/html');
-    res.send(HTML_APP);
-  });
+  // React SPA — serve static build if available, otherwise inline fallback
+  if (existsSync(CLIENT_DIST)) {
+    app.use(express.static(CLIENT_DIST));
+    // SPA fallback: all non-API routes → index.html (Express 5 compatible)
+    app.use((_req, res) => {
+      res.sendFile(path.join(CLIENT_DIST, 'index.html'));
+    });
+  } else {
+    // Dev fallback: inline HTML until `npm run build:client` has been run
+    app.get('/setup', (_req, res) => {
+      res.setHeader('Content-Type', 'text/html');
+      res.send(SETUP_PAGE);
+    });
+    app.get('/', async (_req, res) => {
+      let totpConfigured = false;
+      try {
+        const { hasTotpConfigured } = await import('./totp.js');
+        totpConfigured = hasTotpConfigured();
+      } catch { /* */ }
+      if (!hasRegisteredKeys() && !totpConfigured) {
+        res.redirect('/setup');
+        return;
+      }
+      res.setHeader('Content-Type', 'text/html');
+      res.send(HTML_APP);
+    });
+  }
 
   // ── TLS / HTTPS support ──────────────────────────────────────────────────
   const tlsCert = cfg.webapp?.tlsCert;

@@ -108,6 +108,9 @@ export async function executeProposal(
         case 'browser_action':
           result = await executeBrowserAction(payload.input, config);
           break;
+        case 'sign_tx':
+          result = await executeSignTx(payload.input, config);
+          break;
         case 'add_knowledge_source':
           result = await executeAddKnowledgeSource(payload.input, config);
           break;
@@ -307,6 +310,14 @@ async function executeBrowserAction(
 ): Promise<WorkerResult> {
   const { BrowserActionWorker } = await import('./browser-action.js');
   return new BrowserActionWorker(config).execute(input);
+}
+
+async function executeSignTx(
+  input: Record<string, unknown>,
+  config: Config,
+): Promise<WorkerResult> {
+  const { executeSignTx: sign } = await import('./tx-sign.js');
+  return sign(input, config);
 }
 
 async function executeEmailSend(

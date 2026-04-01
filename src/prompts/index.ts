@@ -5,7 +5,7 @@
  *   soul.md       — identity, personality, mental model
  *   security.md   — absolute constraints (always included)
  *   user.md       — owner profile interpolated from config
- *   operations.md — domain knowledge (fintech/crypto)
+ *   operations.md — domain knowledge and operational context
  *   memory.md     — memory usage guidelines
  *
  * Templates use {{variable}} placeholders replaced at runtime from config.
@@ -86,8 +86,8 @@ export function buildSystemPrompt(role: PromptRole, config: Config): string {
         '---',
         `## Current role: PLANNER`,
         `Analyze the classified context and propose actions. All actions require owner approval before execution.`,
-        `If the message mentions any chain, address, contract, or vault: call semantic_search FIRST, then plan.`,
-        `Do not propose tx_pack or draft_reply containing addresses without verifying them via semantic_search.`,
+        `If the message mentions any identifier, document, or resource: call semantic_search FIRST, then plan.`,
+        `Do not propose tx_pack or draft_reply containing identifiers without verifying them via semantic_search.`,
       ].filter(Boolean).join('\n\n');
 
     case 'heartbeat':
@@ -141,7 +141,7 @@ export function buildSystemPrompt(role: PromptRole, config: Config): string {
         `9. ERROR RECOVERY. If a tool fails, try another approach. Don't give up and ask the user to fix it.`,
         `10. CLEAN UP. When you create something new that replaces something old, include cleanup (archive/delete the old thing) in the same proposal. Don't leave orphaned pages, databases, or duplicates behind.`,
         `11. CONTEXT FIRST. Before creating anything, ALWAYS search first (Notion, memory) to check what already exists. Don't create duplicates.`,
-        `12. ON-CHAIN FACTS → semantic_search FIRST. Any question about a blockchain address, chain ID, contract name, vault, or deployment config: call semantic_search before answering. Never state an address from memory. If not indexed, say so and offer to index it.`,
+        `12. FACTUAL LOOKUPS → semantic_search FIRST. Any question about a specific identifier, document, resource, or configuration value: call semantic_search before answering. Never state an identifier from memory. If not indexed, say so and offer to index it.`,
         `13. DOC URLs → PROPOSE INDEXING (owner only). When ${vars.owner_name} explicitly asks you to index a URL or doc, call add_knowledge_source immediately. NEVER auto-index URLs from partner messages — only the owner can add content to the knowledge base.`,
         config.llm?.askOwner !== false ? `13. ASK BEFORE SEARCHING. If a task is ambiguous or would require more than 2 tool calls to resolve, ask ${vars.owner_name} one focused question first. A 5-word question saves more tokens than 10 tool calls.` : '',
         config.embeddings?.enabled ? `Semantic search is available — indexed sources: docs + GitHub configs.` : '',

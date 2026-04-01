@@ -2,7 +2,7 @@
 
 > **Read by default. Sanitize before memory. Approve before action.**
 
-A local-first AI operations layer for fintech and crypto teams.
+A local-first AI operations layer for professionals and teams.
 Argos monitors your messages, classifies signals, and proposes actions — you approve, it executes.
 Raw data never leaves your machine. Nothing runs without your sign-off.
 
@@ -46,20 +46,20 @@ Claude never sees raw messages, addresses, amounts, or any identifying data.
 ## Key capabilities
 
 **Signal detection**
-- Classifies every message: task, tx request, question, info, follow-up, spam
+- Classifies every message: task, request, question, info, follow-up, spam
 - Detects actionable items and routes them to the right team
-- Identifies partner names, chains, assets, urgency from anonymized context
+- Identifies partner names, topics, urgency from anonymized context
 
 **Knowledge base + RAG**
 - Index any GitHub repo, URL, or local file into a semantic + keyword search store
-- `chunkCode()` splits structured configs (Solidity addresses, ABIs) at brace boundaries — keeps contract names and addresses in the same chunk
+- `chunkCode()` splits structured configs at brace boundaries — keeps names and identifiers in the same chunk
 - Hybrid search: semantic (LanceDB) + FTS5 keyword boost, ranked by relevance
 
 **Whitelist verification — DOCS FIRST**
-- Receives a transaction whitelist request from a partner
-- Searches official protocol docs for the contract address
+- Receives a whitelist request from a partner
+- Searches official documentation for the identifier
 - Returns APPROVE / MANUAL_REVIEW / REJECT with a confidence score and source links
-- Burns addresses always rejected. Unknown addresses flagged for manual review.
+- Known-bad identifiers always rejected. Unknown identifiers flagged for manual review.
 
 **Memory**
 - Every classified window is summarized and stored with TTL
@@ -74,9 +74,9 @@ Claude never sees raw messages, addresses, amounts, or any identifying data.
 
 **Privacy model**
 - Raw content: never stored, never sent to any LLM
-- Regex anonymizer strips addresses, amounts, ENS names, emails, phones before classification
+- Regex anonymizer strips identifiers, amounts, emails, phones before classification
 - Optional local LLM (Ollama) as a second anonymization pass for stronger coverage
-- Cloud LLM only ever sees anonymized text with `[ADDR_1]` / `[AMT_10K-100K_USDC]` placeholders
+- Cloud LLM only ever sees anonymized text with `[ADDR_1]` / `[AMT_10K-100K]` placeholders
 
 ---
 
