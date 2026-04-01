@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { GitBranch, Menu, X } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { LogoFull } from './Logo'
 
 const links = [
   { label: 'Pipeline', href: '#pipeline' },
@@ -34,19 +35,8 @@ export default function Nav() {
     >
       <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-16">
         {/* Logo */}
-        <a href="#" className="flex items-center gap-3 group">
-          <div className="relative">
-            <div
-              className="w-2.5 h-2.5 rounded-full bg-green animate-pulse-glow"
-              style={{ boxShadow: '0 0 8px #00ff88, 0 0 16px rgba(0,255,136,0.4)' }}
-            />
-          </div>
-          <span
-            className="font-mono font-bold text-lg tracking-widest text-white glow-cyan"
-            style={{ letterSpacing: '0.3em' }}
-          >
-            ARGOS
-          </span>
+        <a href="#" className="flex items-center">
+          <LogoFull height={28} />
         </a>
 
         {/* Desktop Links */}
