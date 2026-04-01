@@ -1,0 +1,220 @@
+{
+  "_comment": "Copy to ~/.argos/config.json and fill in your values. Remove all _comment fields.",
+
+  "owner": {
+    "name": "Your Name",
+    "telegramUserId": 0,
+    "_comment": "Find your Telegram user ID at https://t.me/userinfobot"
+  },
+
+  "llm": {
+    "activeProvider": "anthropic",
+    "activeModel": "claude-sonnet-4-6",
+    "_comment_providers": "Supported: anthropic, anthropic-oauth, openai, gemini, groq, deepseek, mistral, xai, qwen, together, perplexity, cohere, ollama, lmstudio, custom",
+    "fallbackProvider": "ollama",
+    "fallbackModel": "qwen2.5:7b",
+    "providers": {
+      "anthropic": {
+        "name": "Anthropic",
+        "api": "anthropic",
+        "auth": "api-key",
+        "apiKey": "sk-ant-..."
+      },
+      "openai": {
+        "name": "OpenAI",
+        "api": "openai",
+        "auth": "api-key",
+        "apiKey": "sk-..."
+      },
+      "groq": {
+        "name": "Groq",
+        "api": "openai",
+        "auth": "api-key",
+        "apiKey": "gsk_...",
+        "baseUrl": "https://api.groq.com/openai/v1",
+        "models": ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"]
+      },
+      "qwen": {
+        "name": "Qwen (Alibaba)",
+        "api": "openai",
+        "auth": "api-key",
+        "apiKey": "sk-...",
+        "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "models": ["qwen-max", "qwen-plus", "qwen-turbo"]
+      },
+      "ollama": {
+        "name": "Ollama (local)",
+        "api": "openai",
+        "auth": "bearer",
+        "baseUrl": "http://localhost:11434/v1",
+        "models": ["qwen2.5:7b", "llama3.2:3b", "mistral:7b"]
+      },
+      "custom": {
+        "name": "Custom OpenAI-compatible",
+        "api": "openai",
+        "auth": "api-key",
+        "apiKey": "your-key",
+        "baseUrl": "https://your-endpoint/v1",
+        "models": ["your-model"]
+      }
+    }
+  },
+
+  "secrets": {
+    "_comment": "All keys here are injected into process.env at startup",
+    "TELEGRAM_API_ID": "12345678",
+    "TELEGRAM_API_HASH": "your_hash_here",
+    "TELEGRAM_BOT_TOKEN": "123456789:ABC...",
+    "SLACK_BOT_TOKEN": "xoxb-...",
+    "SLACK_APP_TOKEN": "xapp-...",
+    "DISCORD_BOT_TOKEN": "your_discord_bot_token",
+    "OP_SERVICE_ACCOUNT_TOKEN": "ops_..."
+  },
+
+  "channels": {
+    "telegram": {
+      "listener": {
+        "mode": "mtproto",
+        "monitoredChats": [
+          { "chatId": "-1001234567890", "name": "Team Alpha", "tags": ["team"], "isGroup": true },
+          { "chatId": "987654321", "name": "Alice", "tags": ["partner"] }
+        ],
+        "ignoredChats": [],
+        "contextWindow": { "waitMs": 30000, "maxMessages": 5 }
+      },
+      "personal": {
+        "approvalChatId": "me"
+      }
+    },
+    "slack": {
+      "enabled": false,
+      "monitoredChannels": [
+        { "channelId": "C01234567", "name": "general", "tags": ["team"] }
+      ],
+      "monitorDMs": true
+    },
+    "discord": {
+      "enabled": false,
+      "monitoredChannels": [],
+      "monitoredGuildIds": ["123456789012345678"],
+      "monitorDMs": true
+    }
+  },
+
+  "triage": {
+    "enabled": false,
+    "myHandles": ["@yourhandle", "YourFirstName"],
+    "watchedTeams": [
+      {
+        "name": "ops",
+        "handles": ["@ops-team"],
+        "keywords": ["whitelist", "transfer", "urgent"],
+        "isOwnTeam": true
+      }
+    ],
+    "ignoreOwnTeam": true,
+    "mentionOnly": false
+  },
+
+  "privacy": {
+    "roles": {
+      "sanitize": "privacy",
+      "classify": "privacy",
+      "triage": "privacy",
+      "llmAnon": "privacy",
+      "plan": "primary"
+    },
+    "storeRaw": false
+  },
+
+  "anonymizer": {
+    "mode": "regex",
+    "knownPersons": ["Alice Dupont", "Bob Martin"],
+    "bucketAmounts": true
+  },
+
+  "heartbeat": {
+    "enabled": false,
+    "intervalMinutes": 60,
+    "prompt": "Review pending tasks and messages. Flag anything urgent."
+  },
+
+  "webapp": {
+    "port": 3000,
+    "webauthnRpId": "localhost",
+    "webauthnOrigin": "https://localhost:3000",
+    "tlsCert": "~/.argos/tls/cert.pem",
+    "tlsKey": "~/.argos/tls/key.pem"
+  },
+
+  "notion": {
+    "_comment": "Optional — remove block if not using Notion",
+    "apiKey": "secret_...",
+    "agentDatabaseId": "your-database-id",
+    "ownerDatabaseId": "your-owner-database-id",
+    "mode": "agent"
+  },
+
+  "calendar": {
+    "_comment": "Optional — remove block if not using Google Calendar",
+    "credentials": {
+      "clientId": "your-client-id.apps.googleusercontent.com",
+      "clientSecret": "your-client-secret",
+      "refreshToken": "your-refresh-token"
+    },
+    "calendarId": "primary"
+  },
+
+  "smtp": {
+    "_comment": "Optional — remove block if not sending emails",
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "secure": false,
+    "user": "you@gmail.com",
+    "password": "your-app-password",
+    "fromName": "Your Name"
+  },
+
+  "knowledge": {
+    "sources": [
+      {
+        "type": "url",
+        "name": "Company docs",
+        "url": "https://docs.yourcompany.com",
+        "refreshHours": 168
+      },
+      {
+        "type": "github",
+        "owner": "your-org",
+        "repo": "your-repo",
+        "paths": ["README.md", "docs/"],
+        "refreshHours": 168
+      }
+    ],
+    "indexLocally": true
+  },
+
+  "embeddings": {
+    "enabled": false,
+    "baseUrl": "http://localhost:11434",
+    "model": "nomic-embed-text"
+  },
+
+  "mcpServers": [],
+
+  "memory": {
+    "defaultTtlDays": 7,
+    "archiveTtlDays": 365,
+    "autoArchiveThreshold": 8
+  },
+
+  "approval": {
+    "defaultExpiryMs": 1800000,
+    "criticalExpiryMs": 600000,
+    "doubleTapCritical": true
+  },
+
+  "readOnly": true,
+  "logLevel": "info",
+  "dataDir": "~/.argos"
+}

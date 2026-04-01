@@ -105,6 +105,9 @@ export async function executeProposal(
         case 'send_email':
           result = await executeEmailSend(payload.input, config);
           break;
+        case 'browser_action':
+          result = await executeBrowserAction(payload.input, config);
+          break;
         case 'add_knowledge_source':
           result = await executeAddKnowledgeSource(payload.input, config);
           break;
@@ -296,6 +299,14 @@ function executeDeleteCronJob(input: Record<string, unknown>): WorkerResult {
     dryRun: false,
     output: `Cron job "${name}" disabled`,
   };
+}
+
+async function executeBrowserAction(
+  input: Record<string, unknown>,
+  config: Config,
+): Promise<WorkerResult> {
+  const { BrowserActionWorker } = await import('./browser-action.js');
+  return new BrowserActionWorker(config).execute(input);
 }
 
 async function executeEmailSend(

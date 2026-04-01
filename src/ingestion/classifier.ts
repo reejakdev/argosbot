@@ -18,7 +18,7 @@ import { llmCall, extractJson, type LLMConfig } from '../llm/index.js';
 import { createLogger } from '../logger.js';
 import { getDb } from '../db/index.js';
 import { buildSystemPrompt } from '../prompts/index.js';
-import type { ContextWindow, ClassificationResult, Task, CompletionSignal, TaskScope } from '../types.js';
+import type { ContextWindow, ClassificationResult, Task, CompletionSignal } from '../types.js';
 import type { Config } from '../config/schema.js';
 
 const log = createLogger('classifier');
@@ -140,7 +140,7 @@ export async function classify(
   });
 
   const response = await llmCall(
-    { ...llmConfig, temperature: 0 },  // zero temp — deterministic classification
+    { ...llmConfig, temperature: llmConfig.temperature ?? 0 },  // default 0 — deterministic
     [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: prompt },
@@ -169,7 +169,7 @@ export async function classify(
       injectionDetected: raw.injectionDetected ?? false,
       injectionReason:  raw.injectionReason,
     };
-  } catch (e) {
+  } catch {
     log.error(`Failed to parse classifier response for window ${window.id}`, response.content);
     result = {
       category: 'info',

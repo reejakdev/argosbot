@@ -133,7 +133,6 @@ function parseVerifierOutput(raw: string): Omit<WhitelistVerification, 'rawOutpu
 
   // Decision line: ✅/⚠️/❌ DECISION — Protocol — Chain
   const decisionMatch = text.match(/^([✅⚠️❌])\s*(APPROVE|MANUAL_REVIEW|MANUAL REVIEW|REJECT)\s*[—–-]\s*([^\n—–-]+?)\s*[—–-]\s*([^\n]+)/im);
-  const emoji    = decisionMatch?.[1] ?? '⚠️';
   const rawDec   = (decisionMatch?.[2] ?? 'MANUAL_REVIEW').toUpperCase().replace(' ', '_');
   const decision = (['APPROVE', 'MANUAL_REVIEW', 'REJECT'].includes(rawDec) ? rawDec : 'MANUAL_REVIEW') as WhitelistDecision;
   const protocol = decisionMatch?.[3]?.trim() ?? 'unknown';
@@ -250,8 +249,10 @@ export function formatVerificationNotif(v: WhitelistVerification): string {
     REJECT:        '❌',
   };
   const icon     = icons[v.decision];
-  const scoreBar = '█'.repeat(Math.round(v.score * 10)) + '░'.repeat(10 - Math.round(v.score * 10));
-  const scoreStr = `${scoreBar} ${(v.score * 100).toFixed(0)}%`;
+  const clampedScore = Math.max(0, Math.min(1, v.score));
+  const filled = Math.round(clampedScore * 10);
+  const scoreBar = '█'.repeat(filled) + '░'.repeat(10 - filled);
+  const scoreStr = `${scoreBar} ${(clampedScore * 100).toFixed(0)}%`;
 
   const lines = [
     `${icon} *${v.decision.replace('_', ' ')}* — ${v.protocol} — ${v.chain}`,

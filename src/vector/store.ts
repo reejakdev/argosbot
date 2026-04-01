@@ -19,8 +19,6 @@ import { createLogger } from '../logger.js';
 import {
   embed,
   cosineSimilarity,
-  serializeEmbedding,
-  deserializeEmbedding,
 } from '../embeddings/index.js';
 import type { EmbeddingsConfig } from '../config/schema.js';
 

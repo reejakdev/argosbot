@@ -20,6 +20,7 @@ import { createLogger } from '../logger.js';
 import { getSkillToolDefinitions, executeSkill } from '../skills/registry.js';
 import { buildAnthropicMcpConfig } from '../mcp/index.js';
 import { requestApproval } from '../gateway/approval.js';
+import { llmConfigFromConfig, callAnthropicBearerRaw } from '../llm/index.js';
 import type { Config } from '../config/schema.js';
 import type { Proposal, ProposedAction, WorkerType } from '../types.js';
 
@@ -135,10 +136,21 @@ export async function runProactivePlan(
   const label = opts.label ?? 'heartbeat';
   log.info(`Proactive plan: ${label}`);
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) { log.warn('No ANTHROPIC_API_KEY — skipping heartbeat'); return; }
+  // Resolve LLM config via the multi-provider abstraction — same as planner.
+  // Heartbeat uses Anthropic tool format, so we need an Anthropic provider.
+  let llmCfg = llmConfigFromConfig(config);
+  if (llmCfg.provider !== 'anthropic') {
+    if (llmCfg.fallback?.provider === 'anthropic') {
+      log.warn('Primary LLM is not Anthropic — using fallback for heartbeat');
+      llmCfg = llmCfg.fallback;
+    } else {
+      log.warn(`Heartbeat requires Anthropic provider. Active: ${llmCfg.provider}. Skipping.`);
+      return;
+    }
+  }
+  const useBearerMode = llmCfg.authMode === 'bearer';
+  const client = useBearerMode ? null : new Anthropic({ apiKey: llmCfg.apiKey });
 
-  const client = new Anthropic({ apiKey });
   const stateSnapshot = buildStateSnapshot();
 
   const skillTools = getSkillToolDefinitions(config.skills) as unknown as Anthropic.Tool[];

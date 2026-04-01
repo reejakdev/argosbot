@@ -100,7 +100,8 @@ export class SlackChannel implements Channel {
         disconnect: () => Promise<void>;
       };
 
-      sm.on('message', async ({ event, ack }: { event: unknown; ack: () => Promise<void> }) => {
+      sm.on('message', async (data: unknown) => {
+        const { event, ack } = data as { event: unknown; ack: () => Promise<void> };
         await ack();
         await this.handleEvent(event);
       });

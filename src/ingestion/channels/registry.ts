@@ -40,8 +40,12 @@ export async function startAllChannels(
 ): Promise<void> {
   for (const channel of channels.values()) {
     channel.onMessage(onMessage);
-    await channel.start();
-    log.info(`Channel started: ${channel.name}`);
+    try {
+      await channel.start();
+      log.info(`Channel started: ${channel.name}`);
+    } catch (e) {
+      log.error(`Channel "${channel.name}" failed to start — skipping`, e);
+    }
   }
 }
 

@@ -176,6 +176,38 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'browser_action',
+    description: 'Automate a browser — navigate, fill forms, click, extract data. Use for web logins, form submissions, scraping, or any web interaction. If credentials are needed (password, card), pass a credential_ref (e.g. "vault:BankLogin") — the actual secret is NEVER sent here, only the reference name.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'What this automation does (shown to owner in approval)' },
+        credential_ref: {
+          type: 'string',
+          description: 'Optional: reference to a credential in the vault (e.g. "vault:BankLogin", "vault:MyBank/Login", "config:SOME_KEY"). The actual secret is resolved at execution time — never sent to the LLM.',
+        },
+        steps: {
+          type: 'array',
+          description: 'Ordered list of browser actions',
+          items: {
+            type: 'object',
+            properties: {
+              action: { type: 'string', enum: ['navigate', 'fill', 'click', 'screenshot', 'wait', 'extract', 'submit'] },
+              selector: { type: 'string', description: 'CSS selector for fill/click/extract/submit/wait' },
+              url:      { type: 'string', description: 'URL for navigate' },
+              value:    { type: 'string', description: 'Static value for fill (use credential_field for secrets)' },
+              credential_field: { type: 'string', enum: ['username', 'password', 'token', 'cardNumber', 'cardExpiry', 'cardCvv', 'value'], description: 'Which field from the resolved credential to inject' },
+              wait_for: { description: 'Selector string or ms number for wait action' },
+              filename: { type: 'string', description: 'Filename for screenshot (optional)' },
+            },
+            required: ['action'],
+          },
+        },
+      },
+      required: ['description', 'steps'],
+    },
+  },
+  {
     name: 'send_email',
     description: 'Compose and send an email via SMTP. The email will NOT be sent until the owner approves. Use for replies to email threads, outbound communication, or forwarding summaries.',
     input_schema: {

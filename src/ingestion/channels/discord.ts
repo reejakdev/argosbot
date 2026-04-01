@@ -60,7 +60,7 @@ export class DiscordChannel implements Channel {
         return;
       }
 
-      const { Client, GatewayIntentBits, Partials } = discord as {
+      const { Client, GatewayIntentBits, Partials } = discord as unknown as {
         Client: new (opts: unknown) => unknown;
         GatewayIntentBits: Record<string, number>;
         Partials: Record<string, number>;

@@ -44,6 +44,8 @@ export class EmailChannel implements Channel {
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private onMessageCb: ((msg: RawMessage) => Promise<void>) | null = null;
   private running = false;
+  private reconnectAttempts = 0;
+  private static readonly MAX_RECONNECT_DELAY_MS = 5 * 60 * 1000; // 5 min cap
 
   constructor(config: EmailConfig) {
     this.config = config;
@@ -98,11 +100,11 @@ export class EmailChannel implements Channel {
 
       await (this.client as { connect: () => Promise<void> }).connect();
       log.info(`Email connected to ${this.config.host} as ${this.config.user}`);
+      this.reconnectAttempts = 0; // reset on successful connection
     } catch (e) {
       log.error('Email connect failed', e);
       this.client = null;
-      this.running = false;
-      throw e; // propagate so start() knows connection failed
+      throw e; // propagate so start() / reconnect() knows
     }
   }
 
@@ -173,10 +175,29 @@ export class EmailChannel implements Channel {
       }
     } catch (e) {
       log.error('Email poll failed', e);
-      // Try reconnect
       this.client = null;
-      await this.connect();
+      this.scheduleReconnect();
     }
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.running) return;
+    this.reconnectAttempts++;
+    // Exponential backoff: 2s, 4s, 8s … capped at 5 min
+    const delay = Math.min(
+      1000 * Math.pow(2, this.reconnectAttempts),
+      EmailChannel.MAX_RECONNECT_DELAY_MS,
+    );
+    log.warn(`Email reconnect attempt ${this.reconnectAttempts} in ${Math.round(delay / 1000)}s`);
+    setTimeout(async () => {
+      if (!this.running) return;
+      try {
+        await this.connect();
+        await this.poll();
+      } catch {
+        this.scheduleReconnect();
+      }
+    }, delay);
   }
 
   private async processEmail(msg: {
