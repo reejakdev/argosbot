@@ -1728,6 +1728,114 @@ async function stepWriteConfig(config: object, total: number): Promise<void> {
 
 // ─── Step 7: YubiKey reminder + summary ──────────────────────────────────────
 
+// ─── Step: Hot wallet (optional) ─────────────────────────────────────────────
+
+async function stepWallet(config: Record<string, unknown>): Promise<void> {
+  console.log(rule('Hot wallet  (optional)'));
+  nl();
+
+  tutorial('What the bot wallet enables', [
+    'Argos generates its OWN private key — separate from any of your wallets.',
+    'You send it funds + gas. It can then sign & broadcast on-chain actions.',
+    '',
+    'What it unlocks (all require your explicit YubiKey approval):',
+    '  • Send ETH / SOL / native tokens to any address',
+    '  • Execute contract calls (swaps, approvals, staking…)',
+    '  • Run automated on-chain tasks via cron jobs',
+    '',
+    'Security model:',
+    '  • Bot key is AES-256-GCM encrypted  →  ~/.argos/wallet.enc  (chmod 600)',
+    '  • Never stored in the DB, never logged, never sent to any LLM',
+    '  • Every signing event recorded in the immutable audit log',
+    '  • Per-tx + daily spend limits enforced before any broadcast',
+    '  • readOnly=true in config → dry-run only, nothing ever broadcasts',
+    '',
+    'You will need to fund the generated address before use.',
+  ]);
+
+  const enable = await confirm('Enable the bot hot wallet?', false);
+  if (!enable) {
+    skip('wallet', 'skipped');
+    return;
+  }
+
+  nl();
+  const evmEnabled    = await confirm('Enable EVM chains (Ethereum, Base, Arbitrum…)?', true);
+  const solanaEnabled = await confirm('Enable Solana?', false);
+
+  if (!evmEnabled && !solanaEnabled) {
+    warn('No chains selected — wallet not configured.');
+    return;
+  }
+
+  // ── Encryption secret ───────────────────────────────────────────────────────
+  nl();
+  const { randomBytes } = await import('crypto');
+  const defaultSecret = randomBytes(32).toString('base64');
+  info(`Auto-generated encryption secret: ${c.cyan}${defaultSecret.slice(0, 16)}…${c.reset}`);
+  note('Press Enter to use it, or type your own (min 32 chars).');
+  note(`${c.yellow}⚠ Back it up — losing it means losing access to the encrypted key.${c.reset}`);
+  const secretInput = (await ask('Encryption secret', defaultSecret)).trim();
+  const encryptionSecret = secretInput.length >= 32 ? secretInput : defaultSecret;
+
+  const chains: Record<string, unknown> = {};
+
+  // ── EVM chains ──────────────────────────────────────────────────────────────
+  if (evmEnabled) {
+    nl();
+    info('Common chain IDs: 1=Ethereum  8453=Base  42161=Arbitrum  137=Polygon  10=Optimism');
+    info('Free public RPCs: chainlist.org  — or use Alchemy/Infura for reliability.');
+    nl();
+    let addChain = true;
+    while (addChain) {
+      const name    = (await ask('Chain name (e.g. "base", "ethereum")')).trim();
+      const rpc     = (await ask('RPC URL')).trim();
+      const rawId   = (await ask('Chain ID')).trim();
+      const chainId = parseInt(rawId, 10);
+      const symbol  = (await ask('Native token symbol', 'ETH')).trim() || 'ETH';
+      const explorer = (await ask('Block explorer URL (optional — Enter to skip)', '')).trim();
+      if (name && rpc && !isNaN(chainId)) {
+        chains[name] = { rpc, chainId, symbol, ...(explorer ? { explorer } : {}) };
+        ok(`${name} (chainId ${chainId}, ${symbol}) added`);
+      } else {
+        warn('Skipped — name, RPC and chain ID are all required.');
+      }
+      addChain = await confirm('Add another EVM chain?', false);
+    }
+  }
+
+  // ── Solana ──────────────────────────────────────────────────────────────────
+  if (solanaEnabled) {
+    nl();
+    const solRpc = (await ask('Solana RPC URL', 'https://api.mainnet-beta.solana.com')).trim();
+    chains['solana'] = { rpc: solRpc, symbol: 'SOL' };
+    ok('Solana added');
+  }
+
+  // ── Spend limits ────────────────────────────────────────────────────────────
+  nl();
+  info('Spend limits are per chain (native token). Protects against runaway automation.');
+  const maxTx    = (await ask('Max value per transaction', '1.0')).trim() || '1.0';
+  const dailyMax = (await ask('Max daily spend', '10.0')).trim() || '10.0';
+
+  config['wallet'] = {
+    enabled: true,
+    encryptionSecret,
+    chains,
+    limits: {
+      maxTxValueNative: maxTx,
+      dailyLimitNative: dailyMax,
+      requireElevatedAuth: true,
+    },
+  };
+
+  nl();
+  ok('Hot wallet configured');
+  note(`Wallet address shown on first start — fund it with gas before signing.`);
+  note(`Private key → ${c.cyan}~/.argos/wallet.enc${c.reset}  (AES-256-GCM, chmod 600)`);
+  nl();
+}
+
 function stepSummary(total: number): void {
   stepHeader(7, total, 'You\'re ready');
 
@@ -1870,6 +1978,7 @@ async function main(): Promise<void> {
       await stepContextSources(cfg);
       await stepMcpServers(cfg);
       await stepSkills(cfg);
+      await stepWallet(cfg);
     }},
     { name: STEP_NAMES[6], run: async (total, cfg) => {
       await stepWriteConfig(cfg, total);

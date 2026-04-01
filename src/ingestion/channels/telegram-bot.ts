@@ -892,7 +892,7 @@ You are meeting this user for the first time. You MUST:
     try {
       const { llmCall } = await import('../../llm/index.js');
       const { getAnonymizer } = await import('../../privacy/anonymizer.js');
-      const anonConfig = this.argosConfig?.anonymizer ?? { mode: 'regex' as const, bucketAmounts: true, knownPersons: [], customPatterns: [] };
+      const anonConfig = this.argosConfig?.anonymizer ?? { mode: 'regex' as const, bucketAmounts: true, anonymizeCryptoAddresses: false, knownPersons: [], customPatterns: [] };
       const anonymizer = getAnonymizer(anonConfig);
 
       // Anonymize both sides before sending to LLM — never expose raw PII/addresses

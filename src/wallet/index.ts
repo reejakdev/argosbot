@@ -12,10 +12,14 @@
 
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
 import { readFileSync, writeFileSync, existsSync, chmodSync } from 'fs';
-import { join } from 'path';
-import { expandDataDir } from '../config/index.js';
+import { join, resolve } from 'path';
+import { homedir } from 'os';
 import { audit } from '../db/index.js';
 import { createLogger } from '../logger.js';
+
+function resolveDir(dir: string): string {
+  return dir.startsWith('~') ? join(homedir(), dir.slice(1)) : resolve(dir);
+}
 
 const log = createLogger('wallet');
 
@@ -78,7 +82,7 @@ function decrypt(key: Buffer, enc: EncryptedKey): string {
 // ─── Wallet file path ─────────────────────────────────────────────────────────
 
 function walletPath(dataDir: string): string {
-  return join(expandDataDir(dataDir), 'wallet.enc');
+  return join(resolveDir(dataDir), 'wallet.enc');
 }
 
 function loadFile(dataDir: string): WalletFile | null {
@@ -109,8 +113,7 @@ async function loadEvmPrivateKey(enc: EncryptedKey, encKey: Buffer): Promise<`0x
 // ─── Solana key management ────────────────────────────────────────────────────
 
 async function generateSolanaKey(): Promise<{ address: string; secretKey: Uint8Array }> {
-  const solana = await import('@solana/web3.js');
-  const Keypair = solana.Keypair ?? (solana as unknown as Record<string, typeof solana.Keypair>).default?.Keypair;
+  const { Keypair } = await import('@solana/web3.js');
   const kp = Keypair.generate();
   return {
     address:   kp.publicKey.toBase58(),

@@ -271,7 +271,7 @@ export async function executeSignTx(
     return { success: false, output: 'Wallet not enabled in config', dryRun: true };
   }
 
-  const txInput = input as SignTxInput;
+  const txInput = input as unknown as SignTxInput;
 
   if (!txInput.chain || !txInput.to || !txInput.value) {
     return { success: false, output: 'Missing required fields: chain, to, value', dryRun: true };

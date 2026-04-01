@@ -121,6 +121,7 @@ async function buildAnonymizer(): Promise<Anonymizer> {
       mode: 'regex',
       knownPersons: [],
       bucketAmounts: true,
+      anonymizeCryptoAddresses: false,
       customPatterns: [],
     });
   }

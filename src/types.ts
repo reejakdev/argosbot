@@ -39,7 +39,8 @@ export type WorkerType =
   | 'calendar'
   | 'notion'
   | 'linear'
-  | 'scheduler';
+  | 'scheduler'
+  | 'tx_sign';
 
 // ─── Raw message as received from source ─────────────────────────────────────
 export interface RawMessage {

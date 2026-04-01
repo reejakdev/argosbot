@@ -287,6 +287,10 @@ export async function processWindow(
     autoArchiveThreshold: config.memory.autoArchiveThreshold,
   });
 
+  // Vectorize full conversation — fire-and-forget, enables semantic retrieval over 30d rolling window
+  const { vectorizeConversationAsync } = await import('../memory/store.js');
+  vectorizeConversationAsync(window, result).catch(e => log.warn('Conversation vectorization failed:', e));
+
   // Save task if detected
   if (result.category === 'task' || result.category === 'tx_request' || result.category === 'client_request') {
     const taskId = saveTask(result.summary.slice(0, 120), result, window);

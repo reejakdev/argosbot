@@ -61,6 +61,21 @@ async function boot() {
   });
   log.info('DB initialized');
 
+  // 3b. Wallet init — generate keys if enabled and not yet created
+  if (config.wallet?.enabled) {
+    const { ensureWallet } = await import('./wallet/index.js');
+    const addrs = await ensureWallet(
+      config.dataDir,
+      config.wallet.encryptionSecret,
+      {
+        evm:    Object.values(config.wallet.chains ?? {}).some(c => 'chainId' in c),
+        solana: Object.values(config.wallet.chains ?? {}).some(c => !('chainId' in c)),
+      },
+    );
+    if (addrs.evm)    log.info(`Wallet EVM:    ${addrs.evm}`);
+    if (addrs.solana) log.info(`Wallet Solana: ${addrs.solana}`);
+  }
+
   // 3. LLM configs
   const { llmConfigFromConfig } = await import('./llm/index.js');
   const llmConfig = llmConfigFromConfig(config, { maxTokens: config.claude.maxTokens });

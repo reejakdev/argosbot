@@ -240,6 +240,39 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ];
 
+// Injected at call-time when wallet is enabled — kept separate to avoid leaking
+// chain/address info when wallet is disabled.
+const PROPOSE_TX_TOOL: Anthropic.Tool = {
+  name: 'sign_tx',
+  description: 'Propose signing and broadcasting a transaction from the bot\'s hot wallet. REQUIRES human approval before execution. Use only when the owner explicitly asks to send funds or execute an on-chain action.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      chain: {
+        type: 'string',
+        description: 'Chain name as configured (e.g. "ethereum", "base", "solana"). Use the name the owner used.',
+      },
+      to: {
+        type: 'string',
+        description: 'Recipient address. Use the REAL address as provided by the owner (not an anonymized placeholder — the owner provides this directly).',
+      },
+      value: {
+        type: 'string',
+        description: 'Amount in native token, human-readable (e.g. "0.1" for 0.1 ETH). DO NOT use anonymized buckets here.',
+      },
+      data: {
+        type: 'string',
+        description: 'Optional calldata for contract interactions (hex string starting with 0x).',
+      },
+      note: {
+        type: 'string',
+        description: 'Reason for this transaction — shown to owner in approval UI.',
+      },
+    },
+    required: ['chain', 'to', 'value'],
+  },
+};
+
 // buildSystemPrompt is now imported from src/prompts/index.ts
 
 // ─── Build context for planner ────────────────────────────────────────────────
@@ -286,6 +319,7 @@ function toolCallToAction(
     create_cron_job: 'low',
     delete_cron_job: 'medium',
     add_knowledge_source: 'low',
+    sign_tx: 'high',
   };
 
   const workerMap: Record<string, WorkerType> = {
@@ -298,6 +332,7 @@ function toolCallToAction(
     create_cron_job: 'scheduler',
     delete_cron_job: 'scheduler',
     add_knowledge_source: 'notion',
+    sign_tx: 'tx_sign',
   };
 
   // Actions on the owner's own workspace don't need approval
@@ -332,6 +367,8 @@ function humanizeAction(name: string, input: Record<string, unknown>): string {
       return `Delete scheduled job "${input.name}"${input.reason ? ` — ${input.reason}` : ''}`;
     case 'add_knowledge_source':
       return `Index knowledge source: ${input.name} (${input.url ?? `github:${input.owner}/${input.repo}`})`;
+    case 'sign_tx':
+      return `Sign tx on ${input.chain}: ${input.value} → ${input.to}${input.note ? ` (${input.note})` : ''}`;
     default:
       return `${name}: ${JSON.stringify(input).slice(0, 100)}`;
   }
@@ -371,7 +408,8 @@ export async function plan(
   // Skill tools + proposal tools. MCP excluded — too many tokens per call.
   type ToolDef = { name: string; description: string; input_schema: unknown };
   const skillTools = getSkillToolDefinitions(config.skills) as ToolDef[];
-  const allTools: ToolDef[] = [...(TOOLS as unknown as ToolDef[]), ...skillTools];
+  const walletTools: ToolDef[] = config.wallet?.enabled ? [PROPOSE_TX_TOOL as unknown as ToolDef] : [];
+  const allTools: ToolDef[] = [...(TOOLS as unknown as ToolDef[]), ...walletTools, ...skillTools];
 
   let planText = '';
   const actions: ProposedAction[] = [];

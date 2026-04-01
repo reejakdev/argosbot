@@ -300,6 +300,26 @@ export async function cleanSource(sourceRef: string): Promise<void> {
   }
 }
 
+// ─── Purge old conversation vectors ──────────────────────────────────────────
+
+/**
+ * Delete all conversation: vectors older than olderThanDays.
+ * Called daily from purgeExpired() — keeps the vector store at a rolling 30-day window.
+ */
+export async function purgeOldConversations(olderThanDays: number): Promise<void> {
+  try {
+    const table     = await getTable();
+    const threshold = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+    await table.delete(`source_ref LIKE "conversation:%" AND created_at < ${threshold}`);
+    try {
+      await (table as unknown as { optimize: () => Promise<void> }).optimize();
+    } catch { /* older lancedb versions — safe to ignore */ }
+    log.info(`Purged conversation vectors older than ${olderThanDays} days`);
+  } catch (e) {
+    log.warn(`purgeOldConversations failed: ${e}`);
+  }
+}
+
 // ─── Index ────────────────────────────────────────────────────────────────────
 
 export async function indexChunks(

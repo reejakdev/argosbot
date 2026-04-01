@@ -244,6 +244,16 @@ export function purgeExpired(): number {
     }
   });
 
+  // Purge conversation vectors older than 30 days — rolling window
+  setImmediate(async () => {
+    try {
+      const { purgeOldConversations } = await import('../vector/store.js');
+      await purgeOldConversations(30);
+    } catch (e) {
+      log.warn(`Conversation vector purge failed: ${e}`);
+    }
+  });
+
   return count;
 }
 
@@ -278,6 +288,58 @@ async function vectorizeMemoryAsync(entry: MemoryEntry): Promise<void> {
     );
     await indexChunks(chunks, embCfg);
     log.debug(`Vectorized memory ${entry.id} (${chunks.length} chunk(s))`);
+  } catch {
+    // Vector store is optional — silently skip on any failure
+  }
+}
+
+// ─── Async vector indexing for conversations ──────────────────────────────────
+
+/**
+ * Index a closed context window into LanceDB so the planner can retrieve
+ * recent conversation context via semantic search.
+ *
+ * sourceRef convention: "conversation:<chatId>:<windowId>"
+ * Tags: ['conversation', category, partnerName] — filterable by partner.
+ *
+ * Called fire-and-forget from processWindow() — failures are swallowed.
+ * Purged daily by purgeExpired() → purgeOldConversations(30).
+ */
+export async function vectorizeConversationAsync(
+  window: ContextWindow,
+  result: ClassificationResult,
+): Promise<void> {
+  try {
+    const { loadConfig } = await import('../config/index.js');
+    const config  = loadConfig();
+    const embCfg  = (config as unknown as { embeddings?: import('../config/schema.js').EmbeddingsConfig }).embeddings;
+    if (!embCfg?.enabled) return;
+
+    const { chunkText, indexChunks } = await import('../vector/store.js');
+
+    // Build readable anonymized conversation — content is already sanitized
+    const text = window.messages
+      .map(m => `[${m.partnerName ?? m.chatName ?? 'unknown'}]: ${m.content}`)
+      .join('\n');
+    if (!text.trim()) return;
+
+    const sourceRef = `conversation:${window.chatId}:${window.id}`;
+    const tags = ['conversation', result.category, ...(window.partnerName ? [window.partnerName] : [])].filter(Boolean) as string[];
+
+    const chunks = chunkText(
+      text,
+      sourceRef,
+      window.partnerName ?? window.chatId,
+      tags,
+      {
+        field1: window.chatId,
+        field2: window.partnerName,
+        field3: result.category,
+      },
+    );
+
+    await indexChunks(chunks, embCfg);
+    log.debug(`Vectorized conversation ${sourceRef} (${chunks.length} chunk(s))`);
   } catch {
     // Vector store is optional — silently skip on any failure
   }
