@@ -2,7 +2,9 @@
 
 > **Read by default. Sanitize before memory. Approve before action.**
 
-Argos is a local-first AI assistant that monitors your messages across Telegram, WhatsApp, email, Slack, and Discord — classifies them, detects tasks, and proposes actions for your approval. Nothing executes without you.
+Argos is a privacy-first AI assistant that monitors your messages across Telegram, WhatsApp, email, Slack, and Discord — classifies them, detects tasks, and proposes actions for your approval. Nothing executes without you.
+
+All data stays on your machine. Raw messages are anonymized before reaching any LLM — cloud or local. Argos is designed to mix models: use a capable cloud model (Claude, GPT-4o) for reasoning and tool use, while routing sensitive content through a local model (Ollama) for privacy-critical roles.
 
 Named after *Argos Panoptes*, the hundred-eyed giant who never slept — but acted only on orders.
 
