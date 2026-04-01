@@ -1,6 +1,6 @@
 // ─── Shared domain types ──────────────────────────────────────────────────────
 
-export type MessageSource = 'telegram' | 'whatsapp' | 'email' | 'calendar' | 'notion' | 'github';
+export type MessageSource = 'telegram' | 'whatsapp' | 'email' | 'slack' | 'discord' | 'calendar' | 'notion' | 'github';
 
 export type MessageCategory =
   | 'task'

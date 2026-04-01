@@ -14,7 +14,7 @@ Named after *Argos Panoptes*, the hundred-eyed giant who never slept — but act
 - Node.js >= 22
 - [Ollama](https://ollama.ai) (optional — for local embeddings and privacy LLM roles)
 - A Telegram account with API credentials ([my.telegram.org](https://my.telegram.org))
-- An Anthropic API key or Claude OAuth token
+- An API key for any supported LLM provider (Anthropic, OpenAI, Groq, Qwen, etc.) — or Ollama for fully local usage
 
 ---
 
@@ -45,6 +45,39 @@ cp config.example.json ~/.argos/config.json
 # then edit it
 ```
 
+### Supported LLM providers
+
+Argos works with any LLM — cloud or local. The setup wizard lets you pick one interactively.
+
+| Provider | `activeProvider` | Notes |
+|----------|-----------------|-------|
+| Anthropic (API key) | `anthropic` | Claude Opus/Sonnet/Haiku |
+| Anthropic (OAuth) | `anthropic-oauth` | Claude Pro/Max subscription, no API key |
+| OpenAI | `openai` | GPT-4o, o1, o3-mini |
+| Google Gemini | `gemini` | 2.0 Flash, 1.5 Pro |
+| Groq | `groq` | Llama 3.3, Mixtral — fast inference |
+| DeepSeek | `deepseek` | V3, R1 reasoner |
+| Mistral | `mistral` | Large, Small, Codestral |
+| xAI | `xai` | Grok 2 |
+| Alibaba Qwen | `qwen` | qwen-max, qwen-plus, qwen-turbo |
+| Together AI | `together` | Llama, Mixtral, Qwen hosted |
+| Perplexity | `perplexity` | Sonar — web-grounded |
+| Cohere | `cohere` | Command R+ |
+| Ollama | `ollama` | Local — Llama, Qwen, DeepSeek, Mistral… |
+| LM Studio | `lmstudio` | Local GUI — any GGUF model |
+| Any OpenAI-compatible | `custom` | Set `baseUrl` to your endpoint |
+
+You can also configure a **fallback provider** — if the primary fails, Argos automatically switches:
+
+```json
+"llm": {
+  "activeProvider": "anthropic",
+  "activeModel": "claude-sonnet-4-6",
+  "fallbackProvider": "ollama",
+  "fallbackModel": "qwen3.5:9b"
+}
+```
+
 ### Minimum config to start
 
 ```json
@@ -56,7 +89,7 @@ cp config.example.json ~/.argos/config.json
       "anthropic": {
         "name": "Anthropic",
         "api": "anthropic",
-        "auth": "apikey",
+        "auth": "api-key",
         "apiKey": "sk-ant-..."
       }
     }

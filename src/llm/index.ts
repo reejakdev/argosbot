@@ -84,6 +84,10 @@ export const MODELS = {
   // Common compatible
   MISTRAL_LARGE:  'mistral-large-latest',
   LLAMA3:         'llama3.2',
+  // Alibaba Qwen
+  QWEN_PLUS:      'qwen-plus',
+  QWEN_TURBO:     'qwen-turbo',
+  QWEN_MAX:       'qwen-max',
 } as const;
 
 // ─── Base URLs for well-known providers ──────────────────────────────────────
@@ -97,6 +101,7 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   together:   'https://api.together.xyz/v1',
   perplexity: 'https://api.perplexity.ai',
   cohere:     'https://api.cohere.ai/compatibility/v1',
+  qwen:       'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
   ollama:     'http://localhost:11434/v1',
   lmstudio:   'http://localhost:1234/v1',
 };
@@ -113,6 +118,7 @@ const PROVIDER_ENV_KEYS: Record<string, string> = {
   together:   'TOGETHER_API_KEY',
   perplexity: 'PERPLEXITY_API_KEY',
   cohere:     'COHERE_API_KEY',
+  qwen:       'DASHSCOPE_API_KEY',
 };
 
 /**

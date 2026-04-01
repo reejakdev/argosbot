@@ -127,7 +127,14 @@ async function sinkTask(
     );
   }
 
-  // 4. Notification
+  // 4. Auto-index any documentation URLs found in the message body
+  if (!config.readOnly) {
+    autoIndexDocUrls(result.body, config).catch(e =>
+      log.debug(`Auto-index doc URLs failed: ${e}`),
+    );
+  }
+
+  // 5. Notification
   const icon   = isMyTask ? '📋' : '👥';
   const team   = result.assignee && result.assignee !== 'me' ? ` → ${result.assignee}` : '';
   const urgent = result.urgency === 'high' ? ' 🔴' : '';

@@ -208,19 +208,43 @@ export function getRecentForContext(
 // ─── Purge expired non-archived entries ───────────────────────────────────────
 
 export function purgeExpired(): number {
-  const db = getDb();
+  const db  = getDb();
+  const now = Date.now();
+
+  // Fetch IDs before deleting so we can clean LanceDB orphans
+  const expired = db.prepare(`
+    SELECT id FROM memories
+    WHERE archived = 0
+    AND expires_at IS NOT NULL
+    AND expires_at < ?
+  `).all(now) as Array<{ id: string }>;
+
+  if (expired.length === 0) return 0;
+
   const result = db.prepare(`
     DELETE FROM memories
     WHERE archived = 0
     AND expires_at IS NOT NULL
     AND expires_at < ?
-  `).run(Date.now());
+  `).run(now);
 
   const count = result.changes;
-  if (count > 0) {
-    log.info(`Purged ${count} expired memory entries`);
-    audit('memory_purge', undefined, 'memory', { count });
-  }
+  log.info(`Purged ${count} expired memory entries`);
+  audit('memory_purge', undefined, 'memory', { count });
+
+  // Clean LanceDB orphans asynchronously — fire-and-forget
+  setImmediate(async () => {
+    try {
+      const { cleanSource } = await import('../vector/store.js');
+      for (const { id } of expired) {
+        await cleanSource(`memory:${id}`);
+      }
+      log.debug(`LanceDB: cleaned ${expired.length} orphaned memory chunk(s)`);
+    } catch (e) {
+      log.warn(`LanceDB orphan cleanup failed: ${e}`);
+    }
+  });
+
   return count;
 }
 

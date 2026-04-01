@@ -142,6 +142,7 @@ export function buildSystemPrompt(role: PromptRole, config: Config): string {
         `10. CLEAN UP. When you create something new that replaces something old, include cleanup (archive/delete the old thing) in the same proposal. Don't leave orphaned pages, databases, or duplicates behind.`,
         `11. CONTEXT FIRST. Before creating anything, ALWAYS search first (Notion, memory) to check what already exists. Don't create duplicates.`,
         `12. ON-CHAIN FACTS → semantic_search FIRST. Any question about a blockchain address, chain ID, contract name, vault, or deployment config: call semantic_search before answering. Never state an address from memory. If not indexed, say so and offer to index it.`,
+        `13. DOC URLs → INDEX THEM. When a message contains a documentation URL (docs.*, *.gitbook.io, /docs, GitHub README, any technical reference link), call add_knowledge_source on it IMMEDIATELY — no approval needed, it auto-executes. Do this alongside your other actions in the same turn. This makes future partner questions answerable from memory.`,
         config.llm?.askOwner !== false ? `13. ASK BEFORE SEARCHING. If a task is ambiguous or would require more than 2 tool calls to resolve, ask ${vars.owner_name} one focused question first. A 5-word question saves more tokens than 10 tool calls.` : '',
         config.embeddings?.enabled ? `Semantic search is available — indexed sources: docs + GitHub configs.` : '',
       ].filter(Boolean).join('\n\n');

@@ -29,6 +29,8 @@ import { registerChannel, startAllChannels, stopAllChannels } from './ingestion/
 import { createTelegramChannel } from './ingestion/channels/telegram.js';
 import { createWhatsAppChannel } from './ingestion/channels/whatsapp.js';
 import { createEmailChannel } from './ingestion/channels/email.js';
+import { createSlackChannel } from './ingestion/channels/slack.js';
+import { createDiscordChannel } from './ingestion/channels/discord.js';
 import { loadKnowledge, refreshStaleKnowledge } from './knowledge/index.js';
 import { startWebApp } from './webapp/server.js';
 import { pluginRegistry } from './plugins/registry.js';
@@ -127,6 +129,19 @@ async function boot() {
   if (process.env.WHATSAPP_ENABLED === 'true' || config.secrets?.WHATSAPP_ENABLED === 'true') {
     registerChannel(createWhatsAppChannel(getDataDir()));
     log.info('WhatsApp listener registered');
+  }
+
+  if (config.channels.slack?.enabled && (process.env.SLACK_BOT_TOKEN || config.secrets?.SLACK_BOT_TOKEN)) {
+    if (config.secrets?.SLACK_BOT_TOKEN) process.env.SLACK_BOT_TOKEN = config.secrets.SLACK_BOT_TOKEN;
+    if (config.secrets?.SLACK_APP_TOKEN) process.env.SLACK_APP_TOKEN = config.secrets.SLACK_APP_TOKEN;
+    const slackChannel = createSlackChannel(config.channels.slack);
+    if (slackChannel) { registerChannel(slackChannel); log.info('Slack listener registered'); }
+  }
+
+  if (config.channels.discord?.enabled && (process.env.DISCORD_BOT_TOKEN || config.secrets?.DISCORD_BOT_TOKEN)) {
+    if (config.secrets?.DISCORD_BOT_TOKEN) process.env.DISCORD_BOT_TOKEN = config.secrets.DISCORD_BOT_TOKEN;
+    const discordChannel = createDiscordChannel(config.channels.discord);
+    if (discordChannel) { registerChannel(discordChannel); log.info('Discord listener registered'); }
   }
 
   // 7. Approval gateway — bot en priorité (notifications owner), MTProto fallback

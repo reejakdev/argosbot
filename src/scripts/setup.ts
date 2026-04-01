@@ -491,6 +491,13 @@ const LLM_CATALOG: LlmProviderEntry[] = [
     models: ['command-r-plus', 'command-r'],
   },
   {
+    id: 'qwen', label: 'Alibaba Qwen  (qwen-max, qwen-plus, qwen-turbo)',
+    provider: 'compatible', envKey: 'DASHSCOPE_API_KEY',
+    baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    keyUrl: 'dashscope.aliyuncs.com',
+    models: ['qwen-max', 'qwen-plus', 'qwen-turbo'],
+  },
+  {
     id: 'ollama', label: 'Ollama  (local — Llama, Mistral, Qwen, DeepSeek…)',
     provider: 'compatible', envKey: '',
     baseUrl: 'http://localhost:11434/v1',

@@ -380,7 +380,7 @@ async function toolIndexContent(
       return { output: 'Embeddings not enabled. Set embeddings.enabled = true in config.', error: true };
     }
 
-    const { chunkText, indexChunks } = await import('../vector/store.js');
+    const { chunkText, chunkCode, indexChunks, cleanSource } = await import('../vector/store.js');
 
     let text = '';
     let sourceRef = '';
@@ -446,10 +446,17 @@ async function toolIndexContent(
 
     // Add tags as header so they appear in chunks and aid retrieval
     const tagHeader = tags?.length ? `[tags: ${tags.join(', ')}]\n\n` : '';
-    const chunks = chunkText(tagHeader + text, sourceRef, name);
+    const fullText  = tagHeader + text;
+
+    // Use brace-aware chunker for structured files (.ts / .json / .yaml), line-based for prose
+    const isCode = /\.(ts|js|json|yaml|yml)$/.test(sourceRef);
+    const chunks = isCode
+      ? chunkCode(fullText, sourceRef, name, tags ?? [])
+      : chunkText(fullText, sourceRef, name, tags ?? []);
 
     if (chunks.length === 0) return { output: 'Content too short to index.', error: true };
 
+    await cleanSource(sourceRef); // hard-delete old chunks before re-indexing
     await indexChunks(chunks, config.embeddings);
 
     return {

@@ -121,9 +121,42 @@ const TelegramChannelSchema = z.object({
   personal: TelegramPersonalSchema,
 }).default({});
 
+// ─── Slack channel ────────────────────────────────────────────────────────────
+
+const SlackMonitoredChannelSchema = z.object({
+  channelId: z.string(),
+  name:      z.string(),
+  tags:      z.array(z.string()).default([]),
+});
+
+const SlackChannelSchema = z.object({
+  enabled:           z.boolean().default(false),
+  monitoredChannels: z.array(SlackMonitoredChannelSchema).default([]),
+  monitorDMs:        z.boolean().default(true),
+}).default({});
+
+// ─── Discord channel ──────────────────────────────────────────────────────────
+
+const DiscordMonitoredChannelSchema = z.object({
+  channelId: z.string(),
+  name:      z.string(),
+  guildId:   z.string().optional(),
+  tags:      z.array(z.string()).default([]),
+});
+
+const DiscordChannelSchema = z.object({
+  enabled:           z.boolean().default(false),
+  monitoredChannels: z.array(DiscordMonitoredChannelSchema).default([]),
+  monitoredGuildIds: z.array(z.string()).default([]),
+  monitorDMs:        z.boolean().default(true),
+}).default({});
+
+// ─── Channels ─────────────────────────────────────────────────────────────────
+
 const ChannelsSchema = z.object({
   telegram: TelegramChannelSchema,
-  // slack, discord, whatsapp, gmail — à venir
+  slack:    SlackChannelSchema,
+  discord:  DiscordChannelSchema,
 }).default({});
 
 // ─── Owner ────────────────────────────────────────────────────────────────────
