@@ -99,8 +99,24 @@ export async function ingestMessage(
     return;
   }
 
-  // Anonymize
-  const anon = anonymizer.anonymize(msg.content);
+  // Anonymize — regex pass first
+  let anon = anonymizer.anonymize(msg.content);
+
+  // LLM second pass — catches what regex missed (names, companies, project names…)
+  // Only runs if llmAnon role is configured (typically a local model via Ollama)
+  const llmAnonConfig = llmForRole('llmAnon', llmConfig, privacyConfig, config);
+  if (llmAnonConfig !== llmConfig) {
+    try {
+      const { enhanceWithLlm } = await import('../privacy/llm-anonymizer.js');
+      const enhanced = await enhanceWithLlm(anon, llmAnonConfig, { skipIfClean: false });
+      anon = enhanced;
+      if (enhanced.llmApplied > 0) {
+        log.debug(`LLM anonymizer applied ${enhanced.llmApplied} additional redactions`);
+      }
+    } catch (e) {
+      log.warn('LLM anonymizer failed, falling back to regex-only result:', e);
+    }
+  }
 
   // Populate anonText so plugins and triage have access to the anonymized version
   msg.anonText = anon.text;
