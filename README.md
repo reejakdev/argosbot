@@ -2,8 +2,7 @@
 
 > **Read by default. Sanitize before memory. Approve before action.**
 
-Argos is a local-first AI assistant for fintech/crypto operators.
-It monitors your Telegram, WhatsApp, and email — classifies messages, detects tasks, and proposes actions for your approval. Nothing executes without you.
+Argos is a local-first AI assistant that monitors your messages across Telegram, WhatsApp, email, Slack, and Discord — classifies them, detects tasks, and proposes actions for your approval. Nothing executes without you.
 
 Named after *Argos Panoptes*, the hundred-eyed giant who never slept — but acted only on orders.
 
