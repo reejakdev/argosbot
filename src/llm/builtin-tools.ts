@@ -509,7 +509,9 @@ async function toolSemanticSearch(
 async function toolMemoryStore(content: string, category?: string): Promise<{ output: string; error?: boolean }> {
   try {
     const { storeQuick } = await import('../memory/store.js');
-    const entry = storeQuick(content, category ?? 'general');
+    const { loadConfig } = await import('../config/index.js');
+    const ttlDays = loadConfig().memory?.defaultTtlDays ?? 30;
+    const entry = storeQuick(content, category ?? 'general', [], ttlDays);
     return { output: `Stored memory ${entry.id}: "${content.slice(0, 50)}"` };
   } catch (e) {
     return { output: `Memory store failed: ${e instanceof Error ? e.message : String(e)}`, error: true };

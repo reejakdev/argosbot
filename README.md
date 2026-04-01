@@ -165,12 +165,31 @@ All integrations are opt-in via `~/.argos/config.json`.
 | Telegram MTProto | `channels.telegram.listener` | Reads your messages |
 | Telegram Bot | `secrets.TELEGRAM_BOT_TOKEN` | Bot mode (no MTProto needed) |
 | WhatsApp | `secrets.WHATSAPP_ENABLED=true` | Requires QR scan on first run |
-| Email (IMAP) | `channels.email` | Gmail/Outlook compatible |
+| Email (IMAP) | `channels.email` | Gmail/Outlook compatible — read/classify |
+| Email (SMTP) | `smtp` | Send emails — requires approval before sending |
+| Discord | `secrets.DISCORD_BOT_TOKEN` | Bot reads channels you add it to |
+| Slack | `secrets.SLACK_BOT_TOKEN` | Bot reads channels it's invited to |
 | Notion | `mcpServers` → notion-mcp | Official Notion MCP server |
 | Google Calendar | `secrets.GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN` | OAuth2 |
+| Gmail (MCP) | `mcpServers` → gmail | Read, draft, send via Google OAuth |
+| Outlook (MCP) | `mcpServers` → outlook | Read, draft, send via Microsoft Graph |
+| 1Password (MCP) | `mcpServers` → 1password | Read vault secrets (service account token) |
 | Browser | `mcpServers` → puppeteer | Local headless browser |
 
-For MCP integrations (Notion, browser, Linear, etc.) — add entries to `mcpServers` in config.
+### SMTP config example
+
+```json
+"smtp": {
+  "host": "smtp.gmail.com",
+  "port": 587,
+  "secure": false,
+  "user": "you@gmail.com",
+  "password": "your_app_password",
+  "fromName": "Your Name"
+}
+```
+
+For MCP integrations — add entries to `mcpServers` in config.
 The full catalog is in `src/mcp/index.ts`.
 
 ---

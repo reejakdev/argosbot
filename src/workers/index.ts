@@ -102,6 +102,9 @@ export async function executeProposal(
         case 'telegram_list_chats':
           result = executeTelegramTool(payload.tool, payload.input);
           break;
+        case 'send_email':
+          result = await executeEmailSend(payload.input, config);
+          break;
         case 'add_knowledge_source':
           result = await executeAddKnowledgeSource(payload.input, config);
           break;
@@ -293,6 +296,14 @@ function executeDeleteCronJob(input: Record<string, unknown>): WorkerResult {
     dryRun: false,
     output: `Cron job "${name}" disabled`,
   };
+}
+
+async function executeEmailSend(
+  input: Record<string, unknown>,
+  config: Config,
+): Promise<WorkerResult> {
+  const { EmailSendWorker } = await import('./email-send.js');
+  return new EmailSendWorker(config).send(input);
 }
 
 async function executeAddKnowledgeSource(

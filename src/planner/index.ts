@@ -176,6 +176,22 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'send_email',
+    description: 'Compose and send an email via SMTP. The email will NOT be sent until the owner approves. Use for replies to email threads, outbound communication, or forwarding summaries.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        to:      { type: 'array', items: { type: 'string' }, description: 'Recipient email address(es)' },
+        cc:      { type: 'array', items: { type: 'string' }, description: 'CC addresses (optional)' },
+        subject: { type: 'string', description: 'Email subject line' },
+        body:    { type: 'string', description: 'Plain text email body' },
+        reply_to: { type: 'string', description: 'Message-ID to reply to (for threading, optional)' },
+        notes_for_owner: { type: 'string', description: 'Internal notes explaining why this email' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+  },
+  {
     name: 'add_knowledge_source',
     description: 'Index a new knowledge source (URL, raw GitHub file, GitHub repo) so Argos can search it in future replies. Use when you realize you are missing information that could be indexed from a known source.',
     input_schema: {

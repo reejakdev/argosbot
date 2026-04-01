@@ -9,7 +9,10 @@
  *
  * Current channels:
  *   - telegram (active)
- *   - whatsapp (stub — register when Baileys is configured)
+ *   - whatsapp (active — requires Baileys)
+ *   - slack    (active — requires @slack/socket-mode + @slack/web-api)
+ *   - discord  (active — requires discord.js)
+ *   - email    (active — requires imapflow)
  */
 
 import type { RawMessage } from '../../types.js';

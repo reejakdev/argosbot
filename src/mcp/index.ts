@@ -511,7 +511,48 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
     docsUrl:     'https://github.com/supabase-community/supabase-mcp',
   },
 
+  // ── Secrets / Credentials ────────────────────────────────────────────────
+  {
+    name:        '1password',
+    description: '1Password — retrieve secrets during setup only. NOT for runtime use — secrets must never reach the planner or LLM.',
+    category:    'other',
+    type:        'stdio',
+    official:    true,
+    package:     '@1password/mcp-server',
+    command:     'npx',
+    args:        ['-y', '@1password/mcp-server'],
+    envVars:     ['OP_SERVICE_ACCOUNT_TOKEN'],
+    installNote: '⚠️ Setup use only — enable to pre-fill config.json with API keys, then disable immediately. Never leave enabled at runtime (secrets would be accessible to the planner/LLM). Generate a Service Account token at 1password.com/developer with minimal vault permissions.',
+    docsUrl:     'https://developer.1password.com/docs/mcp',
+  },
+
   // ── Communication ─────────────────────────────────────────────────────────
+  {
+    name:        'gmail',
+    description: 'Gmail — read emails, create drafts, send, manage labels (official Google MCP)',
+    category:    'communication',
+    type:        'stdio',
+    official:    true,
+    package:     '@modelcontextprotocol/server-gmail',
+    command:     'npx',
+    args:        ['-y', '@modelcontextprotocol/server-gmail'],
+    envVars:     ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'],
+    installNote: 'Uses the same Google OAuth credentials as the Calendar integration',
+    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/gmail',
+  },
+  {
+    name:        'outlook',
+    description: 'Microsoft Outlook / Office 365 — read, draft, send emails via Graph API',
+    category:    'communication',
+    type:        'stdio',
+    official:    false,
+    package:     'mcp-server-outlook',
+    command:     'npx',
+    args:        ['-y', 'mcp-server-outlook'],
+    envVars:     ['MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET', 'MICROSOFT_REFRESH_TOKEN'],
+    installNote: 'Register an app at portal.azure.com → App registrations',
+    docsUrl:     'https://github.com/modelcontextprotocol/servers',
+  },
   {
     name:        'slack',
     description: 'Slack — read channels, send messages, reply to threads',

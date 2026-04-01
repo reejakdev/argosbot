@@ -31,7 +31,7 @@ export async function triageSink(
       await sinkTask(result, config, sendNotification, llmConfig);
       break;
     case 'my_reply':
-      await sinkReply(result, config, sendNotification);
+      await sinkReply(result, config, sendNotification, llmConfig);
       break;
     case 'tx_whitelist':
       await sinkTxWhitelist(result, config, sendNotification, llmConfig);
@@ -127,14 +127,7 @@ async function sinkTask(
     );
   }
 
-  // 4. Auto-index any documentation URLs found in the message body
-  if (!config.readOnly) {
-    autoIndexDocUrls(result.body, config).catch(e =>
-      log.debug(`Auto-index doc URLs failed: ${e}`),
-    );
-  }
-
-  // 5. Notification
+  // 4. Notification
   const icon   = isMyTask ? '📋' : '👥';
   const team   = result.assignee && result.assignee !== 'me' ? ` → ${result.assignee}` : '';
   const urgent = result.urgency === 'high' ? ' 🔴' : '';
@@ -235,21 +228,58 @@ async function sinkReply(
   result: TriageResult,
   config: Config,
   notify: (text: string) => Promise<void>,
+  llmConfig?: LLMConfig,
 ): Promise<void> {
   const db  = getDb();
   const now = Date.now();
   const id  = ulid();
 
-  // Create a proposal so the owner can approve the reply from the web app
+  // Generate a proper RAG-backed draft (same pipeline as my_task) when LLM available
+  // Falls back to raw body placeholder so the proposal is never empty
+  let draft = `[Draft — review before sending]\n\n${result.body}`;
+
+  if (llmConfig && !config.readOnly) {
+    try {
+      // Re-use generateDraftReply — fires async, stores proposal separately.
+      // Here we want the draft inline, so we call the LLM directly with the same
+      // memory+knowledge context that generateDraftReply builds.
+      const { llmCall }   = await import('../llm/index.js');
+      const { search }    = await import('../memory/store.js');
+      const ownerName     = config.owner?.name ?? 'the owner';
+
+      const memories = search({ query: result.body, partnerName: result.partner, limit: 5 });
+      const memCtx   = memories.length
+        ? `\n\nRelevant context:\n${memories.map(m => `- ${m.content}`).join('\n')}`
+        : '';
+
+      let knowledgeCtx = '';
+      try {
+        const { hybridSearch } = await import('../vector/store.js');
+        const embCfg = (config as unknown as { embeddings?: import('../config/schema.js').EmbeddingsConfig }).embeddings;
+        if (embCfg?.enabled) {
+          const hits = await hybridSearch(result.body, embCfg, { topK: 3, minSimilarity: 0.2 });
+          if (hits.length) knowledgeCtx = `\n\nRelevant knowledge:\n${hits.map(r => r.chunk.content).join('\n\n').slice(0, 4000)}`;
+        }
+      } catch { /* vector store optional */ }
+
+      const response = await llmCall(llmConfig, [
+        {
+          role: 'system',
+          content: `You are ${ownerName}. Write a reply IN FIRST PERSON. Same language as the partner. No greeting, no subject — just the message body. If specific data is in context, include it. Otherwise say you'll follow up.${memCtx}${knowledgeCtx}`,
+        },
+        { role: 'user', content: `Partner: ${result.partner}\nTheir message: ${result.body}` },
+      ]);
+
+      if (response.content.trim()) draft = response.content.trim();
+    } catch (e) {
+      log.warn(`sinkReply: draft generation failed, using placeholder: ${e}`);
+    }
+  }
+
   const actions = JSON.stringify([{
     tool:    'draft_reply',
-    input:   {
-      to:      result.partner,
-      content: `[Draft — review before sending]\n\n${result.body}`,
-      urgency: result.urgency,
-      notes_for_owner: `Triage detected you were tagged in this message and a reply is needed.`,
-    },
-    description: `Draft reply to ${result.partner}`,
+    input:   { to: result.partner, content: draft, urgency: result.urgency },
+    description: `Reply to ${result.partner}`,
   }]);
 
   db.prepare(`
@@ -260,9 +290,9 @@ async function sinkReply(
     `[Triage] Reply needed — ${result.partner}: ${result.title}`,
     result.body,
     actions,
-    result.body,
+    draft,
     now,
-    now + 24 * 60 * 60 * 1000, // 24h expiry
+    now + 24 * 60 * 60 * 1000,
   );
 
   log.info(`Reply proposal created: ${id} — "${result.title.slice(0, 50)}"`);
@@ -270,7 +300,7 @@ async function sinkReply(
 
   const urgent = result.urgency === 'high' ? ' 🔴' : '';
   await notify(
-    `💬 *Reply needed — ${result.partner}*${urgent}\n${result.title}\n\n_Proposal \`${id.slice(-8)}\` — approve in the web app_`,
+    `💬 *Reply needed — ${result.partner}*${urgent}\n${result.title}\n\n_"${draft.slice(0, 180)}"_\n\n_Proposal \`${id.slice(-8)}\` — approve in the web app_`,
   ).catch(() => {});
 }
 
@@ -391,3 +421,4 @@ async function sinkTxWhitelist(
     `🔐 *Whitelist request — ${result.partner}*\n${result.title}${addrNote}${verifLine}\n\n_Proposal \`${id.slice(-8)}\` — review in web app_`,
   ).catch(() => {});
 }
+

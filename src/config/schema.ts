@@ -319,6 +319,21 @@ const CalendarSchema = z.object({
   calendarId: z.string().default('primary'),
 });
 
+// ─── SMTP (email sending) ─────────────────────────────────────────────────────
+
+const SmtpSchema = z.object({
+  /** SMTP host — e.g. smtp.gmail.com, smtp.office365.com */
+  host:     z.string(),
+  port:     z.number().default(587),
+  secure:   z.boolean().default(false),   // true = port 465, false = STARTTLS
+  user:     z.string(),
+  password: z.string(),
+  /** From address — defaults to user if not set */
+  from:     z.string().optional(),
+  /** Display name shown in From header */
+  fromName: z.string().optional(),
+});
+
 // ─── Web app ──────────────────────────────────────────────────────────────────
 
 const WebAppSchema = z.object({
@@ -393,6 +408,7 @@ export const ConfigSchema = z.object({
   approval:   ApprovalSchema.default({}),
   notion:     NotionSchema.optional(),
   calendar:   CalendarSchema.optional(),
+  smtp:       SmtpSchema.optional(),
   // MCP servers — tools externes disponibles au planner
   mcpServers: z.array(McpServerSchema).default([]),
   // Skills built-in

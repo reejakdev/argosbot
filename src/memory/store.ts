@@ -99,10 +99,9 @@ export function store(
 
 // ─── Quick store — simplified interface for bot auto-memorize ─────────────────
 
-export function storeQuick(content: string, category: string, tags: string[] = []): MemoryEntry {
+export function storeQuick(content: string, category: string, tags: string[] = [], ttlDays = 30): MemoryEntry {
   const db = getDb();
   const now = Date.now();
-  const ttlDays = 30;
   const expiresAt = now + ttlDays * 24 * 60 * 60 * 1000;
 
   const entry: MemoryEntry = {
