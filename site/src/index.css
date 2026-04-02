@@ -5,18 +5,19 @@
 @tailwind utilities;
 
 :root {
-  --bg:       #060b1f;
-  --bg2:      #0a1020;
-  --surface:  #0d1530;
-  --surface2: #111b3a;
-  --border:   rgba(79,110,255,0.15);
+  --bg:       #faf9f7;
+  --bg2:      #f2f0ec;
+  --surface:  #ffffff;
+  --surface2: #f7f6f3;
+  --border:   rgba(0,0,0,0.08);
   --blue:     #4f6eff;
-  --blue2:    #7b96ff;
-  --green:    #10b981;
-  --red:      #ef4444;
-  --yellow:   #f59e0b;
-  --text:     #f0f4ff;
-  --text2:    #94a3b8;
+  --blue2:    #3a56e8;
+  --green:    #059669;
+  --red:      #dc2626;
+  --yellow:   #d97706;
+  --text:     #0f1117;
+  --text2:    #6b7280;
+  --text3:    #9ca3af;
 }
 
 * {
@@ -41,19 +42,6 @@ body {
   min-height: 100vh;
 }
 
-/* Subtle noise texture overlay */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  background-size: 200px 200px;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.4;
-}
-
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 4px;
@@ -66,48 +54,48 @@ body::before {
   border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(79, 110, 255, 0.6);
+  background: rgba(79, 110, 255, 0.5);
 }
 
-/* Clean card — replaces hud-card */
+/* Clean card */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
 }
 
 .card-elevated {
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
 }
 
-/* Legacy alias — keep hud-card mapping to card for components not yet updated */
+/* Legacy alias */
 .hud-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
 }
 
 .hud-card-green {
-  border-color: rgba(16, 185, 129, 0.2);
+  border-color: rgba(5,150,105,0.2);
 }
 
 .hud-card-red {
-  border-color: rgba(239, 68, 68, 0.2);
+  border-color: rgba(220,38,38,0.2);
 }
 
 /* Section label style */
 .section-label {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'JetBrains Mono', 'Courier New', Courier, monospace;
   font-size: 0.75rem;
   font-weight: 600;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--blue2);
+  color: var(--blue);
 }
 
 /* Gradient text */
@@ -136,7 +124,7 @@ body::before {
 
 /* Selection color */
 ::selection {
-  background: rgba(79, 110, 255, 0.2);
+  background: rgba(79, 110, 255, 0.15);
   color: var(--blue2);
 }
 

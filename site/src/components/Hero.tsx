@@ -3,9 +3,9 @@ import { ArrowRight, GitBranch, Shield } from 'lucide-react'
 
 const channels = [
   { label: 'Telegram', angle: -90,  color: '#4f6eff' },
-  { label: 'WhatsApp', angle: -18,  color: '#7b96ff' },
+  { label: 'WhatsApp', angle: -18,  color: '#3a56e8' },
   { label: 'Email',    angle:  54,  color: '#4f6eff' },
-  { label: 'Discord',  angle: 126,  color: '#7b96ff' },
+  { label: 'Discord',  angle: 126,  color: '#3a56e8' },
   { label: 'Slack',    angle: 198,  color: '#4f6eff' },
 ]
 
@@ -31,7 +31,7 @@ function HUDDiagram() {
           <motion.circle
             cx={0} cy={0} r={r1}
             fill="none"
-            stroke="rgba(79,110,255,0.2)"
+            stroke="rgba(79,110,255,0.25)"
             strokeWidth="1"
             strokeDasharray="5 4"
             animate={{ rotate: 360 }}
@@ -55,7 +55,7 @@ function HUDDiagram() {
                   key={i}
                   x1={inner * Math.cos(a)} y1={inner * Math.sin(a)}
                   x2={outer * Math.cos(a)} y2={outer * Math.sin(a)}
-                  stroke="rgba(79,110,255,0.22)"
+                  stroke="rgba(79,110,255,0.3)"
                   strokeWidth={isMajor ? 1.5 : 0.8}
                 />
               )
@@ -66,7 +66,7 @@ function HUDDiagram() {
           <motion.circle
             cx={0} cy={0} r={r2}
             fill="none"
-            stroke="rgba(123,150,255,0.15)"
+            stroke="rgba(79,110,255,0.2)"
             strokeWidth="1"
             strokeDasharray="3 7"
             animate={{ rotate: -360 }}
@@ -78,7 +78,7 @@ function HUDDiagram() {
           <circle
             cx={0} cy={0} r={r3}
             fill="rgba(79,110,255,0.04)"
-            stroke="rgba(79,110,255,0.35)"
+            stroke="rgba(79,110,255,0.4)"
             strokeWidth="1.5"
           />
 
@@ -109,7 +109,7 @@ function HUDDiagram() {
                   x1={0} y1={0} x2={nx} y2={ny}
                   stroke={ch.color}
                   strokeWidth="0.6"
-                  strokeOpacity="0.2"
+                  strokeOpacity="0.25"
                   strokeDasharray="3 3"
                 />
                 <motion.circle
@@ -127,7 +127,7 @@ function HUDDiagram() {
                   fill={ch.color}
                   fontSize="9"
                   fontFamily="JetBrains Mono, Courier New"
-                  opacity="0.8"
+                  opacity="0.85"
                   style={{ userSelect: 'none' }}
                 >
                   {ch.label}
@@ -143,7 +143,7 @@ function HUDDiagram() {
       <div
         className="absolute inset-0 rounded-full pointer-events-none"
         style={{
-          background: 'radial-gradient(circle at center, rgba(79,110,255,0.07) 0%, transparent 65%)',
+          background: 'transparent',
         }}
       />
     </div>
@@ -156,7 +156,7 @@ export default function Hero() {
       id="hero"
       className="relative min-h-screen flex items-center pt-16 overflow-hidden"
       style={{
-        background: 'radial-gradient(ellipse at 70% 50%, rgba(79,110,255,0.06) 0%, transparent 60%)',
+        background: 'transparent',
       }}
     >
       <div className="max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-16 items-center w-full py-20">
@@ -172,8 +172,8 @@ export default function Hero() {
             <div
               className="flex items-center gap-2 px-3 py-1.5 rounded-full"
               style={{
-                border: '1px solid rgba(16,185,129,0.3)',
-                background: 'rgba(16,185,129,0.06)',
+                border: '1px solid rgba(5,150,105,0.3)',
+                background: 'rgba(5,150,105,0.06)',
               }}
             >
               <div className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
@@ -183,11 +183,11 @@ export default function Hero() {
               className="flex items-center gap-2 px-3 py-1.5 rounded-full"
               style={{
                 border: '1px solid rgba(79,110,255,0.25)',
-                background: 'rgba(79,110,255,0.06)',
+                background: 'rgba(79,110,255,0.05)',
               }}
             >
-              <Shield size={11} style={{ color: '#7b96ff' }} />
-              <span className="text-xs font-semibold" style={{ color: '#7b96ff' }}>Privacy-First</span>
+              <Shield size={11} style={{ color: '#4f6eff' }} />
+              <span className="text-xs font-semibold" style={{ color: '#4f6eff' }}>Privacy-First</span>
             </div>
           </motion.div>
 
@@ -196,12 +196,13 @@ export default function Hero() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3, duration: 0.7 }}
             className="text-4xl lg:text-5xl xl:text-6xl font-bold leading-tight mb-6"
+            style={{ color: '#0f1117' }}
           >
             Your messages.{' '}
             <span className="gradient-text">Monitored.</span>
             <br />
             Your actions.{' '}
-            <span style={{ color: '#10b981' }}>Approved by you.</span>
+            <span style={{ color: '#059669' }}>Approved by you.</span>
           </motion.h1>
 
           <motion.p
@@ -212,7 +213,7 @@ export default function Hero() {
           >
             Argos watches your Telegram, WhatsApp, Email, Discord, and Slack —
             classifies every message, drafts responses, and{' '}
-            <span className="text-text font-medium">never acts without your explicit approval.</span>
+            <span className="font-medium" style={{ color: '#374151' }}>never acts without your explicit approval.</span>
           </motion.p>
 
           <motion.p
@@ -221,16 +222,16 @@ export default function Hero() {
             transition={{ delay: 0.6 }}
             className="text-sm mb-8 leading-relaxed"
             style={{
-              color: 'rgba(148,163,184,0.75)',
+              color: '#6b7280',
               borderLeft: '2px solid rgba(79,110,255,0.3)',
               paddingLeft: '1rem',
               fontFamily: 'JetBrains Mono, Courier New, monospace',
             }}
           >
             All PII anonymized before any LLM sees it. Cloud models only see{' '}
-            <span style={{ color: '#7b96ff' }}>[PERSON_1]</span>,{' '}
-            <span style={{ color: '#7b96ff' }}>[AMOUNT_1]</span>,{' '}
-            <span style={{ color: '#7b96ff' }}>[ADDR_1]</span>.{' '}
+            <span style={{ color: '#4f6eff' }}>[PERSON_1]</span>,{' '}
+            <span style={{ color: '#4f6eff' }}>[AMOUNT_1]</span>,{' '}
+            <span style={{ color: '#4f6eff' }}>[ADDR_1]</span>.{' '}
             <span className="text-text2">Never the real thing.</span>
           </motion.p>
 
@@ -246,15 +247,15 @@ export default function Hero() {
               style={{
                 background: '#4f6eff',
                 color: '#fff',
-                boxShadow: '0 4px 20px rgba(79,110,255,0.3)',
+                boxShadow: '0 4px 16px rgba(79,110,255,0.25)',
               }}
               onMouseEnter={e => {
-                (e.currentTarget as HTMLElement).style.background = '#6279ff'
-                ;(e.currentTarget as HTMLElement).style.boxShadow = '0 6px 28px rgba(79,110,255,0.45)'
+                (e.currentTarget as HTMLElement).style.background = '#3a56e8'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = '0 6px 24px rgba(79,110,255,0.35)'
               }}
               onMouseLeave={e => {
                 (e.currentTarget as HTMLElement).style.background = '#4f6eff'
-                ;(e.currentTarget as HTMLElement).style.boxShadow = '0 4px 20px rgba(79,110,255,0.3)'
+                ;(e.currentTarget as HTMLElement).style.boxShadow = '0 4px 16px rgba(79,110,255,0.25)'
               }}
             >
               Get Started <ArrowRight size={15} />
@@ -265,17 +266,17 @@ export default function Hero() {
               rel="noopener noreferrer"
               className="flex items-center gap-2 px-6 py-3 text-sm font-medium rounded-md transition-all duration-200"
               style={{
-                border: '1px solid rgba(79,110,255,0.25)',
-                color: '#7b96ff',
-                background: 'rgba(79,110,255,0.06)',
+                border: '1px solid rgba(79,110,255,0.3)',
+                color: '#4f6eff',
+                background: '#ffffff',
               }}
               onMouseEnter={e => {
-                (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.12)'
-                ;(e.currentTarget as HTMLElement).style.borderColor = 'rgba(79,110,255,0.45)'
+                (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.05)'
+                ;(e.currentTarget as HTMLElement).style.borderColor = 'rgba(79,110,255,0.5)'
               }}
               onMouseLeave={e => {
-                (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.06)'
-                ;(e.currentTarget as HTMLElement).style.borderColor = 'rgba(79,110,255,0.25)'
+                (e.currentTarget as HTMLElement).style.background = '#ffffff'
+                ;(e.currentTarget as HTMLElement).style.borderColor = 'rgba(79,110,255,0.3)'
               }}
             >
               <GitBranch size={15} /> View on GitHub
@@ -287,7 +288,7 @@ export default function Hero() {
             animate={{ opacity: 1 }}
             transition={{ delay: 1 }}
             className="flex items-center gap-8 mt-10 pt-8"
-            style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
+            style={{ borderTop: '1px solid rgba(0,0,0,0.08)' }}
           >
             {[
               { val: '5',    label: 'Channels' },
@@ -298,7 +299,7 @@ export default function Hero() {
               <div key={stat.label}>
                 <div
                   className="text-2xl font-bold font-mono"
-                  style={{ color: stat.highlight ? '#10b981' : '#7b96ff' }}
+                  style={{ color: stat.highlight ? '#059669' : '#4f6eff' }}
                 >
                   {stat.val}
                 </div>
@@ -323,7 +324,7 @@ export default function Hero() {
       {/* Bottom fade */}
       <div
         className="absolute bottom-0 left-0 right-0 h-32 pointer-events-none"
-        style={{ background: 'linear-gradient(transparent, rgba(6,11,31,0.9))' }}
+        style={{ background: 'linear-gradient(transparent, rgba(250,249,247,0.9))' }}
       />
     </section>
   )

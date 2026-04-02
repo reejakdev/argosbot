@@ -72,8 +72,8 @@ const categories = [
 ]
 
 const statusStyle = {
-  live: { dot: '#10b981', text: '#f0f4ff', border: 'rgba(16,185,129,0.15)' },
-  v2:   { dot: '#94a3b8', text: '#94a3b8', border: 'rgba(148,163,184,0.1)' },
+  live: { dot: '#10b981', text: 'var(--text)', border: 'rgba(16,185,129,0.15)' },
+  v2:   { dot: '#6b7280', text: '#6b7280', border: 'rgba(148,163,184,0.1)' },
 }
 
 export default function Integrations() {
@@ -94,7 +94,7 @@ export default function Integrations() {
           className="mb-14"
         >
           <div className="section-label mb-3">Integrations</div>
-          <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
+          <h2 className="text-3xl lg:text-4xl font-bold text-text mb-4">
             Every tool in your context
           </h2>
           <p className="text-text2 max-w-xl leading-relaxed">

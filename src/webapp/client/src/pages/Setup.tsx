@@ -130,7 +130,7 @@ export default function Setup({ onComplete }: SetupProps) {
         {/* Logo */}
         <div className="flex flex-col items-center gap-3 mb-8">
           <EyeIcon size={48} />
-          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: '1.25rem', fontWeight: 700, letterSpacing: '0.18em', color: '#f0f4ff' }}>
+          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: '1.25rem', fontWeight: 700, letterSpacing: '0.18em', color: '#0f1117' }}>
             ARGOS
           </div>
           <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.6rem', letterSpacing: '0.15em', color: 'var(--text2)' }}>
@@ -138,7 +138,7 @@ export default function Setup({ onComplete }: SetupProps) {
           </div>
         </div>
 
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem', boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }}>
+        <div style={{ background: '#ffffff', border: '1px solid rgba(0,0,0,0.08)', borderRadius: '12px', padding: '1.5rem', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
           <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.6rem', letterSpacing: '0.12em', color: 'var(--text2)', textTransform: 'uppercase', marginBottom: '1.25rem' }}>
             Register Authentication Method
           </p>
@@ -155,8 +155,8 @@ export default function Setup({ onComplete }: SetupProps) {
                   fontSize: '0.8125rem',
                   fontWeight: method === m ? 600 : 400,
                   padding: '0.6rem',
-                  background: method === m ? 'rgba(79,110,255,0.12)' : 'transparent',
-                  color: method === m ? '#f0f4ff' : 'var(--text2)',
+                  background: method === m ? 'rgba(79,110,255,0.08)' : '#ffffff',
+                  color: method === m ? '#0f1117' : 'var(--text2)',
                   border: `1px solid ${method === m ? 'rgba(79,110,255,0.4)' : 'var(--border)'}`,
                   borderRadius: '6px',
                   cursor: 'pointer',
@@ -178,10 +178,10 @@ export default function Setup({ onComplete }: SetupProps) {
                 onChange={(e) => setDeviceName(e.target.value)}
                 style={{
                   width: '100%',
-                  background: 'rgba(0,0,0,0.3)',
-                  border: '1px solid var(--border)',
+                  background: '#ffffff',
+                  border: '1px solid rgba(0,0,0,0.1)',
                   borderRadius: '6px',
-                  color: 'var(--text)',
+                  color: '#0f1117',
                   fontFamily: "'Inter', sans-serif",
                   fontSize: '0.875rem',
                   padding: '0.65rem 0.875rem',
@@ -234,10 +234,10 @@ export default function Setup({ onComplete }: SetupProps) {
                 onKeyDown={(e) => e.key === 'Enter' && verifyTotp()}
                 style={{
                   width: '100%',
-                  background: 'rgba(0,0,0,0.3)',
-                  border: '1px solid var(--border)',
+                  background: '#ffffff',
+                  border: '1px solid rgba(0,0,0,0.1)',
                   borderRadius: '6px',
-                  color: '#7b96ff',
+                  color: '#4f6eff',
                   fontFamily: "'JetBrains Mono', monospace",
                   fontSize: '1.4rem',
                   letterSpacing: '0.3em',

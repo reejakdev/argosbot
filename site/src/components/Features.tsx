@@ -80,7 +80,7 @@ export default function Features() {
           className="mb-14"
         >
           <div className="section-label mb-3">Capabilities</div>
-          <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
+          <h2 className="text-3xl lg:text-4xl font-bold text-text mb-4">
             Everything you need.{' '}
             <span className="gradient-text">Nothing you don't.</span>
           </h2>
@@ -117,7 +117,7 @@ export default function Features() {
                 >
                   <Icon size={17} style={{ color: feature.color }} />
                 </div>
-                <h3 className="font-semibold text-white mb-2">{feature.title}</h3>
+                <h3 className="font-semibold text-text mb-2">{feature.title}</h3>
                 <p className="text-text2 text-sm leading-relaxed">{feature.desc}</p>
               </motion.div>
             )

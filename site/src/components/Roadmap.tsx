@@ -98,7 +98,7 @@ function RoadmapColumn({
             <div className="text-xs font-semibold tracking-wide" style={{ color, opacity: 0.75 }}>
               {version}
             </div>
-            <div className="font-semibold text-white text-sm">{title}</div>
+            <div className="font-semibold text-text text-sm">{title}</div>
           </div>
           <span className="ml-auto text-xs font-mono text-text2">{items.length} items</span>
         </div>
@@ -117,7 +117,7 @@ function RoadmapColumn({
               size={13}
               style={{ color, flexShrink: 0, opacity: version === 'v1 — DONE' ? 1 : 0.4 }}
             />
-            <span style={{ color: version === 'v1 — DONE' ? '#f0f4ff' : '#94a3b8' }}>{item}</span>
+            <span style={{ color: version === 'v1 — DONE' ? 'var(--text)' : '#6b7280' }}>{item}</span>
           </motion.div>
         ))}
       </div>
@@ -142,7 +142,7 @@ export default function Roadmap() {
           className="mb-14"
         >
           <div className="section-label mb-3">Roadmap</div>
-          <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
+          <h2 className="text-3xl lg:text-4xl font-bold text-text mb-4">
             Built in the open.{' '}
             <span className="gradient-text">Shipped iteratively.</span>
           </h2>
@@ -173,7 +173,7 @@ export default function Roadmap() {
             title="Multi-user / Enterprise"
             version="v3 — FUTURE"
             items={v3Future}
-            color="#94a3b8"
+            color="#6b7280"
             icon={Hexagon}
             index={2}
           />

@@ -34,7 +34,7 @@ export default function Philosophy() {
       className="py-24"
       style={{
         borderTop: '1px solid rgba(79,110,255,0.08)',
-        background: 'linear-gradient(to bottom, rgba(13,21,48,0.4), transparent)',
+        background: 'var(--bg2)',
       }}
     >
       <div className="max-w-7xl mx-auto px-6">
@@ -45,7 +45,7 @@ export default function Philosophy() {
           className="mb-14 text-center"
         >
           <div className="section-label mb-3 text-center">Philosophy</div>
-          <h2 className="text-3xl lg:text-4xl font-bold text-white mb-8">Design Principles</h2>
+          <h2 className="text-3xl lg:text-4xl font-bold text-text mb-8">Design Principles</h2>
 
           {/* Quote block */}
           <motion.div
@@ -62,7 +62,7 @@ export default function Philosophy() {
                 boxShadow: '0 4px 32px rgba(0,0,0,0.4)',
               }}
             >
-              <blockquote className="text-xl lg:text-2xl font-light text-white leading-relaxed italic">
+              <blockquote className="text-xl lg:text-2xl font-light text-text leading-relaxed italic">
                 "Named after Argos Panoptes — the hundred-eyed giant of Greek mythology who never slept
                 and guarded everything — but acted only on Zeus's orders."
               </blockquote>
@@ -101,7 +101,7 @@ export default function Philosophy() {
                 >
                   <Icon size={20} style={{ color: p.color }} />
                 </div>
-                <h3 className="font-semibold text-white text-lg mb-3">{p.title}</h3>
+                <h3 className="font-semibold text-text text-lg mb-3">{p.title}</h3>
                 <p className="text-text2 text-sm leading-relaxed">{p.desc}</p>
               </motion.div>
             )

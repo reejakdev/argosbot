@@ -147,11 +147,11 @@ export default function Proposals() {
           <div
             key={p.id}
             style={{
-              background: 'var(--surface)',
-              border: '1px solid var(--border)',
+              background: '#ffffff',
+              border: '1px solid rgba(0,0,0,0.08)',
               borderRadius: '8px',
               padding: '1rem',
-              boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
             }}
           >
             {/* Header row */}
@@ -175,7 +175,7 @@ export default function Proposals() {
             {/* Context summary */}
             <p
               className="text-sm leading-relaxed mb-3"
-              style={{ color: '#f0f4ff', fontFamily: "'Inter', sans-serif" }}
+              style={{ color: '#0f1117', fontFamily: "'Inter', sans-serif" }}
             >
               {p.context_summary}
             </p>
@@ -209,7 +209,7 @@ export default function Proposals() {
                   borderRadius: '0 6px 6px 0',
                 }}
               >
-                <div className="label-mono mb-1" style={{ color: 'rgba(123,150,255,0.7)' }}>Draft Reply</div>
+                <div className="label-mono mb-1">Draft Reply</div>
                 <p
                   className="text-xs italic"
                   style={{
@@ -245,9 +245,9 @@ export default function Proposals() {
                               fontFamily: "'JetBrains Mono', monospace",
                               fontSize: '0.6rem',
                               fontWeight: 700,
-                              color: '#7b96ff',
-                              background: 'rgba(79,110,255,0.1)',
-                              border: '1px solid rgba(79,110,255,0.2)',
+                              color: '#4f6eff',
+                              background: 'rgba(79,110,255,0.08)',
+                              border: '1px solid rgba(79,110,255,0.18)',
                               borderRadius: '3px',
                               padding: '0.1rem 0.4rem',
                               letterSpacing: '0.04em',
@@ -258,7 +258,7 @@ export default function Proposals() {
                         )}
                         <span
                           className="text-xs"
-                          style={{ color: '#f0f4ff', fontFamily: "'Inter', sans-serif" }}
+                          style={{ color: '#0f1117', fontFamily: "'Inter', sans-serif" }}
                         >
                           {a.description}
                         </span>

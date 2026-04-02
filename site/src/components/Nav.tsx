@@ -33,8 +33,8 @@ export default function Nav() {
           : 'bg-transparent'
       }`}
       style={scrolled ? {
-        background: 'rgba(6,11,31,0.92)',
-        borderColor: 'rgba(79,110,255,0.12)',
+        background: 'rgba(250,249,247,0.95)',
+        borderColor: 'rgba(0,0,0,0.08)',
       } : {}}
     >
       <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-16">
@@ -65,15 +65,15 @@ export default function Nav() {
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium transition-all duration-200 rounded-md"
             style={{
               border: '1px solid rgba(79,110,255,0.3)',
-              color: '#7b96ff',
-              background: 'rgba(79,110,255,0.06)',
+              color: '#4f6eff',
+              background: 'rgba(79,110,255,0.05)',
             }}
             onMouseEnter={e => {
-              (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.12)'
+              (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.1)'
               ;(e.currentTarget as HTMLElement).style.borderColor = 'rgba(79,110,255,0.5)'
             }}
             onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.06)'
+              (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.05)'
               ;(e.currentTarget as HTMLElement).style.borderColor = 'rgba(79,110,255,0.3)'
             }}
           >
@@ -100,8 +100,8 @@ export default function Nav() {
             exit={{ opacity: 0, height: 0 }}
             className="md:hidden backdrop-blur-xl border-b"
             style={{
-              background: 'rgba(10,16,32,0.97)',
-              borderColor: 'rgba(79,110,255,0.12)',
+              background: 'rgba(250,249,247,0.98)',
+              borderColor: 'rgba(0,0,0,0.08)',
             }}
           >
             <div className="px-6 py-4 flex flex-col gap-4">
@@ -120,7 +120,7 @@ export default function Nav() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 text-sm font-medium"
-                style={{ color: '#7b96ff' }}
+                style={{ color: '#4f6eff' }}
               >
                 <GitBranch size={14} />
                 GitHub

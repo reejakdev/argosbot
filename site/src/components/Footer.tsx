@@ -15,7 +15,7 @@ export default function Footer() {
     <footer
       style={{
         borderTop: '1px solid rgba(79,110,255,0.12)',
-        background: 'rgba(10,16,32,0.6)',
+        background: '#f2f0ec',
       }}
     >
       <div className="max-w-7xl mx-auto px-6 py-16">
@@ -27,7 +27,7 @@ export default function Footer() {
                 className="w-2.5 h-2.5 rounded-full bg-green animate-pulse"
               />
               <span
-                className="font-semibold text-lg text-white tracking-widest"
+                className="font-semibold text-lg text-text tracking-widest"
                 style={{ letterSpacing: '0.25em' }}
               >
                 ARGOS

@@ -91,7 +91,7 @@ export default function Setup() {
           className="mb-14"
         >
           <div className="section-label mb-3">Setup</div>
-          <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
+          <h2 className="text-3xl lg:text-4xl font-bold text-text mb-4">
             Running in{' '}
             <span className="gradient-text">under 5 minutes</span>
           </h2>
@@ -136,7 +136,7 @@ export default function Setup() {
                     <div className="pt-1">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-xs font-medium text-text2/40 tracking-wide">STEP {i + 1}</span>
-                        <h3 className="font-semibold text-white">{step.title}</h3>
+                        <h3 className="font-semibold text-text">{step.title}</h3>
                       </div>
                       <p className="text-text2 text-sm leading-relaxed">{step.desc}</p>
                     </div>

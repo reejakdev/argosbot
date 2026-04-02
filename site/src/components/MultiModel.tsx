@@ -46,7 +46,7 @@ export default function MultiModel() {
     <section
       id="models"
       className="py-24"
-      style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+      style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -56,7 +56,7 @@ export default function MultiModel() {
           className="mb-14"
         >
           <div className="section-label mb-3">Multi-Model</div>
-          <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
+          <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#0f1117' }}>
             15+ LLM providers.{' '}
             <span className="gradient-text">One config.</span>
           </h2>
@@ -80,12 +80,12 @@ export default function MultiModel() {
                 style={{
                   background: 'var(--surface)',
                   border: '1px solid var(--border)',
-                  boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
                 }}
               >
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-2 h-2 rounded-full" style={{ background: '#4f6eff' }} />
-                  <span className="text-sm font-semibold text-white">Primary LLM</span>
+                  <span className="text-sm font-semibold" style={{ color: '#0f1117' }}>Primary LLM</span>
                   <Badge label="cloud" variant="cloud" />
                 </div>
                 <p className="text-text2 text-sm">
@@ -96,13 +96,13 @@ export default function MultiModel() {
                 className="rounded-lg p-4"
                 style={{
                   background: 'var(--surface)',
-                  border: '1px solid rgba(16,185,129,0.2)',
-                  boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+                  border: '1px solid rgba(5,150,105,0.2)',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
                 }}
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <div className="w-2 h-2 rounded-full" style={{ background: '#10b981' }} />
-                  <span className="text-sm font-semibold text-white">Local LLM</span>
+                  <div className="w-2 h-2 rounded-full" style={{ background: '#059669' }} />
+                  <span className="text-sm font-semibold" style={{ color: '#0f1117' }}>Local LLM</span>
                   <Badge label="local" variant="local" />
                 </div>
                 <p className="text-text2 text-sm">
@@ -114,12 +114,12 @@ export default function MultiModel() {
                 style={{
                   background: 'var(--surface)',
                   border: '1px solid var(--border)',
-                  boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
                 }}
               >
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-2 h-2 rounded-full bg-text2" />
-                  <span className="text-sm font-semibold text-white">Fallback LLM</span>
+                  <span className="text-sm font-semibold" style={{ color: '#0f1117' }}>Fallback LLM</span>
                   <Badge label="cloud" variant="cloud" />
                 </div>
                 <p className="text-text2 text-sm">
@@ -148,17 +148,17 @@ export default function MultiModel() {
             style={{
               background: 'var(--surface)',
               border: '1px solid var(--border)',
-              boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
             }}
           >
             <div
               className="px-4 py-3 border-b flex items-center gap-2"
-              style={{ borderColor: 'rgba(79,110,255,0.1)' }}
+              style={{ borderColor: 'rgba(0,0,0,0.06)' }}
             >
-              <div className="text-xs font-semibold tracking-wide" style={{ color: '#7b96ff' }}>SUPPORTED PROVIDERS</div>
+              <div className="text-xs font-semibold tracking-wide" style={{ color: '#4f6eff' }}>SUPPORTED PROVIDERS</div>
               <span className="ml-auto text-xs text-text2 font-mono">{providers.length} total</span>
             </div>
-            <div style={{ borderColor: 'rgba(79,110,255,0.06)' }}>
+            <div>
               {providers.map((p, i) => (
                 <motion.div
                   key={p.name}
@@ -167,12 +167,12 @@ export default function MultiModel() {
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.04 }}
                   className="flex items-center justify-between px-4 py-3 transition-colors"
-                  style={{ borderBottom: i < providers.length - 1 ? '1px solid rgba(79,110,255,0.06)' : 'none' }}
-                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.04)'}
+                  style={{ borderBottom: i < providers.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}
+                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.03)'}
                   onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
                 >
                   <div>
-                    <div className="text-white text-sm font-medium">{p.name}</div>
+                    <div className="text-sm font-medium" style={{ color: '#0f1117' }}>{p.name}</div>
                     <div className="text-text2 text-xs mt-0.5">{p.notes}</div>
                   </div>
                   <Badge

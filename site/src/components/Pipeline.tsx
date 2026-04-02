@@ -24,7 +24,7 @@ const steps = [
     desc: 'Regex fast-screen catches 10+ injection patterns instantly. Suspicious content gets a deeper LLM scan. Injections are quarantined and flagged before anything else runs.',
     badge: 'local',
     badgeLabel: 'local',
-    color: '#10b981',
+    color: '#059669',
   },
   {
     num: '03',
@@ -33,7 +33,7 @@ const steps = [
     desc: 'ETH/BTC/SOL addresses, tx hashes, ENS names, exact amounts, emails, phone numbers — all replaced with typed placeholders like [ADDR_1] and [AMT_10K-100K_USDC]. A local lookup table holds the real values, never sent anywhere.',
     badge: 'local',
     badgeLabel: 'local',
-    color: '#10b981',
+    color: '#059669',
   },
   {
     num: '04',
@@ -60,7 +60,7 @@ const steps = [
     desc: 'Every proposal hits your approval queue. You review, accept, or reject via the WebAuthn dashboard (YubiKey, passkey, or TOTP). High-risk actions require a fresh cryptographic assertion bound to the proposal ID.',
     badge: 'human',
     badgeLabel: 'human',
-    color: '#ef4444',
+    color: '#dc2626',
   },
 ]
 
@@ -82,7 +82,7 @@ function StepCard({ step, index }: { step: typeof steps[0]; index: number }) {
             <div
               className="w-10 h-10 rounded-lg flex items-center justify-center"
               style={{
-                background: `${step.color}12`,
+                background: `${step.color}10`,
                 border: `1px solid ${step.color}25`,
               }}
             >
@@ -91,8 +91,8 @@ function StepCard({ step, index }: { step: typeof steps[0]; index: number }) {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2">
-              <span className="font-mono text-xs text-text2/40">{step.num}</span>
-              <h3 className="font-semibold text-white text-base">{step.title}</h3>
+              <span className="font-mono text-xs" style={{ color: '#9ca3af' }}>{step.num}</span>
+              <h3 className="font-semibold text-base" style={{ color: '#0f1117' }}>{step.title}</h3>
               <Badge
                 label={step.badgeLabel}
                 variant={step.badge as 'local' | 'cloud' | 'human'}
@@ -119,7 +119,7 @@ export default function Pipeline() {
         className="mb-14"
       >
         <div className="section-label mb-3">Architecture</div>
-        <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
+        <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#0f1117' }}>
           The 6-Step{' '}
           <span className="gradient-text">Privacy Pipeline</span>
         </h2>
@@ -142,20 +142,20 @@ export default function Pipeline() {
         viewport={{ once: true }}
         className="rounded-lg p-6"
         style={{
-          background: 'rgba(16,185,129,0.04)',
-          border: '1px solid rgba(16,185,129,0.18)',
-          boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+          background: 'rgba(5,150,105,0.04)',
+          border: '1px solid rgba(5,150,105,0.18)',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
         }}
       >
         <div className="flex items-start gap-4">
-          <EyeOff size={20} style={{ color: '#10b981' }} className="flex-shrink-0 mt-0.5" />
+          <EyeOff size={20} style={{ color: '#059669' }} className="flex-shrink-0 mt-0.5" />
           <div>
-            <div className="text-xs font-semibold tracking-wide mb-2" style={{ color: '#10b981' }}>
+            <div className="text-xs font-semibold tracking-wide mb-2" style={{ color: '#059669' }}>
               KEY INSIGHT — ANONYMIZATION
             </div>
-            <p className="text-text leading-relaxed text-sm">
+            <p className="leading-relaxed text-sm" style={{ color: '#374151' }}>
               The LLM anonymizer that de-identifies sensitive data runs{' '}
-              <span className="font-semibold" style={{ color: '#10b981' }}>exclusively on local models</span> (Ollama, LM Studio, etc.).
+              <span className="font-semibold" style={{ color: '#059669' }}>exclusively on local models</span> (Ollama, LM Studio, etc.).
               Running it on a cloud model would be self-defeating — you'd be sending the raw PII to the very service
               you're trying to protect against. The cloud classifier and planner only ever see sanitized, anonymized
               placeholders. The real values live in an in-memory lookup table that never leaves your machine.

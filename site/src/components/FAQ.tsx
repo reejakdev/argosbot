@@ -74,7 +74,7 @@ function FAQItem({ item, index }: { item: typeof faqs[0]; index: number }) {
           <span className="font-mono text-xs text-text2/40 flex-shrink-0">
             {String(index + 1).padStart(2, '0')}
           </span>
-          <span className="font-medium text-text group-hover:text-white transition-colors">
+          <span className="font-medium text-text group-hover:text-text transition-colors">
             {item.q}
           </span>
         </div>
@@ -127,7 +127,7 @@ export default function FAQ() {
           className="mb-14 text-center"
         >
           <div className="section-label mb-3 text-center">FAQ</div>
-          <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
+          <h2 className="text-3xl lg:text-4xl font-bold text-text mb-4">
             Frequently asked{' '}
             <span className="gradient-text">questions</span>
           </h2>

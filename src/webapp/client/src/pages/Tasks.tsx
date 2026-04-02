@@ -131,17 +131,17 @@ export default function Tasks() {
             <div
               key={t.id}
               style={{
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
+                background: '#ffffff',
+                border: '1px solid rgba(0,0,0,0.08)',
                 borderRadius: '8px',
                 padding: '0.75rem 1rem',
                 transition: 'background 0.15s ease',
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLDivElement).style.background = 'rgba(79,110,255,0.06)';
+                (e.currentTarget as HTMLDivElement).style.background = '#faf9f7';
               }}
               onMouseLeave={(e) => {
-                (e.currentTarget as HTMLDivElement).style.background = 'var(--surface)';
+                (e.currentTarget as HTMLDivElement).style.background = '#ffffff';
               }}
             >
               <div className="flex items-start gap-3">

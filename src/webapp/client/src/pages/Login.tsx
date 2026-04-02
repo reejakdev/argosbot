@@ -105,7 +105,7 @@ export default function Login({ onLogin }: LoginProps) {
               fontSize: '1.5rem',
               fontWeight: 700,
               letterSpacing: '0.06em',
-              color: '#f0f4ff',
+              color: '#0f1117',
             }}
           >
             ARGOS
@@ -125,11 +125,11 @@ export default function Login({ onLogin }: LoginProps) {
 
         <div
           style={{
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
+            background: '#ffffff',
+            border: '1px solid rgba(0,0,0,0.08)',
             borderRadius: '8px',
             padding: '1.5rem',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
           }}
         >
           {/* Method switcher */}
@@ -151,8 +151,8 @@ export default function Login({ onLogin }: LoginProps) {
                   fontSize: '0.75rem',
                   fontWeight: 600,
                   padding: '0.5rem',
-                  background: method === m ? 'var(--surface2)' : 'transparent',
-                  color: method === m ? '#f0f4ff' : 'var(--text2)',
+                  background: method === m ? '#ffffff' : 'transparent',
+                  color: method === m ? '#0f1117' : 'var(--text2)',
                   border: 'none',
                   borderRadius: '4px',
                   cursor: 'pointer',
@@ -201,10 +201,10 @@ export default function Login({ onLogin }: LoginProps) {
                 onKeyDown={(e) => e.key === 'Enter' && loginWithTOTP()}
                 style={{
                   width: '100%',
-                  background: 'var(--bg2)',
-                  border: '1px solid var(--border)',
+                  background: '#ffffff',
+                  border: '1px solid rgba(0,0,0,0.1)',
                   borderRadius: '6px',
-                  color: '#f0f4ff',
+                  color: '#0f1117',
                   fontFamily: "'JetBrains Mono', monospace",
                   fontSize: '1.5rem',
                   fontWeight: 500,

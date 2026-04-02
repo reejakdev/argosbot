@@ -6,7 +6,7 @@ import { Lock, Database, Cpu, ShieldAlert } from 'lucide-react'
 const rules = [
   {
     icon: Database,
-    color: '#10b981',
+    color: '#059669',
     title: 'Raw content is never stored',
     desc: 'Messages exist in memory only during processing. No raw text ever touches the database. Only SHA-256 hashes and anonymized summaries are persisted.',
   },
@@ -18,25 +18,25 @@ const rules = [
   },
   {
     icon: Cpu,
-    color: '#10b981',
+    color: '#059669',
     title: 'LLM anonymizer runs local-only',
     desc: 'The model that strips your PII never runs on a cloud provider. Sending raw data to a cloud model to anonymize it would defeat the purpose entirely. Local model only.',
   },
   {
     icon: ShieldAlert,
-    color: '#ef4444',
+    color: '#dc2626',
     title: 'Every action requires approval',
     desc: 'No autonomous execution. Every proposal from the planner hits a human checkpoint with expiry. High-risk actions require a fresh YubiKey/passkey assertion cryptographically bound to the proposal ID.',
   },
 ]
 
 const flowSteps = [
-  { label: 'Raw Message', sub: 'From Telegram / WhatsApp / Email', color: '#ef4444', dot: true },
+  { label: 'Raw Message', sub: 'From Telegram / WhatsApp / Email', color: '#dc2626', dot: true },
   { label: 'Regex Anonymizer', sub: 'Replaces addresses, amounts, PII', color: '#4f6eff', dot: false },
-  { label: 'LLM Anonymizer', sub: 'Local model only — deep semantic anon', color: '#10b981', dot: false },
+  { label: 'LLM Anonymizer', sub: 'Local model only — deep semantic anon', color: '#059669', dot: false },
   { label: 'Classify + Plan', sub: 'Cloud LLM sees only [PLACEHOLDERS]', color: '#4f6eff', dot: false },
-  { label: 'De-anonymize', sub: 'Real values restored from local map', color: '#10b981', dot: false },
-  { label: 'You Approve', sub: 'WebAuthn / passkey / TOTP', color: '#ef4444', dot: true },
+  { label: 'De-anonymize', sub: 'Real values restored from local map', color: '#059669', dot: false },
+  { label: 'You Approve', sub: 'WebAuthn / passkey / TOTP', color: '#dc2626', dot: true },
 ]
 
 export default function Privacy() {
@@ -48,8 +48,8 @@ export default function Privacy() {
       id="privacy"
       className="py-24"
       style={{
-        borderTop: '1px solid rgba(79,110,255,0.08)',
-        background: 'linear-gradient(to bottom, rgba(13,21,48,0.5), transparent)',
+        borderTop: '1px solid rgba(0,0,0,0.06)',
+        background: '#ffffff',
       }}
     >
       <div className="max-w-7xl mx-auto px-6">
@@ -60,7 +60,7 @@ export default function Privacy() {
           className="mb-14"
         >
           <div className="section-label mb-3">Privacy Model</div>
-          <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
+          <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#0f1117' }}>
             Privacy is{' '}
             <span className="gradient-text">architecture</span>, not policy
           </h2>
@@ -86,19 +86,19 @@ export default function Privacy() {
                   style={{
                     background: 'var(--surface)',
                     border: '1px solid var(--border)',
-                    boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
                   }}
                 >
                   <div className="flex-shrink-0 mt-0.5">
                     <div
                       className="w-8 h-8 rounded-lg flex items-center justify-center"
-                      style={{ background: `${rule.color}12`, border: `1px solid ${rule.color}25` }}
+                      style={{ background: `${rule.color}10`, border: `1px solid ${rule.color}25` }}
                     >
                       <Icon size={16} style={{ color: rule.color }} />
                     </div>
                   </div>
                   <div>
-                    <h3 className="font-semibold text-white mb-1.5">{rule.title}</h3>
+                    <h3 className="font-semibold mb-1.5" style={{ color: '#0f1117' }}>{rule.title}</h3>
                     <p className="text-text2 text-sm leading-relaxed">{rule.desc}</p>
                   </div>
                 </motion.div>
@@ -116,10 +116,10 @@ export default function Privacy() {
             style={{
               background: 'var(--surface)',
               border: '1px solid var(--border)',
-              boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
             }}
           >
-            <div className="text-xs font-semibold tracking-wide mb-6" style={{ color: '#7b96ff' }}>
+            <div className="text-xs font-semibold tracking-wide mb-6" style={{ color: '#4f6eff' }}>
               DATA FLOW DIAGRAM
             </div>
             <div className="space-y-0">
@@ -145,7 +145,7 @@ export default function Privacy() {
                       )}
                     </div>
                     <div className="pb-4">
-                      <div className="font-semibold text-white text-sm">{step.label}</div>
+                      <div className="font-semibold text-sm" style={{ color: '#0f1117' }}>{step.label}</div>
                       <div className="text-text2 text-xs mt-0.5">{step.sub}</div>
                     </div>
                   </div>
@@ -157,17 +157,17 @@ export default function Privacy() {
             <div
               className="mt-4 p-3 rounded-lg"
               style={{
-                background: 'rgba(6,11,31,0.6)',
-                border: '1px solid rgba(79,110,255,0.1)',
+                background: '#f3f4f6',
+                border: '1px solid rgba(0,0,0,0.06)',
               }}
             >
-              <div className="font-mono text-xs mb-2" style={{ color: 'rgba(148,163,184,0.55)' }}>Cloud model receives:</div>
-              <code className="text-xs leading-loose block text-text" style={{ fontFamily: 'JetBrains Mono, Courier New, monospace' }}>
-                <span style={{ color: '#7b96ff' }}>[PERSON_1]</span> wants to send{' '}
-                <span style={{ color: '#7b96ff' }}>[AMT_10K-100K_USDC]</span> to{' '}
-                <span style={{ color: '#7b96ff' }}>[ADDR_1]</span>
+              <div className="font-mono text-xs mb-2" style={{ color: '#9ca3af' }}>Cloud model receives:</div>
+              <code className="text-xs leading-loose block" style={{ color: '#1f2937', fontFamily: 'JetBrains Mono, Courier New, monospace' }}>
+                <span style={{ color: '#4f6eff' }}>[PERSON_1]</span> wants to send{' '}
+                <span style={{ color: '#4f6eff' }}>[AMT_10K-100K_USDC]</span> to{' '}
+                <span style={{ color: '#4f6eff' }}>[ADDR_1]</span>
                 <br />
-                via <span className="text-text2">[NETWORK_1]</span>. Please draft a reply.
+                via <span style={{ color: '#6b7280' }}>[NETWORK_1]</span>. Please draft a reply.
               </code>
             </div>
           </motion.div>

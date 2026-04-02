@@ -104,7 +104,7 @@ export default function Layout({ page, onPageChange, wsConnected, children }: La
               fontSize: '1rem',
               fontWeight: 700,
               letterSpacing: '0.08em',
-              color: '#f0f4ff',
+              color: '#0f1117',
             }}
           >
             ARGOS
@@ -121,10 +121,10 @@ export default function Layout({ page, onPageChange, wsConnected, children }: La
                 onClick={() => onPageChange(item.id)}
                 className="flex items-center gap-3 px-3 py-2.5 w-full text-left cursor-pointer transition-all"
                 style={{
-                  background: isActive ? 'rgba(79,110,255,0.1)' : 'transparent',
+                  background: isActive ? 'rgba(79,110,255,0.08)' : 'transparent',
                   borderLeft: isActive ? '2px solid #4f6eff' : '2px solid transparent',
                   borderRadius: isActive ? '0 6px 6px 0' : '6px',
-                  color: isActive ? '#f0f4ff' : 'var(--text2)',
+                  color: isActive ? '#0f1117' : '#374151',
                   fontFamily: "'Inter', sans-serif",
                   fontSize: '0.8125rem',
                   fontWeight: isActive ? 600 : 400,
@@ -161,7 +161,7 @@ export default function Layout({ page, onPageChange, wsConnected, children }: La
                 fontSize: '0.6rem',
                 fontWeight: 700,
                 letterSpacing: '0.1em',
-                color: '#10b981',
+                color: '#059669',
               }}
             >
               SYSTEM ONLINE
@@ -174,7 +174,7 @@ export default function Layout({ page, onPageChange, wsConnected, children }: La
                 fontFamily: "'JetBrains Mono', monospace",
                 fontSize: '0.6rem',
                 letterSpacing: '0.08em',
-                color: wsConnected ? '#7b96ff' : 'var(--text2)',
+                color: wsConnected ? '#4f6eff' : 'var(--text2)',
               }}
             >
               {wsConnected ? 'WS CONNECTED' : 'WS OFFLINE'}
@@ -189,9 +189,9 @@ export default function Layout({ page, onPageChange, wsConnected, children }: La
         <header
           className="hidden md:flex items-center justify-between px-6 py-3 sticky top-0 z-10"
           style={{
-            background: 'rgba(6,11,31,0.9)',
+            background: 'rgba(255,255,255,0.95)',
             backdropFilter: 'blur(12px)',
-            borderBottom: '1px solid var(--border)',
+            borderBottom: '1px solid rgba(0,0,0,0.06)',
           }}
         >
           <span className="label-mono">{PAGE_TITLES[page]}</span>
@@ -201,7 +201,7 @@ export default function Layout({ page, onPageChange, wsConnected, children }: La
               style={{
                 fontFamily: "'JetBrains Mono', monospace",
                 fontSize: '0.6rem',
-                color: wsConnected ? '#7b96ff' : 'var(--text2)',
+                color: wsConnected ? '#4f6eff' : 'var(--text2)',
                 letterSpacing: '0.08em',
               }}
             >
@@ -227,7 +227,7 @@ export default function Layout({ page, onPageChange, wsConnected, children }: La
                 fontSize: '0.9rem',
                 fontWeight: 700,
                 letterSpacing: '0.08em',
-                color: '#f0f4ff',
+                color: '#0f1117',
               }}
             >
               ARGOS

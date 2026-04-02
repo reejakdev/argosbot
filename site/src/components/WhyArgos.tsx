@@ -98,7 +98,7 @@ export default function WhyArgos() {
           className="mb-14"
         >
           <div className="section-label mb-3">Why Argos</div>
-          <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
+          <h2 className="text-3xl lg:text-4xl font-bold text-text mb-4">
             Not just another{' '}
             <span className="gradient-text">AI assistant</span>
           </h2>
@@ -203,7 +203,7 @@ export default function WhyArgos() {
                 className="w-1 h-8 rounded-full mb-4"
                 style={{ background: box.color }}
               />
-              <h3 className="font-semibold text-white mb-3">{box.title}</h3>
+              <h3 className="font-semibold text-text mb-3">{box.title}</h3>
               <p className="text-text2 text-sm leading-relaxed">{box.body}</p>
             </motion.div>
           ))}

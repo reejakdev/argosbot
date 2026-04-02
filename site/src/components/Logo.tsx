@@ -44,7 +44,7 @@ export function LogoFull({ height = 28 }: { height?: number }) {
     <div className="flex items-center gap-2.5">
       <LogoIcon size={iconSize} />
       <span
-        className="font-semibold tracking-widest text-white"
+        className="font-semibold tracking-widest text-text"
         style={{
           fontSize: height * 0.6,
           letterSpacing: '0.22em',

@@ -16,7 +16,7 @@ const channels = [
   },
   {
     icon: Phone,
-    color: '#10b981',
+    color: '#059669',
     name: 'WhatsApp',
     proto: 'Baileys (multi-device)',
     desc: 'Multi-device WhatsApp via Baileys — no WhatsApp Business API needed. Connects as your personal account with full QR pairing.',
@@ -34,7 +34,7 @@ const channels = [
   },
   {
     icon: Hash,
-    color: '#10b981',
+    color: '#059669',
     name: 'Discord',
     proto: 'Discord Bot API',
     desc: 'Discord bot integration for server and DM monitoring. Requires bot token with message intent. Ideal for team server awareness.',
@@ -43,7 +43,7 @@ const channels = [
   },
   {
     icon: MessagesSquare,
-    color: '#ef4444',
+    color: '#dc2626',
     name: 'Slack',
     proto: 'Slack Bot API',
     desc: 'Slack workspace monitoring via bot token. Subscribe to channels, DMs, and app mentions. Works with Slack Free and Pro workspaces.',
@@ -61,8 +61,8 @@ export default function Channels() {
       id="channels"
       className="py-24"
       style={{
-        borderTop: '1px solid rgba(79,110,255,0.08)',
-        background: 'linear-gradient(to bottom, transparent, rgba(13,21,48,0.3), transparent)',
+        borderTop: '1px solid rgba(0,0,0,0.06)',
+        background: '#ffffff',
       }}
     >
       <div className="max-w-7xl mx-auto px-6">
@@ -73,7 +73,7 @@ export default function Channels() {
           className="mb-14"
         >
           <div className="section-label mb-3">Channels</div>
-          <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
+          <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#0f1117' }}>
             5 channels.{' '}
             <span className="gradient-text">One unified inbox.</span>
           </h2>
@@ -98,7 +98,7 @@ export default function Channels() {
                 style={{
                   background: 'var(--surface)',
                   border: '1px solid var(--border)',
-                  boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
                 }}
               >
                 {/* Header */}
@@ -106,7 +106,7 @@ export default function Channels() {
                   <div
                     className="w-10 h-10 rounded-lg flex items-center justify-center"
                     style={{
-                      background: `${ch.color}12`,
+                      background: `${ch.color}10`,
                       border: `1px solid ${ch.color}25`,
                     }}
                   >
@@ -114,7 +114,7 @@ export default function Channels() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold text-white">{ch.name}</span>
+                      <span className="font-semibold" style={{ color: '#0f1117' }}>{ch.name}</span>
                       <Badge
                         label={ch.status === 'production' ? 'live' : ch.status}
                         variant={ch.status === 'production' ? 'local' : 'default'}
