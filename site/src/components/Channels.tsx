@@ -61,7 +61,7 @@ export default function Channels() {
       id="channels"
       className="py-24"
       style={{
-        borderTop: '1px solid rgba(0,0,0,0.06)',
+        borderTop: '1px solid #e5e7eb',
         background: '#ffffff',
       }}
     >
@@ -73,7 +73,7 @@ export default function Channels() {
           className="mb-14"
         >
           <div className="section-label mb-3">Channels</div>
-          <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#0f1117' }}>
+          <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#111827' }}>
             5 channels.{' '}
             <span className="gradient-text">One unified inbox.</span>
           </h2>
@@ -98,7 +98,7 @@ export default function Channels() {
                 style={{
                   background: 'var(--surface)',
                   border: '1px solid var(--border)',
-                  boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+                  boxShadow: '0 1px 4px #e5e7eb, 0 4px 16px rgba(0,0,0,0.04)',
                 }}
               >
                 {/* Header */}
@@ -114,7 +114,7 @@ export default function Channels() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold" style={{ color: '#0f1117' }}>{ch.name}</span>
+                      <span className="font-semibold" style={{ color: '#111827' }}>{ch.name}</span>
                       <Badge
                         label={ch.status === 'production' ? 'live' : ch.status}
                         variant={ch.status === 'production' ? 'local' : 'default'}

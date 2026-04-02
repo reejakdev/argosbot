@@ -70,7 +70,7 @@ export default function Features() {
     <section
       id="features"
       className="py-24"
-      style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+      style={{ borderTop: '1px solid #e5e7eb' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -103,9 +103,9 @@ export default function Features() {
                 whileHover={{ y: -3 }}
                 className="p-5 rounded-lg group cursor-default transition-all duration-200"
                 style={{
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
+                  background: '#ffffff',
+                  border: '1px solid #e5e7eb',
+                  boxShadow: '0 1px 3px #e5e7eb',
                 }}
               >
                 <div

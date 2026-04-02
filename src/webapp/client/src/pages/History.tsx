@@ -71,7 +71,7 @@ export default function History() {
               border: '1px solid var(--border)',
               borderRadius: '8px',
               overflow: 'hidden',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+              boxShadow: '0 1px 4px #e5e7eb, 0 4px 16px rgba(0,0,0,0.04)',
             }}
           >
             {tasks.map((t, idx) => (
@@ -84,7 +84,7 @@ export default function History() {
                   cursor: 'default',
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.background = 'rgba(79,110,255,0.04)';
+                  (e.currentTarget as HTMLDivElement).style.background = '#f9fafb';
                 }}
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLDivElement).style.background = 'transparent';
@@ -148,7 +148,7 @@ export default function History() {
               border: '1px solid var(--border)',
               borderRadius: '8px',
               overflow: 'hidden',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+              boxShadow: '0 1px 4px #e5e7eb, 0 4px 16px rgba(0,0,0,0.04)',
             }}
           >
             {proposals.map((p, idx) => (
@@ -161,7 +161,7 @@ export default function History() {
                   cursor: 'default',
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.background = 'rgba(79,110,255,0.04)';
+                  (e.currentTarget as HTMLDivElement).style.background = '#f9fafb';
                 }}
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLDivElement).style.background = 'transparent';

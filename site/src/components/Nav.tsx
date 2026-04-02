@@ -33,8 +33,8 @@ export default function Nav() {
           : 'bg-transparent'
       }`}
       style={scrolled ? {
-        background: 'rgba(250,249,247,0.95)',
-        borderColor: 'rgba(0,0,0,0.08)',
+        background: '#ffffff',
+        borderColor: '#e5e7eb',
       } : {}}
     >
       <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-16">
@@ -64,17 +64,17 @@ export default function Nav() {
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium transition-all duration-200 rounded-md"
             style={{
-              border: '1px solid rgba(79,110,255,0.3)',
+              border: '1px solid #e5e7eb',
               color: '#4f6eff',
-              background: 'rgba(79,110,255,0.05)',
+              background: '#ffffff',
             }}
             onMouseEnter={e => {
-              (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.1)'
-              ;(e.currentTarget as HTMLElement).style.borderColor = 'rgba(79,110,255,0.5)'
+              (e.currentTarget as HTMLElement).style.background = '#f3f4f6'
+              ;(e.currentTarget as HTMLElement).style.borderColor = '#4f6eff'
             }}
             onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.05)'
-              ;(e.currentTarget as HTMLElement).style.borderColor = 'rgba(79,110,255,0.3)'
+              (e.currentTarget as HTMLElement).style.background = '#ffffff'
+              ;(e.currentTarget as HTMLElement).style.borderColor = '#e5e7eb'
             }}
           >
             <GitBranch size={14} />
@@ -100,8 +100,8 @@ export default function Nav() {
             exit={{ opacity: 0, height: 0 }}
             className="md:hidden backdrop-blur-xl border-b"
             style={{
-              background: 'rgba(250,249,247,0.98)',
-              borderColor: 'rgba(0,0,0,0.08)',
+              background: '#ffffff',
+              borderColor: '#e5e7eb',
             }}
           >
             <div className="px-6 py-4 flex flex-col gap-4">

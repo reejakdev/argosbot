@@ -5,17 +5,17 @@
 @tailwind utilities;
 
 :root {
-  --bg:       #faf9f7;
-  --bg2:      #f2f0ec;
+  --bg:       #ffffff;
+  --bg2:      #f9fafb;
   --surface:  #ffffff;
-  --surface2: #f7f6f3;
-  --border:   rgba(0,0,0,0.08);
+  --surface2: #f3f4f6;
+  --border:   #e5e7eb;
   --blue:     #4f6eff;
   --blue2:    #3a56e8;
   --green:    #059669;
   --red:      #dc2626;
   --yellow:   #d97706;
-  --text:     #0f1117;
+  --text:     #111827;
   --text2:    #6b7280;
   --text3:    #9ca3af;
 }
@@ -30,8 +30,8 @@ html {
 
 body {
   margin: 0;
-  background-color: var(--bg);
-  color: var(--text);
+  background-color: #ffffff;
+  color: #111827;
   font-family: 'Inter', system-ui, sans-serif;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
@@ -47,37 +47,37 @@ body {
   width: 4px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--bg2);
+  background: #f9fafb;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(79, 110, 255, 0.3);
+  background: #d1d5db;
   border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(79, 110, 255, 0.5);
+  background: #9ca3af;
 }
 
 /* Clean card */
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 
 .card-elevated {
-  background: var(--surface2);
-  border: 1px solid var(--border);
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 
 /* Legacy alias */
 .hud-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 
 .hud-card-green {
@@ -98,12 +98,9 @@ body {
   color: var(--blue);
 }
 
-/* Gradient text */
+/* Accent text — single solid blue, no gradient */
 .gradient-text {
-  background: linear-gradient(135deg, var(--blue), var(--blue2));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #4f6eff;
 }
 
 /* Marquee */

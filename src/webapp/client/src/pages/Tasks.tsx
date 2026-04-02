@@ -96,7 +96,7 @@ export default function Tasks() {
               fontSize: '0.8125rem',
               fontWeight: filter === f.id ? 600 : 400,
               padding: '0.375rem 0.875rem',
-              background: filter === f.id ? 'rgba(79,110,255,0.1)' : 'transparent',
+              background: filter === f.id ? 'rgba(79,110,255,0.08)' : 'transparent',
               color: filter === f.id ? '#7b96ff' : 'var(--text2)',
               border: `1px solid ${filter === f.id ? 'rgba(79,110,255,0.35)' : 'var(--border)'}`,
               borderRadius: '6px',
@@ -132,13 +132,13 @@ export default function Tasks() {
               key={t.id}
               style={{
                 background: '#ffffff',
-                border: '1px solid rgba(0,0,0,0.08)',
+                border: '1px solid #e5e7eb',
                 borderRadius: '8px',
                 padding: '0.75rem 1rem',
                 transition: 'background 0.15s ease',
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLDivElement).style.background = '#faf9f7';
+                (e.currentTarget as HTMLDivElement).style.background = '#ffffff';
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLDivElement).style.background = '#ffffff';
@@ -221,7 +221,7 @@ export default function Tasks() {
                             fontWeight: 700,
                             letterSpacing: '0.06em',
                             color: '#7b96ff',
-                            background: 'rgba(79,110,255,0.1)',
+                            background: 'rgba(79,110,255,0.08)',
                             border: '1px solid rgba(79,110,255,0.2)',
                             borderRadius: '4px',
                             padding: '0.1rem 0.4rem',

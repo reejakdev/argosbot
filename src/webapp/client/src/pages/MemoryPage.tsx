@@ -20,7 +20,7 @@ function importanceColor(importance: number): string {
 function importanceBg(importance: number): string {
   if (importance >= 8) return 'rgba(239,68,68,0.1)';
   if (importance >= 5) return 'rgba(245,158,11,0.1)';
-  return 'rgba(79,110,255,0.1)';
+  return 'rgba(79,110,255,0.08)';
 }
 
 function importanceBorder(importance: number): string {
@@ -74,7 +74,7 @@ export default function MemoryPage() {
               border: '1px solid var(--border)',
               borderRadius: '8px',
               padding: '1rem',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+              boxShadow: '0 1px 4px #e5e7eb, 0 4px 16px rgba(0,0,0,0.04)',
             }}
           >
             {/* Content */}
@@ -90,7 +90,7 @@ export default function MemoryPage() {
               className="mb-3"
               style={{
                 height: 3,
-                background: 'rgba(79,110,255,0.08)',
+                background: '#f3f4f6',
                 borderRadius: '2px',
                 position: 'relative',
               }}
@@ -149,7 +149,7 @@ export default function MemoryPage() {
                       fontWeight: 700,
                       letterSpacing: '0.06em',
                       color: '#7b96ff',
-                      background: 'rgba(79,110,255,0.1)',
+                      background: 'rgba(79,110,255,0.08)',
                       border: '1px solid rgba(79,110,255,0.2)',
                       borderRadius: '4px',
                       padding: '0.15rem 0.5rem',
@@ -203,7 +203,7 @@ export default function MemoryPage() {
                       letterSpacing: '0.06em',
                       fontWeight: 500,
                       color: '#7b96ff',
-                      background: 'rgba(79,110,255,0.08)',
+                      background: '#f3f4f6',
                       border: '1px solid rgba(79,110,255,0.2)',
                       borderRadius: '4px',
                       padding: '0.1rem 0.4rem',

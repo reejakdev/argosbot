@@ -16,7 +16,7 @@ function StatCard({ label, value, color }: { label: string; value: number | stri
         border: '1px solid var(--border)',
         borderRadius: '8px',
         padding: '1rem',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+        boxShadow: '0 1px 4px #e5e7eb, 0 4px 16px rgba(0,0,0,0.04)',
       }}
     >
       <div className="label-mono">{label}</div>
@@ -111,7 +111,7 @@ export default function Status({ onLogout }: StatusProps) {
               border: '1px solid var(--border)',
               borderRadius: '8px',
               padding: '1rem',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+              boxShadow: '0 1px 4px #e5e7eb, 0 4px 16px rgba(0,0,0,0.04)',
             }}
           >
             <div className="label-mono mb-2">Operator</div>
@@ -137,7 +137,7 @@ export default function Status({ onLogout }: StatusProps) {
                       letterSpacing: '0.08em',
                       textTransform: 'uppercase',
                       color: '#7b96ff',
-                      background: 'rgba(79,110,255,0.1)',
+                      background: 'rgba(79,110,255,0.08)',
                       border: '1px solid rgba(79,110,255,0.25)',
                       borderRadius: '4px',
                       padding: '0.15rem 0.5rem',
@@ -196,7 +196,7 @@ export default function Status({ onLogout }: StatusProps) {
               border: '1px solid var(--border)',
               borderRadius: '8px',
               padding: '0.75rem 1rem',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+              boxShadow: '0 1px 4px #e5e7eb, 0 4px 16px rgba(0,0,0,0.04)',
             }}
           >
             <div className="label-mono mb-1">System</div>

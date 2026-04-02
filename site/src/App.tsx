@@ -16,7 +16,7 @@ import Footer from './components/Footer'
 
 function App() {
   return (
-    <div className="relative z-10" style={{ background: '#faf9f7' }}>
+    <div className="relative z-10" style={{ background: '#ffffff' }}>
       <Nav />
       <Hero />
       <Ticker />

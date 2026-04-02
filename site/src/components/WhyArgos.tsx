@@ -88,7 +88,7 @@ export default function WhyArgos() {
     <section
       id="why"
       className="py-24"
-      style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+      style={{ borderTop: '1px solid #f3f4f6' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -122,7 +122,7 @@ export default function WhyArgos() {
         >
           <table className="w-full">
             <thead>
-              <tr style={{ borderBottom: '1px solid rgba(79,110,255,0.1)' }}>
+              <tr style={{ borderBottom: '1px solid rgba(79,110,255,0.08)' }}>
                 <th className="text-left px-5 py-4 text-text2 text-sm font-medium">Feature</th>
                 <th className="px-5 py-4 text-center">
                   <div className="flex items-center justify-center gap-2">
@@ -143,8 +143,8 @@ export default function WhyArgos() {
                   whileInView={{ opacity: 1, x: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.06 }}
-                  style={{ borderBottom: '1px solid rgba(79,110,255,0.06)' }}
-                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.04)'}
+                  style={{ borderBottom: '1px solid #f9fafb' }}
+                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f9fafb'}
                   onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
                   className="transition-colors"
                 >

@@ -48,7 +48,7 @@ export function LogoFull({ height = 28 }: { height?: number }) {
         style={{
           fontSize: height * 0.6,
           letterSpacing: '0.22em',
-          color: '#0f1117',
+          color: '#111827',
         }}
       >
         ARGOS

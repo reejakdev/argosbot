@@ -81,7 +81,7 @@ export default function Setup() {
     <section
       id="setup"
       className="py-24"
-      style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+      style={{ borderTop: '1px solid #f3f4f6' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div

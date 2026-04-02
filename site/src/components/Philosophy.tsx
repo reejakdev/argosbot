@@ -33,7 +33,7 @@ export default function Philosophy() {
       id="philosophy"
       className="py-24"
       style={{
-        borderTop: '1px solid rgba(79,110,255,0.08)',
+        borderTop: '1px solid #f3f4f6',
         background: 'var(--bg2)',
       }}
     >
@@ -57,8 +57,8 @@ export default function Philosophy() {
             <div
               className="relative p-8 rounded-xl"
               style={{
-                background: 'linear-gradient(135deg, rgba(79,110,255,0.04), rgba(123,150,255,0.04))',
-                border: '1px solid rgba(79,110,255,0.15)',
+                background: 'linear-gradient(135deg, #f9fafb, rgba(123,150,255,0.04))',
+                border: '1px solid #e5e7eb',
                 boxShadow: '0 4px 32px rgba(0,0,0,0.4)',
               }}
             >

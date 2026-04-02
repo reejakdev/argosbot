@@ -92,7 +92,7 @@ function StepCard({ step, index }: { step: typeof steps[0]; index: number }) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2">
               <span className="font-mono text-xs" style={{ color: '#9ca3af' }}>{step.num}</span>
-              <h3 className="font-semibold text-base" style={{ color: '#0f1117' }}>{step.title}</h3>
+              <h3 className="font-semibold text-base" style={{ color: '#111827' }}>{step.title}</h3>
               <Badge
                 label={step.badgeLabel}
                 variant={step.badge as 'local' | 'cloud' | 'human'}
@@ -119,7 +119,7 @@ export default function Pipeline() {
         className="mb-14"
       >
         <div className="section-label mb-3">Architecture</div>
-        <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#0f1117' }}>
+        <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#111827' }}>
           The 6-Step{' '}
           <span className="gradient-text">Privacy Pipeline</span>
         </h2>
@@ -142,9 +142,9 @@ export default function Pipeline() {
         viewport={{ once: true }}
         className="rounded-lg p-6"
         style={{
-          background: 'rgba(5,150,105,0.04)',
-          border: '1px solid rgba(5,150,105,0.18)',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+          background: '#f9fafb',
+          border: '1px solid #e5e7eb',
+          boxShadow: '0 1px 3px #e5e7eb',
         }}
       >
         <div className="flex items-start gap-4">

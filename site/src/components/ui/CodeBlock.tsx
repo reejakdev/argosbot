@@ -10,7 +10,7 @@ export function CodeBlock({ code, language = 'json', title }: CodeBlockProps) {
       className="overflow-hidden"
       style={{
         background: '#080e22',
-        border: '1px solid rgba(79,110,255,0.15)',
+        border: '1px solid #e5e7eb',
         borderRadius: '8px',
         boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
       }}
@@ -19,8 +19,8 @@ export function CodeBlock({ code, language = 'json', title }: CodeBlockProps) {
         <div
           className="flex items-center gap-2 px-4 py-2.5 border-b"
           style={{
-            borderColor: 'rgba(79,110,255,0.12)',
-            background: 'rgba(79,110,255,0.04)',
+            borderColor: 'rgba(79,110,255,0.1)',
+            background: '#f9fafb',
           }}
         >
           <div className="flex gap-1.5">

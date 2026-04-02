@@ -24,20 +24,20 @@ export default function Ticker() {
     <div
       className="relative py-3 overflow-hidden"
       style={{
-        borderTop: '1px solid rgba(79,110,255,0.1)',
-        borderBottom: '1px solid rgba(79,110,255,0.1)',
-        background: '#f2f0ec',
+        borderTop: '1px solid #e5e7eb',
+        borderBottom: '1px solid rgba(79,110,255,0.08)',
+        background: '#f9fafb',
       }}
     >
       {/* Left fade */}
       <div
         className="absolute left-0 top-0 bottom-0 w-20 z-10 pointer-events-none"
-        style={{ background: 'linear-gradient(to right, #f2f0ec, transparent)' }}
+        style={{ background: 'linear-gradient(to right, #f9fafb, transparent)' }}
       />
       {/* Right fade */}
       <div
         className="absolute right-0 top-0 bottom-0 w-20 z-10 pointer-events-none"
-        style={{ background: 'linear-gradient(to left, #f2f0ec, transparent)' }}
+        style={{ background: 'linear-gradient(to left, #f9fafb, transparent)' }}
       />
 
       <div className="marquee-container">

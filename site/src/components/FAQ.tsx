@@ -67,7 +67,7 @@ function FAQItem({ item, index }: { item: typeof faqs[0]; index: number }) {
         className="w-full flex items-center justify-between px-6 py-4 text-left transition-colors group"
         style={{ borderRadius: 'inherit' }}
         onClick={() => setOpen(!open)}
-        onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.04)'}
+        onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f9fafb'}
         onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
       >
         <div className="flex items-center gap-3 flex-1">
@@ -98,7 +98,7 @@ function FAQItem({ item, index }: { item: typeof faqs[0]; index: number }) {
           >
             <div
               className="px-6 pb-5 pt-0"
-              style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+              style={{ borderTop: '1px solid #f3f4f6' }}
             >
               <p className="text-text2 text-sm leading-relaxed pt-4">{item.a}</p>
             </div>
@@ -117,7 +117,7 @@ export default function FAQ() {
     <section
       id="faq"
       className="py-24"
-      style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+      style={{ borderTop: '1px solid #f3f4f6' }}
     >
       <div className="max-w-4xl mx-auto px-6">
         <motion.div

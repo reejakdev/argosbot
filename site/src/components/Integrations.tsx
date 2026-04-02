@@ -84,7 +84,7 @@ export default function Integrations() {
     <section
       id="integrations"
       className="py-24"
-      style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+      style={{ borderTop: '1px solid #f3f4f6' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -155,8 +155,8 @@ export default function Integrations() {
           transition={{ delay: 0.5 }}
           className="mt-8 p-4 text-center rounded-lg"
           style={{
-            border: '1px solid rgba(79,110,255,0.12)',
-            background: 'rgba(79,110,255,0.04)',
+            border: '1px solid rgba(79,110,255,0.1)',
+            background: '#f9fafb',
           }}
         >
           <span className="font-mono text-sm text-text2">

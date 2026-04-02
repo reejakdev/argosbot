@@ -2,27 +2,27 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #faf9f7;
-  --color-bg2: #f2f0ec;
+  --color-bg: #ffffff;
+  --color-bg2: #f9fafb;
   --color-surface: #ffffff;
-  --color-surface2: #f7f6f3;
+  --color-surface2: #f3f4f6;
   --color-blue: #4f6eff;
   --color-blue2: #3a56e8;
   --color-green: #059669;
   --color-red: #dc2626;
   --color-yellow: #d97706;
-  --color-text: #0f1117;
+  --color-text: #111827;
   --color-text2: #6b7280;
-  --color-border: rgba(0,0,0,0.08);
+  --color-border: #e5e7eb;
 }
 
 :root {
-  --bg: #faf9f7;
-  --bg2: #f2f0ec;
+  --bg: #ffffff;
+  --bg2: #f9fafb;
   --surface: #ffffff;
-  --surface2: #f7f6f3;
-  --border: rgba(0, 0, 0, 0.08);
-  --text: #0f1117;
+  --surface2: #f3f4f6;
+  --border: #e5e7eb;
+  --text: #111827;
   --text2: #6b7280;
   --muted: #9ca3af;
   --blue: #4f6eff;
@@ -41,7 +41,7 @@
 
 html {
   scrollbar-width: thin;
-  scrollbar-color: rgba(79, 110, 255, 0.35) #e5e3df;
+  scrollbar-color: #d1d5db #f9fafb;
 }
 
 ::-webkit-scrollbar {
@@ -50,22 +50,22 @@ html {
 }
 
 ::-webkit-scrollbar-track {
-  background: #e5e3df;
+  background: #f9fafb;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(79, 110, 255, 0.35);
+  background: #d1d5db;
   border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(79, 110, 255, 0.6);
+  background: #9ca3af;
 }
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: #faf9f7;
-  color: #0f1117;
+  background-color: #ffffff;
+  color: #111827;
   min-height: 100dvh;
   margin: 0;
   padding: 0;
@@ -74,19 +74,19 @@ body {
 /* ── Surface Card ── */
 .hud-card {
   position: relative;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 1rem;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 .card {
   background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 1rem;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 /* ── Labels ── */

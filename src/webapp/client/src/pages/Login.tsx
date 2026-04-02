@@ -96,7 +96,7 @@ export default function Login({ onLogin }: LoginProps) {
               fontSize: '1.25rem',
               fontWeight: 700,
               letterSpacing: '0.18em',
-              color: '#0f1117',
+              color: '#111827',
             }}
           >
             ARGOS
@@ -117,10 +117,10 @@ export default function Login({ onLogin }: LoginProps) {
         <div
           style={{
             background: '#ffffff',
-            border: '1px solid rgba(0,0,0,0.08)',
+            border: '1px solid #e5e7eb',
             borderRadius: '8px',
             padding: '1.5rem',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
+            boxShadow: '0 2px 12px #e5e7eb',
           }}
         >
           {/* Method switcher */}
@@ -143,7 +143,7 @@ export default function Login({ onLogin }: LoginProps) {
                   fontWeight: 600,
                   padding: '0.5rem',
                   background: method === m ? '#ffffff' : 'transparent',
-                  color: method === m ? '#0f1117' : 'var(--text2)',
+                  color: method === m ? '#111827' : 'var(--text2)',
                   border: 'none',
                   borderRadius: '4px',
                   cursor: 'pointer',
@@ -195,7 +195,7 @@ export default function Login({ onLogin }: LoginProps) {
                   background: '#ffffff',
                   border: '1px solid rgba(0,0,0,0.1)',
                   borderRadius: '6px',
-                  color: '#0f1117',
+                  color: '#111827',
                   fontFamily: "'JetBrains Mono', monospace",
                   fontSize: '1.5rem',
                   fontWeight: 500,

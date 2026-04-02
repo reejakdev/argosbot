@@ -148,10 +148,10 @@ export default function Proposals() {
             key={p.id}
             style={{
               background: '#ffffff',
-              border: '1px solid rgba(0,0,0,0.08)',
+              border: '1px solid #e5e7eb',
               borderRadius: '8px',
               padding: '1rem',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+              boxShadow: '0 1px 4px #e5e7eb',
             }}
           >
             {/* Header row */}
@@ -175,7 +175,7 @@ export default function Proposals() {
             {/* Context summary */}
             <p
               className="text-sm leading-relaxed mb-3"
-              style={{ color: '#0f1117', fontFamily: "'Inter', sans-serif" }}
+              style={{ color: '#111827', fontFamily: "'Inter', sans-serif" }}
             >
               {p.context_summary}
             </p>
@@ -203,8 +203,8 @@ export default function Proposals() {
               <div
                 className="mb-3 px-3 py-2.5"
                 style={{
-                  background: 'rgba(79,110,255,0.05)',
-                  border: '1px solid rgba(79,110,255,0.15)',
+                  background: '#f9fafb',
+                  border: '1px solid #e5e7eb',
                   borderLeft: '3px solid rgba(79,110,255,0.5)',
                   borderRadius: '0 6px 6px 0',
                 }}
@@ -246,7 +246,7 @@ export default function Proposals() {
                               fontSize: '0.6rem',
                               fontWeight: 700,
                               color: '#4f6eff',
-                              background: 'rgba(79,110,255,0.08)',
+                              background: '#f3f4f6',
                               border: '1px solid rgba(79,110,255,0.18)',
                               borderRadius: '3px',
                               padding: '0.1rem 0.4rem',
@@ -258,7 +258,7 @@ export default function Proposals() {
                         )}
                         <span
                           className="text-xs"
-                          style={{ color: '#0f1117', fontFamily: "'Inter', sans-serif" }}
+                          style={{ color: '#111827', fontFamily: "'Inter', sans-serif" }}
                         >
                           {a.description}
                         </span>

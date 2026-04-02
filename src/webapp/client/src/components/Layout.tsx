@@ -104,7 +104,7 @@ export default function Layout({ page, onPageChange, wsConnected, children }: La
               fontSize: '1rem',
               fontWeight: 700,
               letterSpacing: '0.08em',
-              color: '#0f1117',
+              color: '#111827',
             }}
           >
             ARGOS
@@ -121,10 +121,10 @@ export default function Layout({ page, onPageChange, wsConnected, children }: La
                 onClick={() => onPageChange(item.id)}
                 className="flex items-center gap-3 px-3 py-2.5 w-full text-left cursor-pointer transition-all"
                 style={{
-                  background: isActive ? 'rgba(79,110,255,0.08)' : 'transparent',
+                  background: isActive ? '#f3f4f6' : 'transparent',
                   borderLeft: isActive ? '2px solid #4f6eff' : '2px solid transparent',
                   borderRadius: isActive ? '0 6px 6px 0' : '6px',
-                  color: isActive ? '#0f1117' : '#374151',
+                  color: isActive ? '#111827' : '#374151',
                   fontFamily: "'Inter', sans-serif",
                   fontSize: '0.8125rem',
                   fontWeight: isActive ? 600 : 400,
@@ -191,7 +191,7 @@ export default function Layout({ page, onPageChange, wsConnected, children }: La
           style={{
             background: 'rgba(255,255,255,0.95)',
             backdropFilter: 'blur(12px)',
-            borderBottom: '1px solid rgba(0,0,0,0.06)',
+            borderBottom: '1px solid #e5e7eb',
           }}
         >
           <span className="label-mono">{PAGE_TITLES[page]}</span>
@@ -227,7 +227,7 @@ export default function Layout({ page, onPageChange, wsConnected, children }: La
                 fontSize: '0.9rem',
                 fontWeight: 700,
                 letterSpacing: '0.08em',
-                color: '#0f1117',
+                color: '#111827',
               }}
             >
               ARGOS

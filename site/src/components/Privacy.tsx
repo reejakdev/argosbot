@@ -48,8 +48,8 @@ export default function Privacy() {
       id="privacy"
       className="py-24"
       style={{
-        borderTop: '1px solid rgba(0,0,0,0.06)',
-        background: '#ffffff',
+        borderTop: '1px solid #e5e7eb',
+        background: '#f9fafb',
       }}
     >
       <div className="max-w-7xl mx-auto px-6">
@@ -60,7 +60,7 @@ export default function Privacy() {
           className="mb-14"
         >
           <div className="section-label mb-3">Privacy Model</div>
-          <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#0f1117' }}>
+          <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#111827' }}>
             Privacy is{' '}
             <span className="gradient-text">architecture</span>, not policy
           </h2>
@@ -86,7 +86,7 @@ export default function Privacy() {
                   style={{
                     background: 'var(--surface)',
                     border: '1px solid var(--border)',
-                    boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+                    boxShadow: '0 1px 3px #e5e7eb',
                   }}
                 >
                   <div className="flex-shrink-0 mt-0.5">
@@ -98,7 +98,7 @@ export default function Privacy() {
                     </div>
                   </div>
                   <div>
-                    <h3 className="font-semibold mb-1.5" style={{ color: '#0f1117' }}>{rule.title}</h3>
+                    <h3 className="font-semibold mb-1.5" style={{ color: '#111827' }}>{rule.title}</h3>
                     <p className="text-text2 text-sm leading-relaxed">{rule.desc}</p>
                   </div>
                 </motion.div>
@@ -116,7 +116,7 @@ export default function Privacy() {
             style={{
               background: 'var(--surface)',
               border: '1px solid var(--border)',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
+              boxShadow: '0 1px 3px #e5e7eb',
             }}
           >
             <div className="text-xs font-semibold tracking-wide mb-6" style={{ color: '#4f6eff' }}>
@@ -145,7 +145,7 @@ export default function Privacy() {
                       )}
                     </div>
                     <div className="pb-4">
-                      <div className="font-semibold text-sm" style={{ color: '#0f1117' }}>{step.label}</div>
+                      <div className="font-semibold text-sm" style={{ color: '#111827' }}>{step.label}</div>
                       <div className="text-text2 text-xs mt-0.5">{step.sub}</div>
                     </div>
                   </div>
@@ -158,7 +158,7 @@ export default function Privacy() {
               className="mt-4 p-3 rounded-lg"
               style={{
                 background: '#f3f4f6',
-                border: '1px solid rgba(0,0,0,0.06)',
+                border: '1px solid #e5e7eb',
               }}
             >
               <div className="font-mono text-xs mb-2" style={{ color: '#9ca3af' }}>Cloud model receives:</div>

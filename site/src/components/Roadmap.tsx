@@ -90,7 +90,7 @@ function RoadmapColumn({
     >
       <div
         className="px-5 py-4 border-b"
-        style={{ background: `${color}06`, borderColor: 'rgba(79,110,255,0.1)' }}
+        style={{ background: `${color}06`, borderColor: 'rgba(79,110,255,0.08)' }}
       >
         <div className="flex items-center gap-3">
           <Icon size={16} style={{ color }} />
@@ -132,7 +132,7 @@ export default function Roadmap() {
   return (
     <section
       className="py-24"
-      style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+      style={{ borderTop: '1px solid #f3f4f6' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
