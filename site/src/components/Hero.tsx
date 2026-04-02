@@ -2,15 +2,15 @@ import { motion } from 'framer-motion'
 import { ArrowRight, GitBranch, Shield } from 'lucide-react'
 
 const channels = [
-  { label: 'Telegram',  angle: -90,  color: '#4f6eff' },
-  { label: 'WhatsApp',  angle: -45,  color: '#059669' },
+  { label: 'Telegram',  angle: -80,  color: '#4f6eff' },
+  { label: 'WhatsApp',  angle: -40,  color: '#059669' },
   { label: 'Discord',   angle:   0,  color: '#6366f1' },
-  { label: 'Email',     angle:  45,  color: '#059669' },
-  { label: 'Slack',     angle:  90,  color: '#d97706' },
-  { label: 'GitHub',    angle: 135,  color: '#3a56e8' },
+  { label: 'Email',     angle:  40,  color: '#059669' },
+  { label: 'Slack',     angle:  80,  color: '#d97706' },
+  { label: 'GitHub',    angle: 140,  color: '#3a56e8' },
   { label: 'Notion',    angle: 180,  color: '#3a56e8' },
-  { label: 'Linear',    angle: 225,  color: '#4f6eff' },
-  { label: '+ any MCP', angle: 270,  color: '#9ca3af' },
+  { label: 'Linear',    angle: 220,  color: '#4f6eff' },
+  { label: '+ any MCP', angle: 280,  color: '#9ca3af' },
 ]
 
 function HUDDiagram() {
