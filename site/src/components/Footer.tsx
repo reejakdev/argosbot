@@ -27,7 +27,7 @@ export default function Footer() {
               />
               <span
                 className="font-semibold text-lg tracking-widest"
-                style={{ color: '#ffffff', letterSpacing: '0.25em' }}
+                style={{ color: '#f5f5f5', letterSpacing: '0.25em' }}
               >
                 ARGOS
               </span>

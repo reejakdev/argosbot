@@ -84,7 +84,7 @@ export default function History() {
                   cursor: 'default',
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.background = '#f9fafb';
+                  (e.currentTarget as HTMLDivElement).style.background = '#ebebeb';
                 }}
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLDivElement).style.background = 'transparent';
@@ -161,7 +161,7 @@ export default function History() {
                   cursor: 'default',
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.background = '#f9fafb';
+                  (e.currentTarget as HTMLDivElement).style.background = '#ebebeb';
                 }}
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLDivElement).style.background = 'transparent';

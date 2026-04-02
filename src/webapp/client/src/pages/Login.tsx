@@ -116,7 +116,7 @@ export default function Login({ onLogin }: LoginProps) {
 
         <div
           style={{
-            background: '#ffffff',
+            background: '#f5f5f5',
             border: '1px solid #e5e7eb',
             borderRadius: '8px',
             padding: '1.5rem',
@@ -142,7 +142,7 @@ export default function Login({ onLogin }: LoginProps) {
                   fontSize: '0.75rem',
                   fontWeight: 600,
                   padding: '0.5rem',
-                  background: method === m ? '#ffffff' : 'transparent',
+                  background: method === m ? '#f5f5f5' : 'transparent',
                   color: method === m ? '#111827' : 'var(--text2)',
                   border: 'none',
                   borderRadius: '4px',
@@ -192,7 +192,7 @@ export default function Login({ onLogin }: LoginProps) {
                 onKeyDown={(e) => e.key === 'Enter' && loginWithTOTP()}
                 style={{
                   width: '100%',
-                  background: '#ffffff',
+                  background: '#f5f5f5',
                   border: '1px solid rgba(0,0,0,0.1)',
                   borderRadius: '6px',
                   color: '#111827',

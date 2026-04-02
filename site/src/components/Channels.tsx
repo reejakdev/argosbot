@@ -62,7 +62,7 @@ export default function Channels() {
       className="py-24"
       style={{
         borderTop: '1px solid #e5e7eb',
-        background: '#ffffff',
+        background: '#f5f5f5',
       }}
     >
       <div className="max-w-7xl mx-auto px-6">

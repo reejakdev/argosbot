@@ -156,7 +156,7 @@ export default function Integrations() {
           className="mt-8 p-4 text-center rounded-lg"
           style={{
             border: '1px solid rgba(79,110,255,0.1)',
-            background: '#f9fafb',
+            background: '#ebebeb',
           }}
         >
           <span className="font-mono text-sm text-text2">

@@ -33,8 +33,8 @@ export default function Nav() {
           : 'bg-transparent'
       }`}
       style={scrolled ? {
-        background: '#ffffff',
-        borderColor: '#e5e7eb',
+        background: '#f5f5f5',
+        borderColor: '#d4d4d4',
       } : {}}
     >
       <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-16">
@@ -66,15 +66,15 @@ export default function Nav() {
             style={{
               border: '1px solid #e5e7eb',
               color: '#4f6eff',
-              background: '#ffffff',
+              background: '#f5f5f5',
             }}
             onMouseEnter={e => {
-              (e.currentTarget as HTMLElement).style.background = '#f3f4f6'
+              (e.currentTarget as HTMLElement).style.background = '#e4e4e4'
               ;(e.currentTarget as HTMLElement).style.borderColor = '#4f6eff'
             }}
             onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.background = '#ffffff'
-              ;(e.currentTarget as HTMLElement).style.borderColor = '#e5e7eb'
+              (e.currentTarget as HTMLElement).style.background = '#f5f5f5'
+              ;(e.currentTarget as HTMLElement).style.borderColor = '#d4d4d4'
             }}
           >
             <GitBranch size={14} />
@@ -100,8 +100,8 @@ export default function Nav() {
             exit={{ opacity: 0, height: 0 }}
             className="md:hidden backdrop-blur-xl border-b"
             style={{
-              background: '#ffffff',
-              borderColor: '#e5e7eb',
+              background: '#f5f5f5',
+              borderColor: '#d4d4d4',
             }}
           >
             <div className="px-6 py-4 flex flex-col gap-4">

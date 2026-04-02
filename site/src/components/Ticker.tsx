@@ -26,7 +26,7 @@ export default function Ticker() {
       style={{
         borderTop: '1px solid #e5e7eb',
         borderBottom: '1px solid rgba(79,110,255,0.08)',
-        background: '#f9fafb',
+        background: '#ebebeb',
       }}
     >
       {/* Left fade */}

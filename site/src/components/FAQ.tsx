@@ -67,7 +67,7 @@ function FAQItem({ item, index }: { item: typeof faqs[0]; index: number }) {
         className="w-full flex items-center justify-between px-6 py-4 text-left transition-colors group"
         style={{ borderRadius: 'inherit' }}
         onClick={() => setOpen(!open)}
-        onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f9fafb'}
+        onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#ebebeb'}
         onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
       >
         <div className="flex items-center gap-3 flex-1">

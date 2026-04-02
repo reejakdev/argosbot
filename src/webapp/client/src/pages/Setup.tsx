@@ -138,7 +138,7 @@ export default function Setup({ onComplete }: SetupProps) {
           </div>
         </div>
 
-        <div style={{ background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '1.5rem', boxShadow: '0 2px 12px #e5e7eb' }}>
+        <div style={{ background: '#f5f5f5', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '1.5rem', boxShadow: '0 2px 12px #e5e7eb' }}>
           <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.6rem', letterSpacing: '0.12em', color: 'var(--text2)', textTransform: 'uppercase', marginBottom: '1.25rem' }}>
             Register Authentication Method
           </p>
@@ -155,7 +155,7 @@ export default function Setup({ onComplete }: SetupProps) {
                   fontSize: '0.8125rem',
                   fontWeight: method === m ? 600 : 400,
                   padding: '0.6rem',
-                  background: method === m ? '#f3f4f6' : '#ffffff',
+                  background: method === m ? '#e4e4e4' : '#f5f5f5',
                   color: method === m ? '#111827' : 'var(--text2)',
                   border: `1px solid ${method === m ? 'rgba(79,110,255,0.4)' : 'var(--border)'}`,
                   borderRadius: '6px',
@@ -178,7 +178,7 @@ export default function Setup({ onComplete }: SetupProps) {
                 onChange={(e) => setDeviceName(e.target.value)}
                 style={{
                   width: '100%',
-                  background: '#ffffff',
+                  background: '#f5f5f5',
                   border: '1px solid rgba(0,0,0,0.1)',
                   borderRadius: '6px',
                   color: '#111827',
@@ -234,7 +234,7 @@ export default function Setup({ onComplete }: SetupProps) {
                 onKeyDown={(e) => e.key === 'Enter' && verifyTotp()}
                 style={{
                   width: '100%',
-                  background: '#ffffff',
+                  background: '#f5f5f5',
                   border: '1px solid rgba(0,0,0,0.1)',
                   borderRadius: '6px',
                   color: '#4f6eff',

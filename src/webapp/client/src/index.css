@@ -2,8 +2,8 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #ffffff;
-  --color-bg2: #f9fafb;
+  --color-bg: #f5f5f5;
+  --color-bg2: #ebebeb;
   --color-surface: #ffffff;
   --color-surface2: #f3f4f6;
   --color-blue: #4f6eff;
@@ -17,11 +17,11 @@
 }
 
 :root {
-  --bg: #ffffff;
-  --bg2: #f9fafb;
+  --bg: #f5f5f5;
+  --bg2: #ebebeb;
   --surface: #ffffff;
   --surface2: #f3f4f6;
-  --border: #e5e7eb;
+  --border: #d4d4d4;
   --text: #111827;
   --text2: #6b7280;
   --muted: #9ca3af;
@@ -64,7 +64,7 @@ html {
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: #ffffff;
+  background-color: #f5f5f5;
   color: #111827;
   min-height: 100dvh;
   margin: 0;

@@ -144,7 +144,7 @@ export default function WhyArgos() {
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.06 }}
                   style={{ borderBottom: '1px solid #f9fafb' }}
-                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f9fafb'}
+                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#ebebeb'}
                   onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
                   className="transition-colors"
                 >

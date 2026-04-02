@@ -103,7 +103,7 @@ export default function Features() {
                 whileHover={{ y: -3 }}
                 className="p-5 rounded-lg group cursor-default transition-all duration-200"
                 style={{
-                  background: '#ffffff',
+                  background: '#f5f5f5',
                   border: '1px solid #e5e7eb',
                   boxShadow: '0 1px 3px #e5e7eb',
                 }}

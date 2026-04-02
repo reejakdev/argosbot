@@ -81,7 +81,7 @@ function HUDDiagram() {
           {/* Inner static ring */}
           <circle
             cx={0} cy={0} r={r3}
-            fill="#f9fafb"
+            fill="#ebebeb"
             stroke="rgba(79,110,255,0.4)"
             strokeWidth="1.5"
           />
@@ -177,7 +177,7 @@ export default function Hero() {
               className="flex items-center gap-2 px-3 py-1.5 rounded-full"
               style={{
                 border: '1px solid #e5e7eb',
-                background: '#f9fafb',
+                background: '#ebebeb',
               }}
             >
               <div className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
@@ -187,7 +187,7 @@ export default function Hero() {
               className="flex items-center gap-2 px-3 py-1.5 rounded-full"
               style={{
                 border: '1px solid #e5e7eb',
-                background: '#f9fafb',
+                background: '#ebebeb',
               }}
             >
               <Shield size={11} style={{ color: '#4f6eff' }} />
@@ -269,15 +269,15 @@ export default function Hero() {
               style={{
                 border: '1px solid #e5e7eb',
                 color: '#4f6eff',
-                background: '#ffffff',
+                background: '#f5f5f5',
               }}
               onMouseEnter={e => {
-                (e.currentTarget as HTMLElement).style.background = '#f3f4f6'
+                (e.currentTarget as HTMLElement).style.background = '#e4e4e4'
                 ;(e.currentTarget as HTMLElement).style.borderColor = '#4f6eff'
               }}
               onMouseLeave={e => {
-                (e.currentTarget as HTMLElement).style.background = '#ffffff'
-                ;(e.currentTarget as HTMLElement).style.borderColor = '#e5e7eb'
+                (e.currentTarget as HTMLElement).style.background = '#f5f5f5'
+                ;(e.currentTarget as HTMLElement).style.borderColor = '#d4d4d4'
               }}
             >
               <GitBranch size={15} /> View on GitHub

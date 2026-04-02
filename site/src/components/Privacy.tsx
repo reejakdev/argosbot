@@ -49,7 +49,7 @@ export default function Privacy() {
       className="py-24"
       style={{
         borderTop: '1px solid #e5e7eb',
-        background: '#f9fafb',
+        background: '#ebebeb',
       }}
     >
       <div className="max-w-7xl mx-auto px-6">
@@ -157,7 +157,7 @@ export default function Privacy() {
             <div
               className="mt-4 p-3 rounded-lg"
               style={{
-                background: '#f3f4f6',
+                background: '#e4e4e4',
                 border: '1px solid #e5e7eb',
               }}
             >

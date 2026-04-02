@@ -153,7 +153,7 @@ export default function MultiModel() {
           >
             <div
               className="px-4 py-3 border-b flex items-center gap-2"
-              style={{ borderColor: '#e5e7eb' }}
+              style={{ borderColor: '#d4d4d4' }}
             >
               <div className="text-xs font-semibold tracking-wide" style={{ color: '#4f6eff' }}>SUPPORTED PROVIDERS</div>
               <span className="ml-auto text-xs text-text2 font-mono">{providers.length} total</span>

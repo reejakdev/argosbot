@@ -90,7 +90,7 @@ export default function MemoryPage() {
               className="mb-3"
               style={{
                 height: 3,
-                background: '#f3f4f6',
+                background: '#e4e4e4',
                 borderRadius: '2px',
                 position: 'relative',
               }}
@@ -203,7 +203,7 @@ export default function MemoryPage() {
                       letterSpacing: '0.06em',
                       fontWeight: 500,
                       color: '#7b96ff',
-                      background: '#f3f4f6',
+                      background: '#e4e4e4',
                       border: '1px solid rgba(79,110,255,0.2)',
                       borderRadius: '4px',
                       padding: '0.1rem 0.4rem',

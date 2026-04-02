@@ -147,7 +147,7 @@ export default function Proposals() {
           <div
             key={p.id}
             style={{
-              background: '#ffffff',
+              background: '#f5f5f5',
               border: '1px solid #e5e7eb',
               borderRadius: '8px',
               padding: '1rem',
@@ -203,7 +203,7 @@ export default function Proposals() {
               <div
                 className="mb-3 px-3 py-2.5"
                 style={{
-                  background: '#f9fafb',
+                  background: '#ebebeb',
                   border: '1px solid #e5e7eb',
                   borderLeft: '3px solid rgba(79,110,255,0.5)',
                   borderRadius: '0 6px 6px 0',
@@ -246,7 +246,7 @@ export default function Proposals() {
                               fontSize: '0.6rem',
                               fontWeight: 700,
                               color: '#4f6eff',
-                              background: '#f3f4f6',
+                              background: '#e4e4e4',
                               border: '1px solid rgba(79,110,255,0.18)',
                               borderRadius: '3px',
                               padding: '0.1rem 0.4rem',

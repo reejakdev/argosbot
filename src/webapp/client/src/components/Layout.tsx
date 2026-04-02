@@ -121,7 +121,7 @@ export default function Layout({ page, onPageChange, wsConnected, children }: La
                 onClick={() => onPageChange(item.id)}
                 className="flex items-center gap-3 px-3 py-2.5 w-full text-left cursor-pointer transition-all"
                 style={{
-                  background: isActive ? '#f3f4f6' : 'transparent',
+                  background: isActive ? '#e4e4e4' : 'transparent',
                   borderLeft: isActive ? '2px solid #4f6eff' : '2px solid transparent',
                   borderRadius: isActive ? '0 6px 6px 0' : '6px',
                   color: isActive ? '#111827' : '#374151',

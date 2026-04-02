@@ -20,7 +20,7 @@ export function CodeBlock({ code, language = 'json', title }: CodeBlockProps) {
           className="flex items-center gap-2 px-4 py-2.5 border-b"
           style={{
             borderColor: 'rgba(79,110,255,0.1)',
-            background: '#f9fafb',
+            background: '#ebebeb',
           }}
         >
           <div className="flex gap-1.5">

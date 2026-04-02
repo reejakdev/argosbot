@@ -142,7 +142,7 @@ export default function Pipeline() {
         viewport={{ once: true }}
         className="rounded-lg p-6"
         style={{
-          background: '#f9fafb',
+          background: '#ebebeb',
           border: '1px solid #e5e7eb',
           boxShadow: '0 1px 3px #e5e7eb',
         }}
