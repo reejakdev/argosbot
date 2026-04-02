@@ -39,7 +39,7 @@ const channels = [
     proto: 'Discord Bot API',
     desc: 'Discord bot integration for server and DM monitoring. Requires bot token with message intent. Ideal for team server awareness.',
     features: ['Server channels', 'DM monitoring', 'Bot API', 'Thread support'],
-    status: 'v2',
+    status: 'production',
   },
   {
     icon: MessagesSquare,
@@ -48,7 +48,7 @@ const channels = [
     proto: 'Slack Bot API',
     desc: 'Slack workspace monitoring via bot token. Subscribe to channels, DMs, and app mentions. Works with Slack Free and Pro workspaces.',
     features: ['Channel monitoring', 'App mentions', 'DM inbox', 'Workspace events'],
-    status: 'v2',
+    status: 'production',
   },
 ]
 
