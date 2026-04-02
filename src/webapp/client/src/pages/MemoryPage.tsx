@@ -5,16 +5,28 @@ import type { Memory } from '../types.ts';
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts;
   const h = Math.floor(diff / 3600000);
-  if (h < 1) return 'JUST NOW';
-  if (h < 24) return `${h}H AGO`;
+  if (h < 1) return 'Just now';
+  if (h < 24) return `${h}h ago`;
   const d = Math.floor(h / 24);
-  return `${d}D AGO`;
+  return `${d}d ago`;
 }
 
 function importanceColor(importance: number): string {
-  if (importance >= 8) return '#ff4466';
-  if (importance >= 5) return '#ffaa00';
-  return '#00d4ff';
+  if (importance >= 8) return '#ef4444';
+  if (importance >= 5) return '#f59e0b';
+  return '#4f6eff';
+}
+
+function importanceBg(importance: number): string {
+  if (importance >= 8) return 'rgba(239,68,68,0.1)';
+  if (importance >= 5) return 'rgba(245,158,11,0.1)';
+  return 'rgba(79,110,255,0.1)';
+}
+
+function importanceBorder(importance: number): string {
+  if (importance >= 8) return 'rgba(239,68,68,0.25)';
+  if (importance >= 5) return 'rgba(245,158,11,0.25)';
+  return 'rgba(79,110,255,0.25)';
 }
 
 export default function MemoryPage() {
@@ -34,7 +46,7 @@ export default function MemoryPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <span className="label-mono" style={{ color: 'var(--muted)' }}>LOADING...</span>
+        <span className="label-mono">Loading...</span>
       </div>
     );
   }
@@ -42,10 +54,10 @@ export default function MemoryPage() {
   if (memories.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-3">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="rgba(0,212,255,0.25)" strokeWidth={1}>
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="rgba(79,110,255,0.25)" strokeWidth={1}>
           <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
         </svg>
-        <span className="label-mono" style={{ color: 'rgba(0,212,255,0.3)' }}>NO MEMORIES YET</span>
+        <span className="label-mono" style={{ color: 'rgba(79,110,255,0.4)' }}>No Memories Yet</span>
       </div>
     );
   }
@@ -55,11 +67,20 @@ export default function MemoryPage() {
       {memories.map((m) => {
         const impColor = importanceColor(m.importance);
         return (
-          <div key={m.id} className="hud-card">
+          <div
+            key={m.id}
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              padding: '1rem',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+            }}
+          >
             {/* Content */}
             <p
               className="text-sm leading-relaxed mb-3"
-              style={{ color: 'var(--text)' }}
+              style={{ color: '#f0f4ff', fontFamily: "'Inter', sans-serif" }}
             >
               {m.content}
             </p>
@@ -68,8 +89,9 @@ export default function MemoryPage() {
             <div
               className="mb-3"
               style={{
-                height: 2,
-                background: 'rgba(0,212,255,0.08)',
+                height: 3,
+                background: 'rgba(79,110,255,0.08)',
+                borderRadius: '2px',
                 position: 'relative',
               }}
             >
@@ -78,7 +100,8 @@ export default function MemoryPage() {
                   height: '100%',
                   width: `${(m.importance / 10) * 100}%`,
                   background: impColor,
-                  boxShadow: `0 0 6px ${impColor}80`,
+                  borderRadius: '2px',
+                  transition: 'width 0.3s ease',
                 }}
               />
             </div>
@@ -87,25 +110,28 @@ export default function MemoryPage() {
             <div className="flex items-center gap-2 flex-wrap">
               <span
                 style={{
-                  fontFamily: "'Courier New', monospace",
+                  fontFamily: "'JetBrains Mono', monospace",
                   fontSize: '0.6rem',
+                  fontWeight: 700,
                   letterSpacing: '0.06em',
                   color: impColor,
-                  fontWeight: 700,
+                  background: importanceBg(m.importance),
+                  border: `1px solid ${importanceBorder(m.importance)}`,
+                  borderRadius: '4px',
+                  padding: '0.15rem 0.5rem',
                 }}
               >
-                IMP:{m.importance}
+                IMP {m.importance}/10
               </span>
 
               {m.partner_name && (
                 <>
-                  <span style={{ color: 'var(--border)', fontSize: '0.6rem' }}>·</span>
+                  <span style={{ color: 'var(--border)', fontSize: '0.7rem' }}>·</span>
                   <span
                     style={{
-                      fontFamily: "'Courier New', monospace",
-                      fontSize: '0.6rem',
-                      color: 'var(--muted)',
-                      letterSpacing: '0.04em',
+                      fontFamily: "'Inter', sans-serif",
+                      fontSize: '0.75rem',
+                      color: 'var(--text2)',
                     }}
                   >
                     {m.partner_name}
@@ -115,8 +141,21 @@ export default function MemoryPage() {
 
               {m.category && (
                 <>
-                  <span style={{ color: 'var(--border)', fontSize: '0.6rem' }}>·</span>
-                  <span className="badge-pending" style={{ fontSize: '0.55rem', padding: '0.1rem 0.4rem' }}>
+                  <span style={{ color: 'var(--border)', fontSize: '0.7rem' }}>·</span>
+                  <span
+                    style={{
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: '0.6rem',
+                      fontWeight: 700,
+                      letterSpacing: '0.06em',
+                      color: '#7b96ff',
+                      background: 'rgba(79,110,255,0.1)',
+                      border: '1px solid rgba(79,110,255,0.2)',
+                      borderRadius: '4px',
+                      padding: '0.15rem 0.5rem',
+                      textTransform: 'uppercase',
+                    }}
+                  >
                     {m.category}
                   </span>
                 </>
@@ -124,13 +163,14 @@ export default function MemoryPage() {
 
               {m.archived === 1 && (
                 <>
-                  <span style={{ color: 'var(--border)', fontSize: '0.6rem' }}>·</span>
+                  <span style={{ color: 'var(--border)', fontSize: '0.7rem' }}>·</span>
                   <span
                     style={{
-                      fontFamily: "'Courier New', monospace",
+                      fontFamily: "'JetBrains Mono', monospace",
                       fontSize: '0.6rem',
-                      color: '#ffaa00',
+                      fontWeight: 700,
                       letterSpacing: '0.06em',
+                      color: '#f59e0b',
                     }}
                   >
                     ARCHIVED
@@ -138,7 +178,15 @@ export default function MemoryPage() {
                 </>
               )}
 
-              <span style={{ marginLeft: 'auto', fontFamily: "'Courier New', monospace", fontSize: '0.6rem', color: 'var(--muted)' }}>
+              <span
+                style={{
+                  marginLeft: 'auto',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '0.6rem',
+                  color: 'var(--text2)',
+                  letterSpacing: '0.04em',
+                }}
+              >
                 {timeAgo(m.created_at)}
               </span>
             </div>
@@ -150,13 +198,14 @@ export default function MemoryPage() {
                   <span
                     key={tag}
                     style={{
-                      fontFamily: "'Courier New', monospace",
+                      fontFamily: "'JetBrains Mono', monospace",
                       fontSize: '0.55rem',
                       letterSpacing: '0.06em',
-                      fontWeight: 700,
-                      color: '#00d4ff',
-                      background: 'rgba(0,212,255,0.08)',
-                      border: '1px solid rgba(0,212,255,0.2)',
+                      fontWeight: 500,
+                      color: '#7b96ff',
+                      background: 'rgba(79,110,255,0.08)',
+                      border: '1px solid rgba(79,110,255,0.2)',
+                      borderRadius: '4px',
                       padding: '0.1rem 0.4rem',
                     }}
                   >
