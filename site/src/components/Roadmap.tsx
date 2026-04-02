@@ -83,14 +83,14 @@ function RoadmapColumn({
       transition={{ delay: index * 0.15, duration: 0.5 }}
       className="rounded-lg overflow-hidden"
       style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
+        background: '#ffffff',
+        border: '1px solid #e2e2e2',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
       }}
     >
       <div
         className="px-5 py-4 border-b"
-        style={{ background: `${color}06`, borderColor: 'rgba(79,110,255,0.08)' }}
+        style={{ background: `${color}06`, borderColor: '#e2e2e2' }}
       >
         <div className="flex items-center gap-3">
           <Icon size={16} style={{ color }} />
@@ -117,7 +117,7 @@ function RoadmapColumn({
               size={13}
               style={{ color, flexShrink: 0, opacity: version === 'v1 — DONE' ? 1 : 0.4 }}
             />
-            <span style={{ color: version === 'v1 — DONE' ? 'var(--text)' : '#6b7280' }}>{item}</span>
+            <span style={{ color: version === 'v1 — DONE' ? '#1a1a1a' : '#888888' }}>{item}</span>
           </motion.div>
         ))}
       </div>
@@ -132,7 +132,7 @@ export default function Roadmap() {
   return (
     <section
       className="py-24"
-      style={{ borderTop: '1px solid #f3f4f6' }}
+      style={{ borderTop: '1px solid #e2e2e2' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -157,7 +157,7 @@ export default function Roadmap() {
             title="Core Pipeline"
             version="v1 — DONE"
             items={v1Done}
-            color="#10b981"
+            color="#16a34a"
             icon={CheckCircle2}
             index={0}
           />
@@ -165,7 +165,7 @@ export default function Roadmap() {
             title="Native + Extended"
             version="v2 — NEXT"
             items={v2Next}
-            color="#4f6eff"
+            color="#5b6cf8"
             icon={Circle}
             index={1}
           />
@@ -173,7 +173,7 @@ export default function Roadmap() {
             title="Multi-user / Enterprise"
             version="v3 — FUTURE"
             items={v3Future}
-            color="#6b7280"
+            color="#888888"
             icon={Hexagon}
             index={2}
           />

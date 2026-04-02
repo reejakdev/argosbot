@@ -7,19 +7,21 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: '#060b1f',
-        bg2: '#0a1020',
-        surface: '#0d1530',
-        surface2: '#111b3a',
-        blue: '#4f6eff',
-        blue2: '#7b96ff',
-        green: '#10b981',
-        red: '#ef4444',
-        yellow: '#f59e0b',
-        text: '#f0f4ff',
-        text2: '#94a3b8',
-        // Legacy aliases for gradual migration
-        cyan: '#4f6eff',
+        bg: '#f8f8f8',
+        bg2: '#f8f8f8',
+        surface: '#ffffff',
+        surface2: '#f0f0f0',
+        blue: '#5b6cf8',
+        blue2: '#4455e8',
+        green: '#16a34a',
+        red: '#dc2626',
+        yellow: '#d97706',
+        text: '#1a1a1a',
+        text2: '#444444',
+        text3: '#888888',
+        border: '#e2e2e2',
+        // Legacy alias
+        cyan: '#5b6cf8',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
@@ -46,12 +48,12 @@ export default {
         },
       },
       boxShadow: {
-        'blue': '0 4px 24px rgba(79,110,255,0.25)',
-        'blue-sm': '0 2px 12px rgba(79,110,255,0.2)',
-        'card': '0 4px 24px rgba(0,0,0,0.4)',
+        'blue': '0 4px 24px rgba(91,108,248,0.2)',
+        'blue-sm': '0 2px 12px rgba(91,108,248,0.15)',
+        'card': '0 1px 3px rgba(0,0,0,0.1)',
       },
       borderColor: {
-        DEFAULT: 'rgba(79,110,255,0.15)',
+        DEFAULT: '#e2e2e2',
       },
     },
   },

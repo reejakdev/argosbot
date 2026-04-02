@@ -46,7 +46,7 @@ export default function MultiModel() {
     <section
       id="models"
       className="py-24"
-      style={{ borderTop: '1px solid #e5e7eb' }}
+      style={{ borderTop: '1px solid #e2e2e2' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -56,7 +56,7 @@ export default function MultiModel() {
           className="mb-14"
         >
           <div className="section-label mb-3">Multi-Model</div>
-          <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#111827' }}>
+          <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#1a1a1a' }}>
             15+ LLM providers.{' '}
             <span className="gradient-text">One config.</span>
           </h2>
@@ -78,14 +78,14 @@ export default function MultiModel() {
               <div
                 className="rounded-lg p-4"
                 style={{
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  boxShadow: '0 1px 4px #e5e7eb, 0 4px 16px rgba(0,0,0,0.04)',
+                  background: '#ffffff',
+                  border: '1px solid #e2e2e2',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                 }}
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <div className="w-2 h-2 rounded-full" style={{ background: '#4f6eff' }} />
-                  <span className="text-sm font-semibold" style={{ color: '#111827' }}>Primary LLM</span>
+                  <div className="w-2 h-2 rounded-full" style={{ background: '#5b6cf8' }} />
+                  <span className="text-sm font-semibold" style={{ color: '#1a1a1a' }}>Primary LLM</span>
                   <Badge label="cloud" variant="cloud" />
                 </div>
                 <p className="text-text2 text-sm">
@@ -95,14 +95,14 @@ export default function MultiModel() {
               <div
                 className="rounded-lg p-4"
                 style={{
-                  background: 'var(--surface)',
-                  border: '1px solid rgba(5,150,105,0.2)',
-                  boxShadow: '0 1px 4px #e5e7eb, 0 4px 16px rgba(0,0,0,0.04)',
+                  background: '#ffffff',
+                  border: '1px solid rgba(22,163,74,0.25)',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                 }}
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <div className="w-2 h-2 rounded-full" style={{ background: '#059669' }} />
-                  <span className="text-sm font-semibold" style={{ color: '#111827' }}>Local LLM</span>
+                  <div className="w-2 h-2 rounded-full" style={{ background: '#16a34a' }} />
+                  <span className="text-sm font-semibold" style={{ color: '#1a1a1a' }}>Local LLM</span>
                   <Badge label="local" variant="local" />
                 </div>
                 <p className="text-text2 text-sm">
@@ -112,14 +112,14 @@ export default function MultiModel() {
               <div
                 className="rounded-lg p-4"
                 style={{
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  boxShadow: '0 1px 4px #e5e7eb, 0 4px 16px rgba(0,0,0,0.04)',
+                  background: '#ffffff',
+                  border: '1px solid #e2e2e2',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                 }}
               >
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-2 h-2 rounded-full bg-text2" />
-                  <span className="text-sm font-semibold" style={{ color: '#111827' }}>Fallback LLM</span>
+                  <span className="text-sm font-semibold" style={{ color: '#1a1a1a' }}>Fallback LLM</span>
                   <Badge label="cloud" variant="cloud" />
                 </div>
                 <p className="text-text2 text-sm">
@@ -146,16 +146,16 @@ export default function MultiModel() {
             transition={{ duration: 0.5 }}
             className="rounded-lg overflow-hidden"
             style={{
-              background: 'var(--surface)',
-              border: '1px solid var(--border)',
-              boxShadow: '0 1px 4px #e5e7eb, 0 4px 16px rgba(0,0,0,0.04)',
+              background: '#ffffff',
+              border: '1px solid #e2e2e2',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
             }}
           >
             <div
               className="px-4 py-3 border-b flex items-center gap-2"
-              style={{ borderColor: '#d4d4d4' }}
+              style={{ borderColor: '#e2e2e2' }}
             >
-              <div className="text-xs font-semibold tracking-wide" style={{ color: '#4f6eff' }}>SUPPORTED PROVIDERS</div>
+              <div className="text-xs font-semibold tracking-wide" style={{ color: '#5b6cf8' }}>SUPPORTED PROVIDERS</div>
               <span className="ml-auto text-xs text-text2 font-mono">{providers.length} total</span>
             </div>
             <div>
@@ -167,12 +167,12 @@ export default function MultiModel() {
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.04 }}
                   className="flex items-center justify-between px-4 py-3 transition-colors"
-                  style={{ borderBottom: i < providers.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}
-                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.03)'}
+                  style={{ borderBottom: i < providers.length - 1 ? '1px solid #e2e2e2' : 'none' }}
+                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f8f8f8'}
                   onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
                 >
                   <div>
-                    <div className="text-sm font-medium" style={{ color: '#111827' }}>{p.name}</div>
+                    <div className="text-sm font-medium" style={{ color: '#1a1a1a' }}>{p.name}</div>
                     <div className="text-text2 text-xs mt-0.5">{p.notes}</div>
                   </div>
                   <Badge

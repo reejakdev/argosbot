@@ -58,16 +58,16 @@ function FAQItem({ item, index }: { item: typeof faqs[0]; index: number }) {
       transition={{ delay: index * 0.05 }}
       className="rounded-lg overflow-hidden"
       style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+        background: '#ffffff',
+        border: '1px solid #e2e2e2',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
       }}
     >
       <button
         className="w-full flex items-center justify-between px-6 py-4 text-left transition-colors group"
         style={{ borderRadius: 'inherit' }}
         onClick={() => setOpen(!open)}
-        onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#ebebeb'}
+        onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f8f8f8'}
         onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
       >
         <div className="flex items-center gap-3 flex-1">
@@ -83,7 +83,7 @@ function FAQItem({ item, index }: { item: typeof faqs[0]; index: number }) {
           transition={{ duration: 0.2 }}
           className="flex-shrink-0 ml-4"
         >
-          <ChevronDown size={16} style={{ color: 'rgba(79,110,255,0.5)' }} />
+          <ChevronDown size={16} style={{ color: 'rgba(91,108,248,0.5)' }} />
         </motion.div>
       </button>
 
@@ -98,7 +98,7 @@ function FAQItem({ item, index }: { item: typeof faqs[0]; index: number }) {
           >
             <div
               className="px-6 pb-5 pt-0"
-              style={{ borderTop: '1px solid #f3f4f6' }}
+              style={{ borderTop: '1px solid #e2e2e2' }}
             >
               <p className="text-text2 text-sm leading-relaxed pt-4">{item.a}</p>
             </div>
@@ -117,7 +117,7 @@ export default function FAQ() {
     <section
       id="faq"
       className="py-24"
-      style={{ borderTop: '1px solid #f3f4f6' }}
+      style={{ borderTop: '1px solid #e2e2e2' }}
     >
       <div className="max-w-4xl mx-auto px-6">
         <motion.div

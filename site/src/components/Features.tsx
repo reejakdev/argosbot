@@ -8,55 +8,55 @@ import {
 const features = [
   {
     icon: Zap,
-    color: '#4f6eff',
+    color: '#5b6cf8',
     title: 'Triage Engine',
     desc: 'Fast regex pre-screen catches noise before the expensive LLM call. Messages are categorized, team-routed, and scored for urgency at near-zero cost.',
   },
   {
     icon: FileText,
-    color: '#10b981',
+    color: '#16a34a',
     title: 'RAG-backed Drafts',
     desc: 'Drafts are grounded in your knowledge base. LanceDB semantic search retrieves relevant context before the planner generates any response — no hallucinated facts.',
   },
   {
     icon: BookOpen,
-    color: '#4f6eff',
+    color: '#5b6cf8',
     title: 'Knowledge Base',
     desc: 'Connect Notion pages, GitHub repos, and URLs. Argos chunks, embeds, and indexes them in LanceDB. Your assistant stays current with your actual documentation.',
   },
   {
     icon: Brain,
-    color: '#10b981',
+    color: '#16a34a',
     title: 'Personal Memory',
     desc: 'Anonymized summaries stored with FTS5 full-text search and semantic embeddings. Configurable TTL (default 30 days). Auto-archives high-importance memories for 1 year.',
   },
   {
     icon: CheckSquare,
-    color: '#ef4444',
+    color: '#dc2626',
     title: 'Proposal Queue',
     desc: 'Every LLM action plan queues for human review. Approve, reject, or edit before anything executes. Proposals expire automatically — no stale actions lurking.',
   },
   {
     icon: Puzzle,
-    color: '#4f6eff',
+    color: '#5b6cf8',
     title: 'Plugin System',
     desc: 'TypeScript plugin API with onBoot, onMessage, and onShutdown hooks. Plugins can inject messages, register tools, or trigger background tasks. Full lifecycle control.',
   },
   {
     icon: Link2,
-    color: '#10b981',
+    color: '#16a34a',
     title: 'MCP Integrations',
     desc: 'Model Context Protocol support — connect Argos to any MCP server. Expose external tools (databases, APIs, services) to the planner via the standardized protocol.',
   },
   {
     icon: Bell,
-    color: '#4f6eff',
+    color: '#5b6cf8',
     title: 'Briefing Mode',
     desc: 'Scheduled heartbeat that synthesizes open tasks, pending proposals, and recent memories into a concise daily briefing. Delivered to your chosen channel.',
   },
   {
     icon: Key,
-    color: '#ef4444',
+    color: '#dc2626',
     title: 'WebAuthn Dashboard',
     desc: 'Local web app secured by FIDO2/YubiKey passkeys with TOTP backup. Review proposals, manage tasks, browse memories — all behind hardware authentication.',
   },
@@ -70,7 +70,7 @@ export default function Features() {
     <section
       id="features"
       className="py-24"
-      style={{ borderTop: '1px solid #e5e7eb' }}
+      style={{ borderTop: '1px solid #e2e2e2' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -103,9 +103,9 @@ export default function Features() {
                 whileHover={{ y: -3 }}
                 className="p-5 rounded-lg group cursor-default transition-all duration-200"
                 style={{
-                  background: '#f5f5f5',
-                  border: '1px solid #e5e7eb',
-                  boxShadow: '0 1px 3px #e5e7eb',
+                  background: '#ffffff',
+                  border: '1px solid #e2e2e2',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                 }}
               >
                 <div

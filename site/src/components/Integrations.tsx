@@ -72,8 +72,8 @@ const categories = [
 ]
 
 const statusStyle = {
-  live: { dot: '#10b981', text: 'var(--text)', border: 'rgba(16,185,129,0.15)' },
-  v2:   { dot: '#6b7280', text: '#6b7280', border: 'rgba(148,163,184,0.1)' },
+  live: { dot: '#16a34a', text: '#1a1a1a', border: 'rgba(22,163,74,0.15)' },
+  v2:   { dot: '#888888', text: '#888888', border: 'rgba(136,136,136,0.15)' },
 }
 
 export default function Integrations() {
@@ -84,7 +84,7 @@ export default function Integrations() {
     <section
       id="integrations"
       className="py-24"
-      style={{ borderTop: '1px solid #f3f4f6' }}
+      style={{ borderTop: '1px solid #e2e2e2' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -113,9 +113,9 @@ export default function Integrations() {
               transition={{ delay: ci * 0.07 }}
               className="p-5 rounded-lg"
               style={{
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
+                background: '#ffffff',
+                border: '1px solid #e2e2e2',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
               }}
             >
               <div className="section-label mb-4" style={{ fontSize: '10px' }}>
@@ -128,7 +128,7 @@ export default function Integrations() {
                     <div
                       key={item.name}
                       className="flex items-center justify-between px-3 py-1.5 rounded-md"
-                      style={{ background: 'rgba(0,0,0,0.2)', border: `1px solid ${s.border}` }}
+                      style={{ background: '#f8f8f8', border: `1px solid ${s.border}` }}
                     >
                       <div className="flex items-center gap-2">
                         <div
@@ -155,12 +155,13 @@ export default function Integrations() {
           transition={{ delay: 0.5 }}
           className="mt-8 p-4 text-center rounded-lg"
           style={{
-            border: '1px solid rgba(79,110,255,0.1)',
-            background: '#ebebeb',
+            border: '1px solid #e2e2e2',
+            background: '#ffffff',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
           }}
         >
           <span className="font-mono text-sm text-text2">
-            + any <span style={{ color: '#7b96ff' }}>MCP server</span> · any <span style={{ color: '#7b96ff' }}>OpenAI-compatible</span> endpoint · any <span style={{ color: '#10b981' }}>local Ollama model</span>
+            + any <span style={{ color: '#5b6cf8' }}>MCP server</span> · any <span style={{ color: '#5b6cf8' }}>OpenAI-compatible</span> endpoint · any <span style={{ color: '#16a34a' }}>local Ollama model</span>
           </span>
         </motion.div>
       </div>

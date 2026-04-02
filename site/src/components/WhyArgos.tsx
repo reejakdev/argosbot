@@ -64,17 +64,17 @@ const rows = [
 
 const boxes = [
   {
-    color: '#4f6eff',
+    color: '#5b6cf8',
     title: 'Privacy by architecture',
     body: 'Generic AI assistants promise privacy in their terms of service. Argos enforces it structurally. The pipeline is designed so that raw data physically cannot reach a cloud model — not because we ask nicely, but because the anonymizer runs locally before any external call is made.',
   },
   {
-    color: '#10b981',
+    color: '#16a34a',
     title: 'Human-in-the-loop',
     body: 'Most AI tools optimize for autonomy. Argos optimizes for trust. Every proposed action is a checkpoint. You\'re not signing a blank check — you\'re reviewing a specific, reversible proposal with full context about what will happen and why.',
   },
   {
-    color: '#ef4444',
+    color: '#dc2626',
     title: 'Built for fintech & crypto',
     body: 'Ethereum addresses, transaction hashes, ENS names, DeFi protocol names, custody flows — Argos knows the vocabulary. The anonymizer has specific patterns for crypto PII that generic tools miss entirely.',
   },
@@ -88,7 +88,7 @@ export default function WhyArgos() {
     <section
       id="why"
       className="py-24"
-      style={{ borderTop: '1px solid #f3f4f6' }}
+      style={{ borderTop: '1px solid #e2e2e2' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -115,19 +115,19 @@ export default function WhyArgos() {
           viewport={{ once: true }}
           className="rounded-xl overflow-hidden mb-10"
           style={{
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            boxShadow: '0 4px 32px rgba(0,0,0,0.4)',
+            background: '#ffffff',
+            border: '1px solid #e2e2e2',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
           }}
         >
           <table className="w-full">
             <thead>
-              <tr style={{ borderBottom: '1px solid rgba(79,110,255,0.08)' }}>
+              <tr style={{ borderBottom: '1px solid #e2e2e2' }}>
                 <th className="text-left px-5 py-4 text-text2 text-sm font-medium">Feature</th>
                 <th className="px-5 py-4 text-center">
                   <div className="flex items-center justify-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-green animate-pulse" />
-                    <span className="font-semibold text-sm" style={{ color: '#10b981' }}>ARGOS</span>
+                    <span className="font-semibold text-sm" style={{ color: '#16a34a' }}>ARGOS</span>
                   </div>
                 </th>
                 <th className="px-5 py-4 text-center">
@@ -143,8 +143,8 @@ export default function WhyArgos() {
                   whileInView={{ opacity: 1, x: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.06 }}
-                  style={{ borderBottom: '1px solid #f9fafb' }}
-                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#ebebeb'}
+                  style={{ borderBottom: '1px solid #e2e2e2' }}
+                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = '#f8f8f8'}
                   onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
                   className="transition-colors"
                 >
@@ -153,11 +153,11 @@ export default function WhyArgos() {
                     <div className="flex flex-col items-center gap-0.5">
                       <div
                         className="flex items-center justify-center w-6 h-6 rounded-full"
-                        style={{ background: row.argos ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)' }}
+                        style={{ background: row.argos ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.12)' }}
                       >
                         {row.argos
-                          ? <Check size={12} style={{ color: '#10b981' }} />
-                          : <X size={12} style={{ color: '#ef4444' }} />
+                          ? <Check size={12} style={{ color: '#16a34a' }} />
+                          : <X size={12} style={{ color: '#dc2626' }} />
                         }
                       </div>
                       <span className="text-xs text-text2/60 font-mono">{row.argosNote}</span>
@@ -167,10 +167,10 @@ export default function WhyArgos() {
                     <div className="flex flex-col items-center gap-0.5">
                       <div
                         className="flex items-center justify-center w-6 h-6 rounded-full"
-                        style={{ background: row.generic ? 'rgba(239,68,68,0.12)' : 'rgba(148,163,184,0.1)' }}
+                        style={{ background: row.generic ? 'rgba(220,38,38,0.12)' : 'rgba(148,163,184,0.1)' }}
                       >
                         {row.generic
-                          ? <X size={12} style={{ color: '#ef4444' }} />
+                          ? <X size={12} style={{ color: '#dc2626' }} />
                           : <Check size={12} className="text-text2" />
                         }
                       </div>
@@ -194,9 +194,9 @@ export default function WhyArgos() {
               transition={{ delay: i * 0.15 }}
               className="rounded-lg p-6"
               style={{
-                background: 'var(--surface)',
+                background: '#ffffff',
                 border: `1px solid ${box.color}20`,
-                boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
               }}
             >
               <div

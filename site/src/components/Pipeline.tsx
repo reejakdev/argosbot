@@ -15,7 +15,7 @@ const steps = [
     desc: 'Messages arrive from Telegram MTProto, WhatsApp Baileys, IMAP email, Discord bot, or Slack bot. Each channel is isolated — one failure never crashes the pipeline.',
     badge: 'local',
     badgeLabel: 'local',
-    color: '#4f6eff',
+    color: '#5b6cf8',
   },
   {
     num: '02',
@@ -24,7 +24,7 @@ const steps = [
     desc: 'Regex fast-screen catches 10+ injection patterns instantly. Suspicious content gets a deeper LLM scan. Injections are quarantined and flagged before anything else runs.',
     badge: 'local',
     badgeLabel: 'local',
-    color: '#059669',
+    color: '#16a34a',
   },
   {
     num: '03',
@@ -33,7 +33,7 @@ const steps = [
     desc: 'ETH/BTC/SOL addresses, tx hashes, ENS names, exact amounts, emails, phone numbers — all replaced with typed placeholders like [ADDR_1] and [AMT_10K-100K_USDC]. A local lookup table holds the real values, never sent anywhere.',
     badge: 'local',
     badgeLabel: 'local',
-    color: '#059669',
+    color: '#16a34a',
   },
   {
     num: '04',
@@ -42,7 +42,7 @@ const steps = [
     desc: 'The anonymized content reaches the LLM classifier at temperature=0 for deterministic output. It assigns category, team routing, task detection, and completion signals.',
     badge: 'cloud',
     badgeLabel: 'cloud ok',
-    color: '#4f6eff',
+    color: '#5b6cf8',
   },
   {
     num: '05',
@@ -51,7 +51,7 @@ const steps = [
     desc: 'The planner uses tool use to draft replies, schedule calendar events, create Notion pages, or prepare transaction review packs. Everything is a proposal — nothing executes yet.',
     badge: 'cloud',
     badgeLabel: 'cloud ok',
-    color: '#4f6eff',
+    color: '#5b6cf8',
   },
   {
     num: '06',
@@ -91,8 +91,8 @@ function StepCard({ step, index }: { step: typeof steps[0]; index: number }) {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2">
-              <span className="font-mono text-xs" style={{ color: '#9ca3af' }}>{step.num}</span>
-              <h3 className="font-semibold text-base" style={{ color: '#111827' }}>{step.title}</h3>
+              <span className="font-mono text-xs" style={{ color: '#888888' }}>{step.num}</span>
+              <h3 className="font-semibold text-base" style={{ color: '#1a1a1a' }}>{step.title}</h3>
               <Badge
                 label={step.badgeLabel}
                 variant={step.badge as 'local' | 'cloud' | 'human'}
@@ -119,7 +119,7 @@ export default function Pipeline() {
         className="mb-14"
       >
         <div className="section-label mb-3">Architecture</div>
-        <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#111827' }}>
+        <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#1a1a1a' }}>
           The 6-Step{' '}
           <span className="gradient-text">Privacy Pipeline</span>
         </h2>
@@ -142,20 +142,20 @@ export default function Pipeline() {
         viewport={{ once: true }}
         className="rounded-lg p-6"
         style={{
-          background: '#ebebeb',
-          border: '1px solid #e5e7eb',
-          boxShadow: '0 1px 3px #e5e7eb',
+          background: '#ffffff',
+          border: '1px solid #e2e2e2',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
         }}
       >
         <div className="flex items-start gap-4">
-          <EyeOff size={20} style={{ color: '#059669' }} className="flex-shrink-0 mt-0.5" />
+          <EyeOff size={20} style={{ color: '#16a34a' }} className="flex-shrink-0 mt-0.5" />
           <div>
-            <div className="text-xs font-semibold tracking-wide mb-2" style={{ color: '#059669' }}>
+            <div className="text-xs font-semibold tracking-wide mb-2" style={{ color: '#16a34a' }}>
               KEY INSIGHT — ANONYMIZATION
             </div>
-            <p className="leading-relaxed text-sm" style={{ color: '#374151' }}>
+            <p className="leading-relaxed text-sm" style={{ color: '#444444' }}>
               The LLM anonymizer that de-identifies sensitive data runs{' '}
-              <span className="font-semibold" style={{ color: '#059669' }}>exclusively on local models</span> (Ollama, LM Studio, etc.).
+              <span className="font-semibold" style={{ color: '#16a34a' }}>exclusively on local models</span> (Ollama, LM Studio, etc.).
               Running it on a cloud model would be self-defeating — you'd be sending the raw PII to the very service
               you're trying to protect against. The cloud classifier and planner only ever see sanitized, anonymized
               placeholders. The real values live in an in-memory lookup table that never leaves your machine.

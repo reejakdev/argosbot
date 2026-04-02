@@ -7,7 +7,7 @@ import { Badge } from './ui/Badge'
 const channels = [
   {
     icon: MessageCircle,
-    color: '#4f6eff',
+    color: '#5b6cf8',
     name: 'Telegram',
     proto: 'MTProto + Bot API',
     desc: 'Full MTProto user client via gramjs — reads your actual Telegram as if you were logged in. Alternative bot mode for group/channel monitoring.',
@@ -16,7 +16,7 @@ const channels = [
   },
   {
     icon: Phone,
-    color: '#059669',
+    color: '#16a34a',
     name: 'WhatsApp',
     proto: 'Baileys (multi-device)',
     desc: 'Multi-device WhatsApp via Baileys — no WhatsApp Business API needed. Connects as your personal account with full QR pairing.',
@@ -25,7 +25,7 @@ const channels = [
   },
   {
     icon: Mail,
-    color: '#4f6eff',
+    color: '#5b6cf8',
     name: 'Email',
     proto: 'IMAP + SMTP',
     desc: 'Standard IMAP polling with IDLE support for near-real-time delivery. Works with Gmail, Outlook, FastMail, Proton Bridge, and any IMAP server.',
@@ -34,7 +34,7 @@ const channels = [
   },
   {
     icon: Hash,
-    color: '#059669',
+    color: '#16a34a',
     name: 'Discord',
     proto: 'Discord Bot API',
     desc: 'Discord bot integration for server and DM monitoring. Requires bot token with message intent. Ideal for team server awareness.',
@@ -61,8 +61,8 @@ export default function Channels() {
       id="channels"
       className="py-24"
       style={{
-        borderTop: '1px solid #e5e7eb',
-        background: '#f5f5f5',
+        borderTop: '1px solid #e2e2e2',
+        background: '#f8f8f8',
       }}
     >
       <div className="max-w-7xl mx-auto px-6">
@@ -73,7 +73,7 @@ export default function Channels() {
           className="mb-14"
         >
           <div className="section-label mb-3">Channels</div>
-          <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#111827' }}>
+          <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#1a1a1a' }}>
             5 channels.{' '}
             <span className="gradient-text">One unified inbox.</span>
           </h2>
@@ -96,9 +96,9 @@ export default function Channels() {
                 whileHover={{ y: -4 }}
                 className="p-5 rounded-lg group cursor-default transition-all duration-200"
                 style={{
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  boxShadow: '0 1px 4px #e5e7eb, 0 4px 16px rgba(0,0,0,0.04)',
+                  background: '#ffffff',
+                  border: '1px solid #e2e2e2',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                 }}
               >
                 {/* Header */}
@@ -114,7 +114,7 @@ export default function Channels() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold" style={{ color: '#111827' }}>{ch.name}</span>
+                      <span className="font-semibold" style={{ color: '#1a1a1a' }}>{ch.name}</span>
                       <Badge
                         label={ch.status === 'production' ? 'live' : ch.status}
                         variant={ch.status === 'production' ? 'local' : 'default'}

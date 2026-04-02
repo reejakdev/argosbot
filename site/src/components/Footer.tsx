@@ -13,8 +13,8 @@ export default function Footer() {
   return (
     <footer
       style={{
-        borderTop: '1px solid #1f2937',
-        background: '#111827',
+        borderTop: '1px solid #2a2a2a',
+        background: '#1a1a1a',
       }}
     >
       <div className="max-w-7xl mx-auto px-6 py-16">
@@ -32,26 +32,26 @@ export default function Footer() {
                 ARGOS
               </span>
             </div>
-            <p className="text-sm leading-relaxed mb-4" style={{ color: '#9ca3af' }}>
+            <p className="text-sm leading-relaxed mb-4" style={{ color: '#888888' }}>
               A local-first, privacy-preserving AI assistant for fintech and crypto teams.
               Read by default. Sanitize before memory. Approve before action.
             </p>
-            <div className="flex items-center gap-2 text-xs" style={{ color: '#6b7280' }}>
-              <Shield size={12} style={{ color: '#059669' }} />
+            <div className="flex items-center gap-2 text-xs" style={{ color: '#666666' }}>
+              <Shield size={12} style={{ color: '#16a34a' }} />
               <span>MIT License — Free forever</span>
             </div>
           </div>
 
           {/* Navigation */}
           <div>
-            <div className="text-xs font-semibold tracking-wide mb-4" style={{ color: '#4f6eff' }}>NAVIGATION</div>
+            <div className="text-xs font-semibold tracking-wide mb-4" style={{ color: '#5b6cf8' }}>NAVIGATION</div>
             <div className="grid grid-cols-2 gap-2">
               {links.map((link) => (
                 <a
                   key={link.href}
                   href={link.href}
                   className="text-sm transition-colors"
-                  style={{ color: '#9ca3af' }}
+                  style={{ color: '#888888' }}
                 >
                   {link.label}
                 </a>
@@ -61,14 +61,14 @@ export default function Footer() {
 
           {/* Links */}
           <div>
-            <div className="text-xs font-semibold tracking-wide mb-4" style={{ color: '#4f6eff' }}>LINKS</div>
+            <div className="text-xs font-semibold tracking-wide mb-4" style={{ color: '#5b6cf8' }}>LINKS</div>
             <div className="space-y-2">
               <a
                 href="https://github.com/reejakdev/argosbot"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 text-sm transition-colors"
-                style={{ color: '#9ca3af' }}
+                style={{ color: '#888888' }}
               >
                 <GitBranch size={14} />
                 GitHub Repository
@@ -78,7 +78,7 @@ export default function Footer() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 text-sm transition-colors"
-                style={{ color: '#9ca3af' }}
+                style={{ color: '#888888' }}
               >
                 <span className="w-3.5 h-3.5 flex items-center justify-center font-mono text-xs">D</span>
                 Documentation
@@ -88,7 +88,7 @@ export default function Footer() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 text-sm transition-colors"
-                style={{ color: '#9ca3af' }}
+                style={{ color: '#888888' }}
               >
                 <span className="w-3.5 h-3.5 flex items-center justify-center font-mono text-xs">!</span>
                 Report an Issue
@@ -100,18 +100,18 @@ export default function Footer() {
         {/* Divider */}
         <div
           className="pt-8"
-          style={{ borderTop: '1px solid #1f2937' }}
+          style={{ borderTop: '1px solid #2a2a2a' }}
         >
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="text-xs font-mono" style={{ color: '#4b5563' }}>
+            <div className="text-xs font-mono" style={{ color: '#555555' }}>
               MIT License — Copyright © 2026 Argos Contributors
             </div>
-            <div className="flex items-center gap-1.5 text-xs" style={{ color: '#4b5563' }}>
+            <div className="flex items-center gap-1.5 text-xs" style={{ color: '#555555' }}>
               <span>Built with</span>
-              <Heart size={11} style={{ color: '#6b7280' }} />
+              <Heart size={11} style={{ color: '#666666' }} />
               <span>for fintech privacy</span>
             </div>
-            <div className="flex items-center gap-1.5 text-xs font-mono" style={{ color: '#4b5563' }}>
+            <div className="flex items-center gap-1.5 text-xs font-mono" style={{ color: '#555555' }}>
               <div className="w-1.5 h-1.5 rounded-full bg-green animate-pulse" />
               <span>v1.0.0 — Local-first</span>
             </div>
@@ -120,7 +120,7 @@ export default function Footer() {
       </div>
 
       {/* Bottom accent line */}
-      <div className="h-px w-full" style={{ background: '#1f2937' }} />
+      <div className="h-px w-full" style={{ background: '#2a2a2a' }} />
     </footer>
   )
 }

@@ -9,19 +9,19 @@ const steps = [
     icon: GitBranch,
     title: 'Clone & Install',
     desc: 'Clone the repository and install dependencies with npm.',
-    color: '#4f6eff',
+    color: '#5b6cf8',
   },
   {
     icon: Settings,
     title: 'Run Setup Wizard',
     desc: 'The interactive wizard walks you through channel config, LLM provider selection, and YubiKey registration.',
-    color: '#10b981',
+    color: '#16a34a',
   },
   {
     icon: Play,
     title: 'Start Argos',
     desc: 'Launch in dev mode or production. Open the dashboard at localhost:3000 to see your first proposals.',
-    color: '#ef4444',
+    color: '#dc2626',
   },
 ]
 
@@ -81,7 +81,7 @@ export default function Setup() {
     <section
       id="setup"
       className="py-24"
-      style={{ borderTop: '1px solid #f3f4f6' }}
+      style={{ borderTop: '1px solid #e2e2e2' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -153,14 +153,14 @@ export default function Setup() {
               transition={{ delay: 0.4 }}
               className="rounded-lg p-5"
               style={{
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+                background: '#ffffff',
+                border: '1px solid #e2e2e2',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
               }}
             >
               <div className="flex items-center gap-2 mb-4">
-                <Terminal size={14} style={{ color: '#7b96ff' }} />
-                <span className="text-xs font-semibold tracking-wide" style={{ color: '#7b96ff' }}>SYSTEM REQUIREMENTS</span>
+                <Terminal size={14} style={{ color: '#5b6cf8' }} />
+                <span className="text-xs font-semibold tracking-wide" style={{ color: '#5b6cf8' }}>SYSTEM REQUIREMENTS</span>
               </div>
               <div className="space-y-2">
                 {[
@@ -173,7 +173,7 @@ export default function Setup() {
                 ].map((req) => (
                   <div key={req.label} className="flex items-center justify-between text-sm">
                     <span className="text-text2">{req.label}</span>
-                    <span className="font-mono text-xs" style={{ color: '#7b96ff' }}>{req.value}</span>
+                    <span className="font-mono text-xs" style={{ color: '#5b6cf8' }}>{req.value}</span>
                   </div>
                 ))}
               </div>

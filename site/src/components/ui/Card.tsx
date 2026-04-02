@@ -11,9 +11,9 @@ interface CardProps {
 export function Card({ children, className = '', variant = 'default', hover = false }: CardProps) {
   const variantStyle =
     variant === 'green'
-      ? { borderColor: 'rgba(16,185,129,0.2)' }
+      ? { borderColor: 'rgba(22,163,74,0.2)' }
       : variant === 'red'
-      ? { borderColor: 'rgba(239,68,68,0.2)' }
+      ? { borderColor: 'rgba(220,38,38,0.2)' }
       : {}
 
   if (hover) {
@@ -21,7 +21,7 @@ export function Card({ children, className = '', variant = 'default', hover = fa
       <motion.div
         className={`card p-5 ${className}`}
         style={variantStyle}
-        whileHover={{ borderColor: 'rgba(79,110,255,0.35)', y: -2, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
+        whileHover={{ borderColor: 'rgba(91,108,248,0.35)', y: -2, boxShadow: '0 4px 16px rgba(0,0,0,0.12)' }}
         transition={{ duration: 0.2 }}
       >
         {children}

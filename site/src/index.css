@@ -5,19 +5,19 @@
 @tailwind utilities;
 
 :root {
-  --bg:       #f5f5f5;
-  --bg2:      #ebebeb;
+  --bg:       #f8f8f8;
+  --bg2:      #f8f8f8;
   --surface:  #ffffff;
   --surface2: #f0f0f0;
-  --border:   #d4d4d4;
-  --blue:     #4f6eff;
-  --blue2:    #3a56e8;
-  --green:    #059669;
+  --border:   #e2e2e2;
+  --blue:     #5b6cf8;
+  --blue2:    #4455e8;
+  --green:    #16a34a;
   --red:      #dc2626;
   --yellow:   #d97706;
-  --text:     #111827;
-  --text2:    #6b7280;
-  --text3:    #9ca3af;
+  --text:     #1a1a1a;
+  --text2:    #444444;
+  --text3:    #888888;
 }
 
 * {
@@ -30,8 +30,8 @@ html {
 
 body {
   margin: 0;
-  background-color: #ffffff;
-  color: #111827;
+  background-color: #f8f8f8;
+  color: #1a1a1a;
   font-family: 'Inter', system-ui, sans-serif;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
@@ -47,41 +47,41 @@ body {
   width: 4px;
 }
 ::-webkit-scrollbar-track {
-  background: #f9fafb;
+  background: #f8f8f8;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: #e2e2e2;
   border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: #888888;
 }
 
 /* Clean card */
 .card {
   background: #ffffff;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e2e2e2;
   border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
 .card-elevated {
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  border: 1px solid #e2e2e2;
   border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
 /* Legacy alias */
 .hud-card {
   background: #ffffff;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e2e2e2;
   border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
 .hud-card-green {
-  border-color: rgba(5,150,105,0.2);
+  border-color: rgba(22,163,74,0.2);
 }
 
 .hud-card-red {
@@ -95,12 +95,15 @@ body {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--blue);
+  color: #5b6cf8;
 }
 
-/* Accent text — single solid blue, no gradient */
+/* Accent text — gradient blue */
 .gradient-text {
-  color: #4f6eff;
+  background: linear-gradient(90deg, #5b6cf8, #8b99ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 /* Marquee */
@@ -121,7 +124,7 @@ body {
 
 /* Selection color */
 ::selection {
-  background: rgba(79, 110, 255, 0.15);
+  background: rgba(91,108,248,0.15);
   color: var(--blue2);
 }
 

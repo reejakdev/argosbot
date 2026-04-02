@@ -33,8 +33,8 @@ export default function Nav() {
           : 'bg-transparent'
       }`}
       style={scrolled ? {
-        background: '#f5f5f5',
-        borderColor: '#d4d4d4',
+        background: '#ffffff',
+        borderColor: '#e2e2e2',
       } : {}}
     >
       <div className="max-w-7xl mx-auto px-6 flex items-center justify-between h-16">
@@ -64,17 +64,17 @@ export default function Nav() {
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium transition-all duration-200 rounded-md"
             style={{
-              border: '1px solid #e5e7eb',
-              color: '#4f6eff',
-              background: '#f5f5f5',
+              border: '1px solid #e2e2e2',
+              color: '#1a1a1a',
+              background: '#ffffff',
             }}
             onMouseEnter={e => {
-              (e.currentTarget as HTMLElement).style.background = '#e4e4e4'
-              ;(e.currentTarget as HTMLElement).style.borderColor = '#4f6eff'
+              (e.currentTarget as HTMLElement).style.background = '#f8f8f8'
+              ;(e.currentTarget as HTMLElement).style.borderColor = '#5b6cf8'
             }}
             onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.background = '#f5f5f5'
-              ;(e.currentTarget as HTMLElement).style.borderColor = '#d4d4d4'
+              (e.currentTarget as HTMLElement).style.background = '#ffffff'
+              ;(e.currentTarget as HTMLElement).style.borderColor = '#e2e2e2'
             }}
           >
             <GitBranch size={14} />
@@ -100,8 +100,8 @@ export default function Nav() {
             exit={{ opacity: 0, height: 0 }}
             className="md:hidden backdrop-blur-xl border-b"
             style={{
-              background: '#f5f5f5',
-              borderColor: '#d4d4d4',
+              background: '#ffffff',
+              borderColor: '#e2e2e2',
             }}
           >
             <div className="px-6 py-4 flex flex-col gap-4">
@@ -120,7 +120,7 @@ export default function Nav() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 text-sm font-medium"
-                style={{ color: '#4f6eff' }}
+                style={{ color: '#5b6cf8' }}
               >
                 <GitBranch size={14} />
                 GitHub

@@ -24,20 +24,20 @@ export default function Ticker() {
     <div
       className="relative py-3 overflow-hidden"
       style={{
-        borderTop: '1px solid #e5e7eb',
-        borderBottom: '1px solid rgba(79,110,255,0.08)',
-        background: '#ebebeb',
+        borderTop: '1px solid #e2e2e2',
+        borderBottom: '1px solid #e2e2e2',
+        background: '#ffffff',
       }}
     >
       {/* Left fade */}
       <div
         className="absolute left-0 top-0 bottom-0 w-20 z-10 pointer-events-none"
-        style={{ background: 'linear-gradient(to right, #f9fafb, transparent)' }}
+        style={{ background: 'linear-gradient(to right, #ffffff, transparent)' }}
       />
       {/* Right fade */}
       <div
         className="absolute right-0 top-0 bottom-0 w-20 z-10 pointer-events-none"
-        style={{ background: 'linear-gradient(to left, #f9fafb, transparent)' }}
+        style={{ background: 'linear-gradient(to left, #ffffff, transparent)' }}
       />
 
       <div className="marquee-container">
@@ -46,7 +46,7 @@ export default function Ticker() {
             <span
               key={i}
               className="inline-block mx-6 font-mono text-xs tracking-widest"
-              style={{ color: phrase.startsWith('◆') ? '#4f6eff' : '#6b7280' }}
+              style={{ color: phrase.startsWith('◆') ? '#5b6cf8' : '#888888' }}
             >
               {phrase}
             </span>
