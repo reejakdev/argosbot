@@ -15,7 +15,7 @@ const steps = [
     desc: 'Messages arrive from Telegram MTProto, WhatsApp Baileys, IMAP email, Discord bot, or Slack bot. Each channel is isolated — one failure never crashes the pipeline.',
     badge: 'local',
     badgeLabel: 'local',
-    color: '#00d4ff',
+    color: '#4f6eff',
   },
   {
     num: '02',
@@ -24,7 +24,7 @@ const steps = [
     desc: 'Regex fast-screen catches 10+ injection patterns instantly. Suspicious content gets a deeper LLM scan. Injections are quarantined and flagged before anything else runs.',
     badge: 'local',
     badgeLabel: 'local',
-    color: '#00ff88',
+    color: '#10b981',
   },
   {
     num: '03',
@@ -33,7 +33,7 @@ const steps = [
     desc: 'ETH/BTC/SOL addresses, tx hashes, ENS names, exact amounts, emails, phone numbers — all replaced with typed placeholders like [ADDR_1] and [AMT_10K-100K_USDC]. A local lookup table holds the real values, never sent anywhere.',
     badge: 'local',
     badgeLabel: 'local',
-    color: '#00ff88',
+    color: '#10b981',
   },
   {
     num: '04',
@@ -42,7 +42,7 @@ const steps = [
     desc: 'The anonymized content reaches the LLM classifier at temperature=0 for deterministic output. It assigns category, team routing, task detection, and completion signals.',
     badge: 'cloud',
     badgeLabel: 'cloud ok',
-    color: '#00d4ff',
+    color: '#4f6eff',
   },
   {
     num: '05',
@@ -51,7 +51,7 @@ const steps = [
     desc: 'The planner uses tool use to draft replies, schedule calendar events, create Notion pages, or prepare transaction review packs. Everything is a proposal — nothing executes yet.',
     badge: 'cloud',
     badgeLabel: 'cloud ok',
-    color: '#00d4ff',
+    color: '#4f6eff',
   },
   {
     num: '06',
@@ -60,7 +60,7 @@ const steps = [
     desc: 'Every proposal hits your approval queue. You review, accept, or reject via the WebAuthn dashboard (YubiKey, passkey, or TOTP). High-risk actions require a fresh cryptographic assertion bound to the proposal ID.',
     badge: 'human',
     badgeLabel: 'human',
-    color: '#ff4466',
+    color: '#ef4444',
   },
 ]
 
@@ -80,10 +80,10 @@ function StepCard({ step, index }: { step: typeof steps[0]; index: number }) {
         <div className="flex items-start gap-4">
           <div className="flex-shrink-0">
             <div
-              className="w-10 h-10 rounded-sm flex items-center justify-center"
+              className="w-10 h-10 rounded-lg flex items-center justify-center"
               style={{
-                background: `${step.color}15`,
-                border: `1px solid ${step.color}30`,
+                background: `${step.color}12`,
+                border: `1px solid ${step.color}25`,
               }}
             >
               <Icon size={18} style={{ color: step.color }} />
@@ -91,8 +91,8 @@ function StepCard({ step, index }: { step: typeof steps[0]; index: number }) {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2">
-              <span className="font-mono text-xs text-text2/50">{step.num}</span>
-              <h3 className="font-bold text-white text-base">{step.title}</h3>
+              <span className="font-mono text-xs text-text2/40">{step.num}</span>
+              <h3 className="font-semibold text-white text-base">{step.title}</h3>
               <Badge
                 label={step.badgeLabel}
                 variant={step.badge as 'local' | 'cloud' | 'human'}
@@ -118,7 +118,7 @@ export default function Pipeline() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         className="mb-14"
       >
-        <div className="section-label mb-3">// ARCHITECTURE</div>
+        <div className="section-label mb-3">Architecture</div>
         <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
           The 6-Step{' '}
           <span className="gradient-text">Privacy Pipeline</span>
@@ -140,16 +140,22 @@ export default function Pipeline() {
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
-        className="hud-card hud-card-green rounded-sm p-6"
-        style={{ background: 'rgba(0,255,136,0.04)' }}
+        className="rounded-lg p-6"
+        style={{
+          background: 'rgba(16,185,129,0.04)',
+          border: '1px solid rgba(16,185,129,0.18)',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+        }}
       >
         <div className="flex items-start gap-4">
-          <EyeOff size={20} className="text-green flex-shrink-0 mt-0.5" />
+          <EyeOff size={20} style={{ color: '#10b981' }} className="flex-shrink-0 mt-0.5" />
           <div>
-            <div className="font-mono text-xs text-green tracking-widest mb-2">KEY INSIGHT — ANONYMIZATION</div>
+            <div className="text-xs font-semibold tracking-wide mb-2" style={{ color: '#10b981' }}>
+              KEY INSIGHT — ANONYMIZATION
+            </div>
             <p className="text-text leading-relaxed text-sm">
               The LLM anonymizer that de-identifies sensitive data runs{' '}
-              <span className="text-green font-semibold">exclusively on local models</span> (Ollama, LM Studio, etc.).
+              <span className="font-semibold" style={{ color: '#10b981' }}>exclusively on local models</span> (Ollama, LM Studio, etc.).
               Running it on a cloud model would be self-defeating — you'd be sending the raw PII to the very service
               you're trying to protect against. The cloud classifier and planner only ever see sanitized, anonymized
               placeholders. The real values live in an in-memory lookup table that never leaves your machine.

@@ -7,22 +7,28 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: '#04050d',
-        bg2: '#080c18',
-        cyan: '#00d4ff',
-        green: '#00ff88',
-        red: '#ff4466',
-        text: '#c8d8f0',
-        text2: '#6a80a8',
+        bg: '#060b1f',
+        bg2: '#0a1020',
+        surface: '#0d1530',
+        surface2: '#111b3a',
+        blue: '#4f6eff',
+        blue2: '#7b96ff',
+        green: '#10b981',
+        red: '#ef4444',
+        yellow: '#f59e0b',
+        text: '#f0f4ff',
+        text2: '#94a3b8',
+        // Legacy aliases for gradual migration
+        cyan: '#4f6eff',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['Courier New', 'Courier', 'monospace'],
+        mono: ['JetBrains Mono', 'Courier New', 'Courier', 'monospace'],
       },
       animation: {
         'spin-slow': 'spin 8s linear infinite',
         'spin-reverse': 'spin-reverse 12s linear infinite',
-        'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
+        'pulse-soft': 'pulse-soft 3s ease-in-out infinite',
         'marquee': 'marquee 30s linear infinite',
       },
       keyframes: {
@@ -30,9 +36,9 @@ export default {
           from: { transform: 'rotate(360deg)' },
           to: { transform: 'rotate(0deg)' },
         },
-        'pulse-glow': {
-          '0%, 100%': { opacity: '1', boxShadow: '0 0 8px #00ff88' },
-          '50%': { opacity: '0.4', boxShadow: '0 0 2px #00ff88' },
+        'pulse-soft': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.5' },
         },
         'marquee': {
           '0%': { transform: 'translateX(0%)' },
@@ -40,10 +46,12 @@ export default {
         },
       },
       boxShadow: {
-        'cyan': '0 0 20px rgba(0,212,255,0.3)',
-        'green': '0 0 20px rgba(0,255,136,0.3)',
-        'red': '0 0 20px rgba(255,68,102,0.3)',
-        'cyan-lg': '0 0 40px rgba(0,212,255,0.4)',
+        'blue': '0 4px 24px rgba(79,110,255,0.25)',
+        'blue-sm': '0 2px 12px rgba(79,110,255,0.2)',
+        'card': '0 4px 24px rgba(0,0,0,0.4)',
+      },
+      borderColor: {
+        DEFAULT: 'rgba(79,110,255,0.15)',
       },
     },
   },

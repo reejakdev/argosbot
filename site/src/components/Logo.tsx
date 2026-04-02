@@ -18,21 +18,21 @@ export function LogoIcon({ size = 32, className = '' }: LogoIconProps) {
       {/* Outer eye outline */}
       <path
         d="M2 16 C6 8, 26 8, 30 16 C26 24, 6 24, 2 16 Z"
-        stroke="#00d4ff"
+        stroke="#4f6eff"
         strokeWidth="1.2"
         fill="none"
       />
       {/* Iris — outer ring */}
-      <circle cx="16" cy="16" r="6.5" stroke="#00d4ff" strokeWidth="1" fill="none" opacity="0.9" />
+      <circle cx="16" cy="16" r="6.5" stroke="#4f6eff" strokeWidth="1" fill="none" opacity="0.9" />
       {/* Iris — middle ring */}
-      <circle cx="16" cy="16" r="4" stroke="#00ff88" strokeWidth="0.8" fill="none" opacity="0.7" />
+      <circle cx="16" cy="16" r="4" stroke="#7b96ff" strokeWidth="0.8" fill="none" opacity="0.7" />
       {/* Pupil */}
-      <circle cx="16" cy="16" r="2" fill="#00d4ff" />
+      <circle cx="16" cy="16" r="2" fill="#4f6eff" />
       {/* Pupil glow center */}
       <circle cx="16" cy="16" r="1" fill="white" opacity="0.9" />
       {/* Corner tick marks on outer eye */}
-      <line x1="2" y1="16" x2="4.5" y2="16" stroke="#00d4ff" strokeWidth="0.8" opacity="0.5" />
-      <line x1="27.5" y1="16" x2="30" y2="16" stroke="#00d4ff" strokeWidth="0.8" opacity="0.5" />
+      <line x1="2" y1="16" x2="4.5" y2="16" stroke="#4f6eff" strokeWidth="0.8" opacity="0.5" />
+      <line x1="27.5" y1="16" x2="30" y2="16" stroke="#4f6eff" strokeWidth="0.8" opacity="0.5" />
     </svg>
   )
 }
@@ -44,11 +44,10 @@ export function LogoFull({ height = 28 }: { height?: number }) {
     <div className="flex items-center gap-2.5">
       <LogoIcon size={iconSize} />
       <span
-        className="font-mono font-bold tracking-widest text-white"
+        className="font-semibold tracking-widest text-white"
         style={{
           fontSize: height * 0.6,
-          letterSpacing: '0.28em',
-          textShadow: '0 0 14px rgba(0,212,255,0.45)',
+          letterSpacing: '0.22em',
         }}
       >
         ARGOS

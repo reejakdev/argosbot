@@ -100,6 +100,7 @@ export async function loadBuiltinSkills(): Promise<void> {
     import('./builtins/fetch-url.js'),
     import('./builtins/notion-search.js'),
     import('./builtins/memory-search.js'),
+    import('./builtins/verify-address.js'),
   ];
 
   const results = await Promise.allSettled(modules);
@@ -141,5 +142,9 @@ export const SKILL_CATALOG: Array<{
   {
     name:        'memory_search',
     description: 'Explicitly search Argos memory (FTS) for past context',
+  },
+  {
+    name:        'verify_protocol_address',
+    description: 'Verify a partner-provided crypto address against official protocol documentation — DOCS FIRST, returns APPROVE / MANUAL REVIEW / REJECT with score',
   },
 ];

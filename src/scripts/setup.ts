@@ -887,6 +887,130 @@ async function stepApiKeys(total: number, config: Record<string, unknown>): Prom
     }
   }
 
+  // ── Slack listener (optional) ─────────────────────────────────────────────
+
+  nl();
+  console.log(rule('Slack listener (optional)'));
+  nl();
+  info('Uses YOUR personal Slack account (user token xoxp-), not a bot.');
+  info('Argos will see all your DMs and channels — no bot invite needed.');
+  nl();
+
+  const existingSlackToken = existingSecrets.SLACK_USER_TOKEN;
+  const slackAlreadyConfigured = !!existingSlackToken;
+
+  if (slackAlreadyConfigured) {
+    ok('Slack user token already configured');
+    const reconfigureSlack = await confirm('Reconfigure?', false);
+    if (!reconfigureSlack) {
+      writeConfig(config);
+      return;
+    }
+  }
+
+  const enableSlack = await confirm('Enable Slack listener?', false);
+
+  if (enableSlack) {
+    tutorial('Get your Slack user token', [
+      '1. Go to  https://api.slack.com/apps  → Create New App → From scratch',
+      '2. OAuth & Permissions → User Token Scopes, add:',
+      '     channels:history  channels:read  groups:history  groups:read',
+      '     im:history  im:read  mpim:history  mpim:read  users:read',
+      '3. Install to Workspace',
+      '4. Copy the  User OAuth Token  (starts with xoxp-)',
+    ]);
+
+    const slackToken = await askSecret('Slack user token (xoxp-...)');
+
+    if (slackToken) {
+      setPath(config, 'secrets.SLACK_USER_TOKEN', slackToken);
+      setPath(config, 'channels.slack.enabled', true);
+
+      const pollInterval = await ask('Poll interval in seconds (default: 60)', '60');
+      const pollSec = parseInt(pollInterval, 10);
+      if (!isNaN(pollSec) && pollSec >= 10) {
+        setPath(config, 'channels.slack.pollIntervalSeconds', pollSec);
+      }
+
+      const limitChannels = await confirm('Limit to specific Slack channels? (default: all joined channels + DMs)', false);
+      if (limitChannels) {
+        info('Enter channel IDs one by one (find them in the channel URL or right-click → Copy Link).');
+        const monitoredChannels: Array<{ channelId: string; name: string }> = [];
+        let addMore = true;
+        while (addMore) {
+          const channelId = await ask('Channel ID (e.g. C0123ABCDEF)');
+          const channelName = await ask('Channel name (for display)');
+          if (channelId && channelName) {
+            monitoredChannels.push({ channelId, name: channelName });
+          }
+          addMore = await confirm('Add another channel?', false);
+        }
+        if (monitoredChannels.length > 0) {
+          setPath(config, 'channels.slack.monitoredChannels', monitoredChannels);
+        }
+      }
+
+      const monitorDMs = await confirm('Monitor Slack DMs?', true);
+      setPath(config, 'channels.slack.monitorDMs', monitorDMs);
+
+      ok('Slack user token saved — polling starts on next boot');
+    } else {
+      warn('No token provided — skipping Slack config');
+    }
+  }
+
+  // ── Slack personal bot ────────────────────────────────────────────────────────
+  nl();
+  console.log(rule(`${c.bold}${c.cyan}Slack personal bot${c.reset}  (owner notifications + commands)`));
+  nl();
+  info('Separate from the listener — lets you receive proposals and type /approve, /reject, etc. in Slack.');
+
+  const existingSlackBotToken = existingSecrets.SLACK_BOT_TOKEN;
+  const slackBotAlreadyConfigured = !!existingSlackBotToken;
+
+  if (slackBotAlreadyConfigured) {
+    ok('Slack bot token already configured');
+  }
+
+  const enableSlackBot = await confirm(
+    slackBotAlreadyConfigured ? 'Reconfigure Slack bot?' : 'Set up Slack personal bot?',
+    !slackBotAlreadyConfigured,
+  );
+
+  if (enableSlackBot) {
+    tutorial('Create a Slack bot for Argos', [
+      '1. Go to  https://api.slack.com/apps  → Create New App → From scratch',
+      '2. OAuth & Permissions → Bot Token Scopes, add:',
+      '     chat:write  channels:history  im:history  im:write',
+      '     groups:history  channels:read  im:read  users:read',
+      '3. Install to workspace → copy Bot User OAuth Token (xoxb-...)',
+      '4. Create or pick a private channel → /invite @<your-bot-name>',
+      '5. Right-click the channel → Copy link → last part is the channel ID (Cxxxxxxxxx)',
+    ]);
+
+    const slackBotToken = await askSecret('Slack bot token (xoxb-...)');
+
+    if (slackBotToken) {
+      setPath(config, 'secrets.SLACK_BOT_TOKEN', slackBotToken);
+
+      const channelId = await ask('Approval channel ID (Cxxxxxxxxx or Dxxxxxxxxx for DM)');
+      if (channelId.trim()) {
+        setPath(config, 'channels.slack.personal.approvalChannelId', channelId.trim());
+        setPath(config, 'channels.slack.personal.botToken', slackBotToken);
+      }
+
+      const ownerUserIds = await ask('Your Slack user ID(s) (Uxxxxxxxxx, comma-separated — leave blank to skip auth check)', '');
+      if (ownerUserIds.trim()) {
+        const ids = ownerUserIds.split(',').map(s => s.trim()).filter(Boolean);
+        setPath(config, 'channels.slack.personal.allowedUserIds', ids);
+      }
+
+      ok('Slack bot configured — start Argos and type /help in the channel to test');
+    } else {
+      warn('No token provided — skipping Slack bot config');
+    }
+  }
+
   // Intermediate save — secrets are written immediately for safety
   writeConfig(config);
 }
@@ -1632,6 +1756,11 @@ const SKILLS_CATALOG_DISPLAY = [
     description: 'Explicitly search Argos memory (FTS)',
     note: 'Always available once Argos is running.',
   },
+  {
+    name: 'verify_protocol_address',
+    description: 'Verify a partner address against official protocol docs (APPROVE / MANUAL REVIEW / REJECT)',
+    note: 'Requires web_search or fetch_url. Ask Argos to verify any address — it scrapes the docs and returns a score.',
+  },
 ];
 
 async function stepSkills(config: Record<string, unknown>): Promise<void> {
@@ -1726,6 +1855,89 @@ async function stepWriteConfig(config: object, total: number): Promise<void> {
   note('All secrets, LLM providers, and settings are in this single file.');
 }
 
+// ─── Step: Notifications + custom instructions ───────────────────────────────
+
+async function stepNotifications(config: Record<string, unknown>): Promise<void> {
+  console.log(rule('Notifications & custom instructions  (optional)'));
+  nl();
+
+  // ── Notification channel ─────────────────────────────────────────────────────
+  const channels = config.channels as Record<string, unknown> | undefined;
+  const hasTgBot     = !!(channels?.telegram as Record<string, unknown>)?.['personal']?.['botToken' as keyof object]
+                    || !!(config.secrets as Record<string, unknown>)?.TELEGRAM_BOT_TOKEN;
+  const hasTgMtproto = !!(process.env.TELEGRAM_API_ID);
+  const hasSlack     = !!(channels?.slack as Record<string, unknown>)?.['personal']?.['botToken' as keyof object]
+                    || !!(config.secrets as Record<string, unknown>)?.SLACK_BOT_TOKEN;
+  const hasWhatsApp  = !!(config.secrets as Record<string, unknown>)?.WHATSAPP_ENABLED;
+
+  const available: Array<{ label: string; value: string }> = [
+    { label: 'Auto-detect  (telegram_bot > telegram > slack > whatsapp)', value: 'auto' },
+  ];
+  if (hasTgBot)     available.push({ label: 'Telegram bot  (personal bot)', value: 'telegram_bot' });
+  if (hasTgMtproto) available.push({ label: 'Telegram MTProto  (your account, Saved Messages)', value: 'telegram' });
+  if (hasSlack)     available.push({ label: 'Slack bot  (DM or private channel)', value: 'slack' });
+  if (hasWhatsApp)  available.push({ label: 'WhatsApp', value: 'whatsapp' });
+
+  info('Push notifications (proposals, alerts, heartbeat) go to a single channel.');
+  note('Conversational replies always use the channel you messaged from — this setting only affects push notifs.');
+  nl();
+
+  const preferred = await select('Preferred notification channel', available, 0);
+
+  if (preferred !== 'auto') {
+    (config.notifications as Record<string, unknown> | undefined ?? (config.notifications = {}));
+    (config.notifications as Record<string, unknown>).preferredChannel = preferred;
+    ok(`Notifications → ${preferred}`);
+
+    // WhatsApp needs a JID
+    if (preferred === 'whatsapp') {
+      nl();
+      const jid = (await ask('WhatsApp JID for notifications  (e.g. 33612345678@s.whatsapp.net)')).trim();
+      if (jid) {
+        if (!config.channels) config.channels = {};
+        const ch = config.channels as Record<string, unknown>;
+        if (!ch.whatsapp) ch.whatsapp = {};
+        (ch.whatsapp as Record<string, unknown>).approvalJid = jid;
+        ok(`WhatsApp approval JID set: ${jid}`);
+      }
+    }
+  } else {
+    note('Auto-detect — Argos will pick the first available channel at boot.');
+  }
+
+  // ── Custom instructions ───────────────────────────────────────────────────────
+  nl();
+  console.log(rule('Custom planner instructions  (optional)'));
+  nl();
+  info('Add domain-specific rules for the planner + heartbeat.');
+  note('Example: "When a partner asks to whitelist an address, call verify_protocol_address first."');
+  note('These are YOUR rules — not shared with other Argos users.');
+  nl();
+
+  const existing = ((config.claude as Record<string, unknown> | undefined)?.customInstructions as string | undefined) ?? '';
+  if (existing) {
+    note(`Current instructions:\n${c.gray}${existing.slice(0, 200)}${existing.length > 200 ? '…' : ''}${c.reset}`);
+    nl();
+  }
+
+  const addInstructions = await confirm('Add custom instructions?', false);
+  if (addInstructions) {
+    note('Enter your instructions (single line or multiline — end with an empty line):');
+    const lines: string[] = [];
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const line = await ask('');
+      if (line === '') break;
+      lines.push(line);
+    }
+    if (lines.length > 0) {
+      if (!config.claude) config.claude = {};
+      (config.claude as Record<string, unknown>).customInstructions = lines.join('\n');
+      ok('Custom instructions saved.');
+    }
+  }
+}
+
 // ─── Step 7: YubiKey reminder + summary ──────────────────────────────────────
 
 // ─── Step: Hot wallet (optional) ─────────────────────────────────────────────
@@ -1818,6 +2030,29 @@ async function stepWallet(config: Record<string, unknown>): Promise<void> {
   const maxTx    = (await ask('Max value per transaction', '1.0')).trim() || '1.0';
   const dailyMax = (await ask('Max daily spend', '10.0')).trim() || '10.0';
 
+  // ── Address whitelist ────────────────────────────────────────────────────────
+  nl();
+  info('Address whitelist — only these addresses can receive funds from the bot.');
+  note('Leave empty to allow any address (less safe). You can add more later in config.json.');
+  nl();
+
+  const whitelist: string[] = [];
+  let addAddress = await confirm('Add a whitelisted address?', false);
+  while (addAddress) {
+    const addr = (await ask('Address (0x… or Solana pubkey)')).trim();
+    if (addr) {
+      whitelist.push(addr);
+      ok(`Whitelisted: ${addr}`);
+    }
+    addAddress = await confirm('Add another?', false);
+  }
+
+  if (whitelist.length === 0) {
+    warn('No whitelist set — any address can receive funds. Add addresses to wallet.limits.whitelist in config to restrict.');
+  } else {
+    ok(`${whitelist.length} address(es) whitelisted`);
+  }
+
   config['wallet'] = {
     enabled: true,
     encryptionSecret,
@@ -1826,6 +2061,7 @@ async function stepWallet(config: Record<string, unknown>): Promise<void> {
       maxTxValueNative: maxTx,
       dailyLimitNative: dailyMax,
       requireElevatedAuth: true,
+      whitelist,
     },
   };
 
@@ -1979,6 +2215,7 @@ async function main(): Promise<void> {
       await stepMcpServers(cfg);
       await stepSkills(cfg);
       await stepWallet(cfg);
+      await stepNotifications(cfg);
     }},
     { name: STEP_NAMES[6], run: async (total, cfg) => {
       await stepWriteConfig(cfg, total);

@@ -43,6 +43,32 @@ export interface WorkerResult {
   data?: unknown;
 }
 
+// ─── De-anonymization ─────────────────────────────────────────────────────────
+
+/** Recursively restore placeholder values in an action input object. */
+function deAnonymizeInput(
+  input: Record<string, unknown>,
+  lookup: Record<string, string>,
+): Record<string, unknown> {
+  if (Object.keys(lookup).length === 0) return input;
+
+  function restore(val: unknown): unknown {
+    if (typeof val === 'string') {
+      // Replace all [PLACEHOLDER] tokens found in the lookup
+      return val.replace(/\[[\w_]+\d*\]/g, (match) => lookup[match] ?? match);
+    }
+    if (Array.isArray(val)) return val.map(restore);
+    if (val !== null && typeof val === 'object') {
+      return Object.fromEntries(
+        Object.entries(val as Record<string, unknown>).map(([k, v]) => [k, restore(v)]),
+      );
+    }
+    return val;
+  }
+
+  return restore(input) as Record<string, unknown>;
+}
+
 // ─── Main dispatcher ──────────────────────────────────────────────────────────
 
 export async function executeProposal(
@@ -63,10 +89,21 @@ export async function executeProposal(
     db.prepare(`UPDATE tasks SET status = 'in_progress' WHERE id = ? AND status = 'open'`).run(proposal.taskId);
   }
 
+  // Load the anon lookup for this proposal — resolves placeholders back to real values.
+  // Applied to each action's input just before execution. Never logged, never sent to LLM.
+  let anonLookup: Record<string, string> = {};
+  try {
+    const row = db.prepare('SELECT anon_lookup FROM proposals WHERE id = ?').get(proposal.id) as { anon_lookup: string | null } | undefined;
+    if (row?.anon_lookup) anonLookup = JSON.parse(row.anon_lookup) as Record<string, string>;
+  } catch { /* non-fatal — workers still run with placeholder text */ }
+
   const results: WorkerResult[] = [];
 
   for (const action of actions) {
     const payload = action.payload as { tool: string; input: Record<string, unknown> };
+    // De-anonymize string values in the input before handing to the worker.
+    // Placeholders like [ADDR_1], [PERSON_1], [AMT_1] are restored to real values.
+    const resolvedInput = deAnonymizeInput(payload.input, anonLookup);
     log.info(`Executing: ${action.description}`);
 
     try {
@@ -74,45 +111,48 @@ export async function executeProposal(
 
       switch (payload.tool) {
         case 'draft_reply':
-          result = await executeDraftReply(payload.input, config);
+          result = await executeDraftReply(resolvedInput, config);
           break;
         case 'create_calendar_event':
-          result = await executeCalendar(payload.input, config);
+          result = await executeCalendar(resolvedInput, config);
           break;
         case 'create_notion_entry':
-          result = await executeNotion(payload.input, config);
+          result = await executeNotion(resolvedInput, config);
           break;
         case 'prepare_tx_pack':
-          result = await executeTxPack(payload.input, config);
+          result = await executeTxPack(resolvedInput, config);
           break;
         case 'create_task':
-          result = executeCreateTask(payload.input);
+          result = executeCreateTask(resolvedInput);
           break;
         case 'set_reminder':
-          result = executeSetReminder(payload.input);
+          result = executeSetReminder(resolvedInput);
           break;
         case 'create_cron_job':
-          result = executeCreateCronJob(payload.input);
+          result = executeCreateCronJob(resolvedInput);
           break;
         case 'delete_cron_job':
-          result = executeDeleteCronJob(payload.input);
+          result = executeDeleteCronJob(resolvedInput);
           break;
         case 'telegram_add_chat':
         case 'telegram_ignore_chat':
         case 'telegram_list_chats':
-          result = executeTelegramTool(payload.tool, payload.input);
+          result = executeTelegramTool(payload.tool, resolvedInput);
           break;
         case 'send_email':
-          result = await executeEmailSend(payload.input, config);
+          result = await executeEmailSend(resolvedInput, config);
           break;
         case 'browser_action':
-          result = await executeBrowserAction(payload.input, config);
+          result = await executeBrowserAction(resolvedInput, config);
           break;
         case 'sign_tx':
-          result = await executeSignTx(payload.input, config);
+          result = await executeSignTx(resolvedInput, config);
           break;
         case 'add_knowledge_source':
-          result = await executeAddKnowledgeSource(payload.input, config);
+          result = await executeAddKnowledgeSource(resolvedInput, config);
+          break;
+        case 'edit_config':
+          result = await executeEditConfig(resolvedInput, config);
           break;
         default:
           result = { success: false, output: `Unknown tool: ${payload.tool}`, dryRun: true };
@@ -399,4 +439,98 @@ async function executeAddKnowledgeSource(
   } catch (e) {
     return { success: false, dryRun: false, output: `Source saved but indexing failed: ${(e as Error).message}` };
   }
+}
+
+// ─── edit_config ──────────────────────────────────────────────────────────────
+// Modifies config.json at a given dot-path. Restricted to safe paths only.
+// High-risk paths (secrets, tokens, llm) are blocked — they require manual edit.
+
+const SAFE_CONFIG_PATHS = new Set([
+  'owner.name', 'owner.teams', 'owner.roles',
+  'triage.enabled', 'triage.mentionOnly', 'triage.ignoreOwnTeam',
+  'triage.myHandles', 'triage.watchedTeams', 'triage.whitelistKeywords',
+  'heartbeat.enabled', 'heartbeat.intervalMinutes', 'heartbeat.prompt',
+  'memory.defaultTtlDays', 'memory.archiveTtlDays', 'memory.autoArchiveThreshold',
+  'knowledge.sources', 'knowledge.refreshHours',
+  'channels.telegram.listener.monitoredChats',
+  'channels.telegram.listener.ignoredChats',
+  'channels.telegram.listener.contextWindow',
+  'channels.slack.monitoredChannels', 'channels.slack.monitorDMs',
+  'channels.slack.pollIntervalSeconds', 'channels.slack.enabled',
+  'readOnly', 'logLevel',
+]);
+
+// Prefixes that are unconditionally blocked (even if path starts with one of these)
+const BLOCKED_PREFIXES = ['secrets', 'llm.providers', 'approval', 'wallet'];
+
+async function executeEditConfig(
+  input: Record<string, unknown>,
+  _config: Config,
+): Promise<WorkerResult> {
+  const configPath = String(input.path ?? '');
+  const value      = input.value;
+  const reason     = String(input.reason ?? '');
+
+  if (!configPath) {
+    return { success: false, output: 'edit_config: path is required', dryRun: false };
+  }
+
+  // Security: block dangerous paths
+  if (BLOCKED_PREFIXES.some(p => configPath === p || configPath.startsWith(p + '.'))) {
+    return {
+      success: false, dryRun: false,
+      output: `edit_config: path "${configPath}" is restricted. Edit manually in ~/.argos/config.json.`,
+    };
+  }
+
+  // Only allow explicitly safe paths (or sub-paths of safe paths)
+  const isSafe = [...SAFE_CONFIG_PATHS].some(
+    safe => configPath === safe || configPath.startsWith(safe + '.') || safe.startsWith(configPath + '.'),
+  );
+  if (!isSafe) {
+    return {
+      success: false, dryRun: false,
+      output: `edit_config: path "${configPath}" is not in the safe-paths list. Propose the change via the web app or edit manually.`,
+    };
+  }
+
+  try {
+    const { readFileSync, writeFileSync } = await import('node:fs');
+    const { default: path } = await import('node:path');
+    const { getDataDir } = await import('../config/index.js');
+
+    const cfgPath = path.join(getDataDir(), 'config.json');
+    const raw = JSON.parse(readFileSync(cfgPath, 'utf8')) as Record<string, unknown>;
+
+    // Set nested value at dot-path
+    setNestedPath(raw, configPath, value);
+    writeFileSync(cfgPath, JSON.stringify(raw, null, 2), { mode: 0o600 });
+
+    // Regenerate self-doc so it reflects the new config
+    try {
+      const { loadConfig } = await import('../config/index.js');
+      const { writeSelfDoc } = await import('../core/self-doc.js');
+      writeSelfDoc(loadConfig());
+    } catch { /* non-blocking */ }
+
+    return {
+      success: true, dryRun: false,
+      output: `✅ Config updated: \`${configPath}\` = ${JSON.stringify(value)}${reason ? `\nReason: ${reason}` : ''}`,
+    };
+  } catch (e) {
+    return { success: false, dryRun: false, output: `edit_config failed: ${(e as Error).message}` };
+  }
+}
+
+function setNestedPath(obj: Record<string, unknown>, dotPath: string, value: unknown): void {
+  const keys = dotPath.split('.');
+  let cur: Record<string, unknown> = obj;
+  for (let i = 0; i < keys.length - 1; i++) {
+    const k = keys[i];
+    if (cur[k] === undefined || cur[k] === null || typeof cur[k] !== 'object') {
+      cur[k] = {};
+    }
+    cur = cur[k] as Record<string, unknown>;
+  }
+  cur[keys[keys.length - 1]] = value;
 }

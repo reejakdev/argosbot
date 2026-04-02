@@ -18,17 +18,28 @@ function riskLabel(actions: Proposal['actions']) {
 }
 
 function RiskBadge({ risk }: { risk: string }) {
-  const styles: Record<string, { bg: string; color: string; label: string }> = {
-    high: { bg: '#7f1d1d', color: '#fca5a5', label: '🔴 HIGH RISK' },
-    medium: { bg: '#713f12', color: '#fde68a', label: '🟡 MEDIUM' },
-    low: { bg: '#14532d', color: '#86efac', label: '🟢 LOW' },
-  };
-  const s = styles[risk] ?? styles.low;
+  const cls = risk === 'high' ? 'badge-high' : risk === 'medium' ? 'badge-medium' : 'badge-low';
+  const label = risk === 'high' ? 'HIGH RISK' : risk === 'medium' ? 'MEDIUM' : 'LOW';
+  return <span className={cls}>{label}</span>;
+}
+
+function ProposalId({ id }: { id: string }) {
   return (
-    <span className="text-xs font-semibold px-1.5 py-0.5 rounded" style={{ background: s.bg, color: s.color }}>
-      {s.label}
+    <span
+      style={{
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: '0.6rem',
+        color: 'var(--text2)',
+        letterSpacing: '0.06em',
+      }}
+    >
+      #{id.slice(-8).toUpperCase()}
     </span>
   );
+}
+
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 export default function Proposals() {
@@ -58,7 +69,6 @@ export default function Proposals() {
     setActing(proposal.id);
     try {
       if (risk === 'high') {
-        // Elevated YubiKey auth required
         const { challengeId, options } = await post<{
           challengeId: string;
           options: PublicKeyCredentialRequestOptionsJSON;
@@ -108,100 +118,204 @@ export default function Proposals() {
   }
 
   if (loading) {
-    return <div className="text-center py-10 text-sm" style={{ color: 'var(--muted)' }}>Loading…</div>;
+    return (
+      <div className="flex items-center justify-center py-16">
+        <span className="label-mono">Loading...</span>
+      </div>
+    );
   }
 
   if (proposals.length === 0) {
-    return <div className="text-center py-10 text-sm" style={{ color: 'var(--muted)' }}>✅ No pending approvals</div>;
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="rgba(79,110,255,0.25)" strokeWidth={1}>
+          <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span className="label-mono" style={{ color: 'rgba(79,110,255,0.4)' }}>
+          No Pending Proposals
+        </span>
+      </div>
+    );
   }
 
   return (
-    <div>
+    <div className="flex flex-col gap-4">
       {proposals.map((p) => {
         const risk = riskLabel(p.actions);
         const isActing = acting === p.id;
         return (
           <div
             key={p.id}
-            className="rounded-xl border mb-2.5 p-3.5"
-            style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              padding: '1rem',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+            }}
           >
-            {/* Header */}
-            <div className="flex items-start gap-2 mb-2">
-              <RiskBadge risk={risk} />
-              <p className="text-sm font-medium leading-snug flex-1">{p.context_summary}</p>
-            </div>
-
-            {/* Plan */}
-            {p.plan && (
-              <p
-                className="text-xs mb-2.5 leading-relaxed overflow-hidden"
+            {/* Header row */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2.5">
+                <RiskBadge risk={risk} />
+                <ProposalId id={p.id} />
+              </div>
+              <span
                 style={{
-                  color: '#a0a0bc',
-                  maxHeight: 80,
-                  WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent)',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '0.6rem',
+                  color: 'var(--text2)',
+                  letterSpacing: '0.04em',
                 }}
               >
-                {p.plan}
-              </p>
+                {formatTime(p.created_at)}
+              </span>
+            </div>
+
+            {/* Context summary */}
+            <p
+              className="text-sm leading-relaxed mb-3"
+              style={{ color: '#f0f4ff', fontFamily: "'Inter', sans-serif" }}
+            >
+              {p.context_summary}
+            </p>
+
+            {/* Plan / reasoning */}
+            {p.plan && (
+              <div className="mb-3">
+                <div className="label-mono mb-1.5">Reasoning</div>
+                <p
+                  className="text-xs leading-relaxed overflow-hidden"
+                  style={{
+                    fontFamily: "'Inter', sans-serif",
+                    color: 'var(--text2)',
+                    maxHeight: 72,
+                    WebkitMaskImage: 'linear-gradient(to bottom, black 55%, transparent)',
+                  }}
+                >
+                  {p.plan}
+                </p>
+              </div>
             )}
 
             {/* Draft reply */}
             {p.draft_reply && (
               <div
-                className="rounded-lg px-3 py-2 mb-2.5 text-xs italic"
-                style={{ background: '#0f172a', color: '#94a3b8' }}
+                className="mb-3 px-3 py-2.5"
+                style={{
+                  background: 'rgba(79,110,255,0.05)',
+                  border: '1px solid rgba(79,110,255,0.15)',
+                  borderLeft: '3px solid rgba(79,110,255,0.5)',
+                  borderRadius: '0 6px 6px 0',
+                }}
               >
-                "{p.draft_reply}"
+                <div className="label-mono mb-1" style={{ color: 'rgba(123,150,255,0.7)' }}>Draft Reply</div>
+                <p
+                  className="text-xs italic"
+                  style={{
+                    fontFamily: "'Inter', sans-serif",
+                    color: 'var(--text2)',
+                    lineHeight: 1.6,
+                  }}
+                >
+                  "{p.draft_reply}"
+                </p>
               </div>
             )}
 
             {/* Actions */}
             {p.actions.length > 0 && (
-              <ul className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-                {p.actions.map((a, i) => (
-                  <li key={i} className="py-0.5">
-                    <strong>{a.description}</strong>
-                    {a.details && (
-                      <pre
-                        className="whitespace-pre-wrap mt-1 mb-1 overflow-auto"
-                        style={{ fontSize: 11, color: 'var(--muted)', maxHeight: 100 }}
-                      >
-                        {a.details.slice(0, 300)}
-                      </pre>
-                    )}
-                  </li>
-                ))}
-              </ul>
+              <div className="mb-3">
+                <div className="label-mono mb-1.5">Actions</div>
+                <div className="flex flex-col gap-1.5">
+                  {p.actions.map((a, i) => (
+                    <div
+                      key={i}
+                      className="px-3 py-2"
+                      style={{
+                        background: 'var(--bg2)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '6px',
+                      }}
+                    >
+                      <div className="flex items-center gap-2 mb-0.5">
+                        {a.tool && (
+                          <span
+                            style={{
+                              fontFamily: "'JetBrains Mono', monospace",
+                              fontSize: '0.6rem',
+                              fontWeight: 700,
+                              color: '#7b96ff',
+                              background: 'rgba(79,110,255,0.1)',
+                              border: '1px solid rgba(79,110,255,0.2)',
+                              borderRadius: '3px',
+                              padding: '0.1rem 0.4rem',
+                              letterSpacing: '0.04em',
+                            }}
+                          >
+                            {a.tool}
+                          </span>
+                        )}
+                        <span
+                          className="text-xs"
+                          style={{ color: '#f0f4ff', fontFamily: "'Inter', sans-serif" }}
+                        >
+                          {a.description}
+                        </span>
+                      </div>
+                      {a.details && (
+                        <pre
+                          className="text-xs overflow-auto mt-1"
+                          style={{
+                            fontFamily: "'JetBrains Mono', monospace",
+                            color: 'var(--text2)',
+                            maxHeight: 80,
+                            whiteSpace: 'pre-wrap',
+                            lineHeight: 1.5,
+                            fontSize: '0.65rem',
+                          }}
+                        >
+                          {a.details.slice(0, 300)}
+                        </pre>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
 
             {/* Expiry */}
-            <p className="text-xs mb-3" style={{ color: 'var(--muted)' }}>
-              Expires in {p.expiresInMin}min
-            </p>
+            <div className="flex items-center gap-1.5 mb-4">
+              <span className="status-dot status-dot-yellow" style={{ width: 5, height: 5 }} />
+              <span
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '0.6rem',
+                  color: 'var(--text2)',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                Expires in {p.expiresInMin}min
+              </span>
+            </div>
 
             {/* Buttons */}
-            <div className="flex gap-2">
+            <div className="flex gap-2.5">
               <button
                 onClick={() => void approve(p)}
                 disabled={isActing}
-                className="flex-1 py-2.5 rounded-lg text-sm font-medium text-white transition-opacity"
-                style={{ background: 'var(--green)', opacity: isActing ? 0.5 : 1 }}
+                className="btn-primary flex-1"
+                style={{ opacity: isActing ? 0.5 : 1 }}
               >
-                {isActing ? '…' : risk === 'high' ? '🔑 Approve' : '✓ Approve'}
+                {isActing ? '...' : risk === 'high' ? 'YubiKey + Approve' : 'Approve'}
               </button>
               <button
                 onClick={() => void reject(p)}
                 disabled={isActing}
-                className="flex-1 py-2.5 rounded-lg text-sm font-medium border transition-opacity"
-                style={{
-                  background: 'var(--surface)',
-                  color: 'var(--red)',
-                  borderColor: 'var(--red)',
-                  opacity: isActing ? 0.5 : 1,
-                }}
+                className="btn-danger flex-1"
+                style={{ opacity: isActing ? 0.5 : 1 }}
               >
-                ✕ Reject
+                Reject
               </button>
             </div>
           </div>

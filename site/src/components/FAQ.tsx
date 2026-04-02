@@ -56,11 +56,19 @@ function FAQItem({ item, index }: { item: typeof faqs[0]; index: number }) {
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
       transition={{ delay: index * 0.05 }}
-      className="hud-card rounded-sm overflow-hidden"
+      className="rounded-lg overflow-hidden"
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+      }}
     >
       <button
-        className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-cyan/5 transition-colors group"
+        className="w-full flex items-center justify-between px-6 py-4 text-left transition-colors group"
+        style={{ borderRadius: 'inherit' }}
         onClick={() => setOpen(!open)}
+        onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.04)'}
+        onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
       >
         <div className="flex items-center gap-3 flex-1">
           <span className="font-mono text-xs text-text2/40 flex-shrink-0">
@@ -75,7 +83,7 @@ function FAQItem({ item, index }: { item: typeof faqs[0]; index: number }) {
           transition={{ duration: 0.2 }}
           className="flex-shrink-0 ml-4"
         >
-          <ChevronDown size={16} className="text-cyan/60" />
+          <ChevronDown size={16} style={{ color: 'rgba(79,110,255,0.5)' }} />
         </motion.div>
       </button>
 
@@ -88,7 +96,10 @@ function FAQItem({ item, index }: { item: typeof faqs[0]; index: number }) {
             transition={{ duration: 0.2, ease: 'easeInOut' }}
             style={{ overflow: 'hidden' }}
           >
-            <div className="px-6 pb-5 pt-0 border-t border-[rgba(0,212,255,0.08)]">
+            <div
+              className="px-6 pb-5 pt-0"
+              style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+            >
               <p className="text-text2 text-sm leading-relaxed pt-4">{item.a}</p>
             </div>
           </motion.div>
@@ -103,7 +114,11 @@ export default function FAQ() {
   const inView = useInView(ref, { once: true })
 
   return (
-    <section id="faq" className="py-24 border-t border-[rgba(0,212,255,0.08)]">
+    <section
+      id="faq"
+      className="py-24"
+      style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+    >
       <div className="max-w-4xl mx-auto px-6">
         <motion.div
           ref={ref}
@@ -111,7 +126,7 @@ export default function FAQ() {
           animate={inView ? { opacity: 1, y: 0 } : {}}
           className="mb-14 text-center"
         >
-          <div className="section-label mb-3 text-center">// FAQ</div>
+          <div className="section-label mb-3 text-center">FAQ</div>
           <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
             Frequently asked{' '}
             <span className="gradient-text">questions</span>

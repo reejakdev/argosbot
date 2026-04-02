@@ -228,7 +228,7 @@ async function signAndSendSolana(
     return { success: false, output: `Invalid Solana address: ${input.to}`, dryRun: true };
   }
 
-  const { blockhash } = await connection.getLatestBlockhash();
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
   const tx = new Transaction().add(
     SystemProgram.transfer({
       fromPubkey: keypair.publicKey,
@@ -238,9 +238,11 @@ async function signAndSendSolana(
   );
   tx.recentBlockhash = blockhash;
   tx.feePayer = keypair.publicKey;
+  tx.sign(keypair);
 
-  const signature = await connection.sendTransaction(tx, [keypair]);
-  await connection.confirmTransaction(signature, 'confirmed');
+  const rawTx = tx.serialize();
+  const signature = await connection.sendRawTransaction(rawTx);
+  await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
 
   log.info(`Solana tx sent: ${signature}`);
   audit('tx_signed', signature, 'wallet', {
@@ -275,6 +277,22 @@ export async function executeSignTx(
 
   if (!txInput.chain || !txInput.to || !txInput.value) {
     return { success: false, output: 'Missing required fields: chain, to, value', dryRun: true };
+  }
+
+  // Whitelist check — runs on the REAL address (after de-anonymization by the dispatcher).
+  const whitelist = walletCfg.limits?.whitelist ?? [];
+  if (whitelist.length > 0) {
+    const toNorm = txInput.to.toLowerCase();
+    const allowed = whitelist.some(a => a.toLowerCase() === toNorm);
+    if (!allowed) {
+      log.warn(`Whitelist rejection: ${txInput.to} not in allowed list`);
+      audit('tx_whitelist_rejected', undefined, 'wallet', { chain: txInput.chain, to: txInput.to });
+      return {
+        success: false,
+        output: `Address ${txInput.to} is not in the whitelist. Add it to wallet.limits.whitelist in config to allow.`,
+        dryRun: true,
+      };
+    }
   }
 
   const chainCfg = walletCfg.chains?.[txInput.chain];

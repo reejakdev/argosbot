@@ -9,19 +9,19 @@ const steps = [
     icon: GitBranch,
     title: 'Clone & Install',
     desc: 'Clone the repository and install dependencies with npm.',
-    color: '#00d4ff',
+    color: '#4f6eff',
   },
   {
     icon: Settings,
     title: 'Run Setup Wizard',
     desc: 'The interactive wizard walks you through channel config, LLM provider selection, and YubiKey registration.',
-    color: '#00ff88',
+    color: '#10b981',
   },
   {
     icon: Play,
     title: 'Start Argos',
     desc: 'Launch in dev mode or production. Open the dashboard at localhost:3000 to see your first proposals.',
-    color: '#ff4466',
+    color: '#ef4444',
   },
 ]
 
@@ -78,7 +78,11 @@ export default function Setup() {
   const inView = useInView(ref, { once: true })
 
   return (
-    <section id="setup" className="py-24 border-t border-[rgba(0,212,255,0.08)]">
+    <section
+      id="setup"
+      className="py-24"
+      style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+    >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
           ref={ref}
@@ -86,7 +90,7 @@ export default function Setup() {
           animate={inView ? { opacity: 1, y: 0 } : {}}
           className="mb-14"
         >
-          <div className="section-label mb-3">// SETUP</div>
+          <div className="section-label mb-3">Setup</div>
           <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
             Running in{' '}
             <span className="gradient-text">under 5 minutes</span>
@@ -114,11 +118,10 @@ export default function Setup() {
                   >
                     <div className="flex flex-col items-center flex-shrink-0">
                       <div
-                        className="w-10 h-10 rounded-sm flex items-center justify-center flex-shrink-0"
+                        className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
                         style={{
-                          background: `${step.color}15`,
-                          border: `1px solid ${step.color}30`,
-                          boxShadow: `0 0 15px ${step.color}20`,
+                          background: `${step.color}12`,
+                          border: `1px solid ${step.color}25`,
                         }}
                       >
                         <Icon size={18} style={{ color: step.color }} />
@@ -126,14 +129,14 @@ export default function Setup() {
                       {i < steps.length - 1 && (
                         <div
                           className="w-px h-8 mt-2"
-                          style={{ background: `linear-gradient(to bottom, ${step.color}40, transparent)` }}
+                          style={{ background: `linear-gradient(to bottom, ${step.color}35, transparent)` }}
                         />
                       )}
                     </div>
                     <div className="pt-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-mono text-xs text-text2/40">STEP {i + 1}</span>
-                        <h3 className="font-bold text-white">{step.title}</h3>
+                        <span className="text-xs font-medium text-text2/40 tracking-wide">STEP {i + 1}</span>
+                        <h3 className="font-semibold text-white">{step.title}</h3>
                       </div>
                       <p className="text-text2 text-sm leading-relaxed">{step.desc}</p>
                     </div>
@@ -148,11 +151,16 @@ export default function Setup() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: 0.4 }}
-              className="hud-card rounded-sm p-5"
+              className="rounded-lg p-5"
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+              }}
             >
               <div className="flex items-center gap-2 mb-4">
-                <Terminal size={14} className="text-cyan" />
-                <span className="font-mono text-xs text-cyan tracking-widest">SYSTEM REQUIREMENTS</span>
+                <Terminal size={14} style={{ color: '#7b96ff' }} />
+                <span className="text-xs font-semibold tracking-wide" style={{ color: '#7b96ff' }}>SYSTEM REQUIREMENTS</span>
               </div>
               <div className="space-y-2">
                 {[
@@ -165,7 +173,7 @@ export default function Setup() {
                 ].map((req) => (
                   <div key={req.label} className="flex items-center justify-between text-sm">
                     <span className="text-text2">{req.label}</span>
-                    <span className="font-mono text-cyan text-xs">{req.value}</span>
+                    <span className="font-mono text-xs" style={{ color: '#7b96ff' }}>{req.value}</span>
                   </div>
                 ))}
               </div>

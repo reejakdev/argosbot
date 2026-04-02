@@ -17,6 +17,8 @@ import { fetchUrl }    from './connectors/url.js';
 import { fetchGitHub } from './connectors/github.js';
 import { fetchNotion } from './connectors/notion.js';
 import { fetchFile }   from './connectors/file.js';
+import { fetchLinear } from './connectors/linear.js';
+import { fetchLocal }  from './connectors/local.js';
 import { indexDocument, isStale } from './indexer.js';
 import type { KnowledgeDocument } from './types.js';
 
@@ -60,8 +62,21 @@ async function fetchSource(source: KnowledgeSource, config: Config): Promise<Kno
       });
 
     case 'linear':
+      return fetchLinear({
+        teamId:      source.teamId,
+        name:        source.name,
+        refreshDays: source.refreshHours / 24,
+      }, config);
+
+    case 'local':
+      return fetchLocal({
+        paths:       source.paths,
+        name:        source.name,
+        refreshDays: source.refreshHours / 24,
+      });
+
     case 'google-drive':
-      log.warn(`Connector '${source.type}' not yet implemented — skipping "${source.name}"`);
+      log.warn(`Connector 'google-drive' not yet implemented — skipping "${source.name}"`);
       return null;
   }
 }
@@ -72,6 +87,7 @@ function sourceKey(source: KnowledgeSource): string {
     case 'github':       return `github:${source.owner}/${source.repo}`;
     case 'notion':       return `notion:${source.pageId}`;
     case 'file':         return `file:${source.filePath}`;
+    case 'local':        return `local:${source.name.toLowerCase().replace(/\s+/g, '_')}`;
     case 'linear':       return `linear:${source.teamId}`;
     case 'google-drive': return `gdrive:${source.folderId}`;
   }

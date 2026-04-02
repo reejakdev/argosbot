@@ -21,7 +21,14 @@ export default function Ticker() {
   const doubled = [...phrases, ...phrases]
 
   return (
-    <div className="relative border-y border-[rgba(0,212,255,0.12)] bg-bg2/60 py-3 overflow-hidden">
+    <div
+      className="relative py-3 overflow-hidden"
+      style={{
+        borderTop: '1px solid rgba(79,110,255,0.1)',
+        borderBottom: '1px solid rgba(79,110,255,0.1)',
+        background: 'rgba(10,16,32,0.6)',
+      }}
+    >
       {/* Left fade */}
       <div
         className="absolute left-0 top-0 bottom-0 w-20 z-10 pointer-events-none"
@@ -38,9 +45,8 @@ export default function Ticker() {
           {doubled.map((phrase, i) => (
             <span
               key={i}
-              className={`inline-block mx-6 font-mono text-xs tracking-widest ${
-                phrase.startsWith('◆') ? 'text-cyan' : 'text-text2'
-              }`}
+              className="inline-block mx-6 font-mono text-xs tracking-widest"
+              style={{ color: phrase.startsWith('◆') ? '#7b96ff' : '#94a3b8' }}
             >
               {phrase}
             </span>

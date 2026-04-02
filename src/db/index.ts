@@ -56,6 +56,7 @@ function runMigrations(db: Database.Database): void {
     { version: 6, sql: MIGRATION_6 },
     { version: 7, sql: MIGRATION_7 },
     { version: 8, sql: MIGRATION_8 },
+    { version: 9, sql: MIGRATION_9 },
   ];
 
   for (const migration of migrations) {
@@ -327,6 +328,13 @@ const MIGRATION_7 = `
 // Stored as JSON. Never sent to any LLM — only used locally for de-anonymization.
 const MIGRATION_8 = `
   ALTER TABLE messages ADD COLUMN anon_lookup TEXT;
+`;
+
+// proposals.anon_lookup: merged lookup (placeholder→real) from all messages in the window.
+// Used by workers to de-anonymize action inputs before execution.
+// Never sent to any LLM — resolved locally at worker execution time only.
+const MIGRATION_9 = `
+  ALTER TABLE proposals ADD COLUMN anon_lookup TEXT;
 `;
 
 // ─── Audit helper ─────────────────────────────────────────────────────────────

@@ -6,20 +6,34 @@ interface CodeBlockProps {
 
 export function CodeBlock({ code, language = 'json', title }: CodeBlockProps) {
   return (
-    <div className="hud-card rounded-sm overflow-hidden">
+    <div
+      className="overflow-hidden"
+      style={{
+        background: '#080e22',
+        border: '1px solid rgba(79,110,255,0.15)',
+        borderRadius: '8px',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+      }}
+    >
       {title && (
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-[rgba(0,212,255,0.1)] bg-[rgba(0,212,255,0.03)]">
+        <div
+          className="flex items-center gap-2 px-4 py-2.5 border-b"
+          style={{
+            borderColor: 'rgba(79,110,255,0.12)',
+            background: 'rgba(79,110,255,0.04)',
+          }}
+        >
           <div className="flex gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-red/60" />
-            <div className="w-2.5 h-2.5 rounded-full bg-[#ffaa00]/60" />
-            <div className="w-2.5 h-2.5 rounded-full bg-green/60" />
+            <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#ef4444', opacity: 0.7 }} />
+            <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#f59e0b', opacity: 0.7 }} />
+            <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#10b981', opacity: 0.7 }} />
           </div>
           <span className="font-mono text-xs text-text2 ml-2">{title}</span>
-          <span className="ml-auto font-mono text-xs text-text2/40">{language}</span>
+          <span className="ml-auto font-mono text-xs" style={{ color: 'rgba(148,163,184,0.4)' }}>{language}</span>
         </div>
       )}
       <pre className="p-4 text-xs overflow-x-auto leading-relaxed">
-        <code className="text-text">{code}</code>
+        <code style={{ color: '#c4d4f0' }}>{code}</code>
       </pre>
     </div>
   )

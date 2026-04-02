@@ -387,15 +387,39 @@ export async function plan(
     return null;
   }
 
-  // Pull relevant memory context
-  const memories = memorySearch({
-    query: result.summary,
+  // Pull relevant memory context — strictly scoped to this chatId.
+  // field1 = chatId in both conversation and memory vectors — no cross-chat bleed.
+  let memoryContext = '';
+  const embCfg = (config as unknown as { embeddings?: { enabled?: boolean; baseUrl?: string; model?: string; apiKey?: string } }).embeddings;
+  if (embCfg?.enabled) {
+    try {
+      const { hybridSearch } = await import('../vector/store.js');
+      const hits = await hybridSearch(result.summary, embCfg as import('../config/schema.js').EmbeddingsConfig, {
+        topK:          8,
+        minSimilarity: 0.25,
+        field1:        window.chatId,  // strict chatId scope — never mix chats
+      });
+      if (hits.length > 0) {
+        memoryContext = hits.map(h =>
+          `[${h.chunk.sourceRef.split(':')[0]}] ${h.chunk.content.slice(0, 300)}`
+        ).join('\n');
+      }
+    } catch { /* fall through to FTS5 */ }
+  }
+
+  // FTS5 fallback — scoped to same chatId/partner
+  const ftsMemories = memorySearch({
+    query:       result.summary,
+    chatId:      window.chatId,
     partnerName: window.partnerName,
-    limit: 5,
+    limit:       5,
   });
-  const memoryContext = memories.map(m =>
-    `[${new Date(m.createdAt).toLocaleDateString()}] ${m.content}`
-  ).join('\n');
+  if (ftsMemories.length > 0) {
+    const ftsCtx = ftsMemories.map(m =>
+      `[${new Date(m.createdAt).toLocaleDateString()}] ${m.content}`
+    ).join('\n');
+    memoryContext = memoryContext ? `${memoryContext}\n---\n${ftsCtx}` : ftsCtx;
+  }
 
   // ─── Provider-agnostic tool use loop ─────────────────────────────────────────
   // Works with any provider that supports tool use: Anthropic, OpenAI, Groq,
@@ -483,10 +507,26 @@ export async function plan(
     expiresAt,
   };
 
+  // Merge anon lookups from all messages in the window so workers can de-anonymize at execution time.
+  // Never sent to any LLM — resolved locally only.
   const db = getDb();
+  const mergedLookup: Record<string, string> = {};
+  const messageIds = window.messages.map(m => m.id);
+  if (messageIds.length > 0) {
+    const placeholders = messageIds.map(() => '?').join(',');
+    const rows = db.prepare(
+      `SELECT anon_lookup FROM messages WHERE id IN (${placeholders}) AND anon_lookup IS NOT NULL`
+    ).all(...messageIds) as Array<{ anon_lookup: string }>;
+    for (const row of rows) {
+      try {
+        Object.assign(mergedLookup, JSON.parse(row.anon_lookup) as Record<string, string>);
+      } catch { /* skip malformed */ }
+    }
+  }
+
   db.prepare(`
-    INSERT INTO proposals (id, context_summary, plan, actions, draft_reply, status, created_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, 'proposed', ?, ?)
+    INSERT INTO proposals (id, context_summary, plan, actions, draft_reply, status, created_at, expires_at, anon_lookup)
+    VALUES (?, ?, ?, ?, ?, 'proposed', ?, ?, ?)
   `).run(
     proposal.id,
     proposal.contextSummary,
@@ -495,6 +535,7 @@ export async function plan(
     proposal.draftReply ?? null,
     proposal.createdAt,
     proposal.expiresAt,
+    Object.keys(mergedLookup).length > 0 ? JSON.stringify(mergedLookup) : null,
   );
 
   log.info(`Proposal ${proposal.id} created`, {

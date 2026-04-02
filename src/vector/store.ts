@@ -460,6 +460,8 @@ export async function keywordSearch(
   opts: {
     topK?:      number;
     sourceRef?: string;
+    /** Scope search to a specific field1 value (e.g. chatId) */
+    field1?:    string;
   } = {},
 ): Promise<SearchResult[]> {
   const { topK = 5 } = opts;
@@ -479,13 +481,19 @@ export async function keywordSearch(
 
   const tokensLow = tokens.map(t => t.toLowerCase());
 
-  // Full table scan with optional sourceRef filter, then JS-side case-insensitive filtering.
-  // LanceDB LIKE is case-sensitive; doing the token match in JS is more reliable.
-  // Full table scan — no vector, just raw rows. LanceDB default limit is 10; override it.
+  // Full table scan with optional filters, then JS-side case-insensitive token matching.
+  // Combine all SQL conditions into one WHERE clause to avoid chaining uncertainty.
   let baseQ = table.query().limit(100_000);
+  const conditions: string[] = [];
   if (opts.sourceRef) {
     const escaped = opts.sourceRef.replace(/"/g, '\\"').replace(/[%_]/g, '\\$&');
-    baseQ = (baseQ as ReturnType<typeof table.query>).where(`source_ref LIKE "${escaped}%" ESCAPE '\\'`);
+    conditions.push(`source_ref LIKE "${escaped}%" ESCAPE '\\'`);
+  }
+  if (opts.field1) {
+    conditions.push(`field1 = "${opts.field1.replace(/"/g, '\\"')}"`);
+  }
+  if (conditions.length > 0) {
+    baseQ = (baseQ as ReturnType<typeof table.query>).where(conditions.join(' AND '));
   }
 
   const allRows = (await baseQ.toArray()) as Array<Record<string, unknown>>;
@@ -537,6 +545,11 @@ export async function hybridSearch(
     topK?:          number;
     minSimilarity?: number;
     sourceRef?:     string;
+    /** Scope to a specific field1 value — prevents cross-chat context bleed */
+    field1?:        string;
+    field2?:        string;
+    field3?:        string;
+    field4?:        string;
   } = {},
 ): Promise<SearchResult[]> {
   const topK = opts.topK ?? 5;
@@ -545,7 +558,7 @@ export async function hybridSearch(
     // Pass minSimilarity=0 so we over-fetch all semantic candidates;
     // the final slice(0, topK) after merge handles quality control.
     semanticSearch(query, config, { ...opts, topK, minSimilarity: 0 }),
-    keywordSearch(query, { topK, sourceRef: opts.sourceRef }),
+    keywordSearch(query, { topK, sourceRef: opts.sourceRef, field1: opts.field1 }),
   ]);
 
   // Merge: keyword results override vector results for same chunk id

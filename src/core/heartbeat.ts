@@ -273,6 +273,16 @@ export async function runHeartbeat(
   sendToApprovalChat: (text: string) => Promise<void>,
 ): Promise<void> {
   if (!config.heartbeat?.enabled) return;
+
+  // Refresh stale knowledge sources before reasoning — Notion pages, Linear issues, etc.
+  // Non-blocking: a connector failure must never prevent the heartbeat from running.
+  try {
+    const { refreshStaleKnowledge } = await import('../knowledge/index.js');
+    await refreshStaleKnowledge(config);
+  } catch (e) {
+    log.warn('Knowledge refresh failed (non-blocking):', e);
+  }
+
   await runProactivePlan(config, {
     prompt:              config.heartbeat.prompt,
     label:               'heartbeat',

@@ -52,8 +52,20 @@ export default function App() {
 
   if (appState === 'loading') {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-white">
-        <div className="text-muted text-sm">Loading…</div>
+      <div
+        className="flex items-center justify-center min-h-screen"
+        style={{ background: '#04050d' }}
+      >
+        <span
+          style={{
+            fontFamily: "'Courier New', monospace",
+            fontSize: '0.65rem',
+            letterSpacing: '0.2em',
+            color: 'rgba(0,212,255,0.4)',
+          }}
+        >
+          INITIALIZING...
+        </span>
       </div>
     );
   }

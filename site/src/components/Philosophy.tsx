@@ -6,19 +6,19 @@ import { Eye, ShieldCheck, UserCheck } from 'lucide-react'
 const principles = [
   {
     icon: Eye,
-    color: '#00d4ff',
+    color: '#4f6eff',
     title: 'Read by default',
     desc: 'Argos observes every message, every channel, every thread. But observation is not action. The system accumulates context silently — building a picture of what matters — without ever reaching out or modifying anything on its own.',
   },
   {
     icon: ShieldCheck,
-    color: '#00ff88',
+    color: '#10b981',
     title: 'Sanitize before memory',
     desc: 'Before any message is classified, stored, or reasoned about, it passes through a sanitization layer. Raw content is stripped of PII, crypto addresses, and injections. Your memory store and your LLM context only ever see safe, anonymized representations.',
   },
   {
     icon: UserCheck,
-    color: '#ff4466',
+    color: '#ef4444',
     title: 'Approve before action',
     desc: 'Every action — draft reply, calendar event, Notion page, transaction review — is presented as a proposal. You have the final word. Always. The system\'s job is to reduce cognitive load and surface options, not to decide for you.',
   },
@@ -31,8 +31,11 @@ export default function Philosophy() {
   return (
     <section
       id="philosophy"
-      className="py-24 border-t border-[rgba(0,212,255,0.08)]"
-      style={{ background: 'linear-gradient(to bottom, rgba(8,12,24,0.5), transparent)' }}
+      className="py-24"
+      style={{
+        borderTop: '1px solid rgba(79,110,255,0.08)',
+        background: 'linear-gradient(to bottom, rgba(13,21,48,0.4), transparent)',
+      }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -41,7 +44,7 @@ export default function Philosophy() {
           animate={inView ? { opacity: 1, y: 0 } : {}}
           className="mb-14 text-center"
         >
-          <div className="section-label mb-3 text-center">// PHILOSOPHY</div>
+          <div className="section-label mb-3 text-center">Philosophy</div>
           <h2 className="text-3xl lg:text-4xl font-bold text-white mb-8">Design Principles</h2>
 
           {/* Quote block */}
@@ -52,24 +55,21 @@ export default function Philosophy() {
             className="max-w-3xl mx-auto mb-14"
           >
             <div
-              className="relative p-8 rounded-sm"
+              className="relative p-8 rounded-xl"
               style={{
-                background: 'linear-gradient(135deg, rgba(0,212,255,0.04), rgba(0,255,136,0.04))',
-                border: '1px solid rgba(0,212,255,0.15)',
+                background: 'linear-gradient(135deg, rgba(79,110,255,0.04), rgba(123,150,255,0.04))',
+                border: '1px solid rgba(79,110,255,0.15)',
+                boxShadow: '0 4px 32px rgba(0,0,0,0.4)',
               }}
             >
-              {/* Corner brackets */}
-              <div className="absolute top-0 left-0 w-5 h-5 border-t-2 border-l-2 border-cyan/60" />
-              <div className="absolute bottom-0 right-0 w-5 h-5 border-b-2 border-r-2 border-green/60" />
-
               <blockquote className="text-xl lg:text-2xl font-light text-white leading-relaxed italic">
                 "Named after Argos Panoptes — the hundred-eyed giant of Greek mythology who never slept
                 and guarded everything — but acted only on Zeus's orders."
               </blockquote>
-              <div className="mt-4 flex items-center justify-center gap-3">
-                <div className="w-8 h-px bg-cyan/40" />
-                <span className="text-text2 text-sm font-mono tracking-wider">GREEK MYTHOLOGY</span>
-                <div className="w-8 h-px bg-cyan/40" />
+              <div className="mt-5 flex items-center justify-center gap-3">
+                <div className="w-8 h-px" style={{ background: 'rgba(79,110,255,0.4)' }} />
+                <span className="text-text2 text-sm font-medium tracking-wider">GREEK MYTHOLOGY</span>
+                <div className="w-8 h-px" style={{ background: 'rgba(79,110,255,0.4)' }} />
               </div>
             </div>
           </motion.div>
@@ -85,19 +85,23 @@ export default function Philosophy() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ delay: i * 0.15, duration: 0.5 }}
-                className="hud-card rounded-sm p-6 text-center"
+                className="rounded-xl p-6 text-center"
+                style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
+                }}
               >
                 <div
                   className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4"
                   style={{
-                    background: `${p.color}15`,
-                    border: `1px solid ${p.color}30`,
-                    boxShadow: `0 0 20px ${p.color}20`,
+                    background: `${p.color}12`,
+                    border: `1px solid ${p.color}25`,
                   }}
                 >
                   <Icon size={20} style={{ color: p.color }} />
                 </div>
-                <h3 className="font-bold text-white text-lg mb-3">{p.title}</h3>
+                <h3 className="font-semibold text-white text-lg mb-3">{p.title}</h3>
                 <p className="text-text2 text-sm leading-relaxed">{p.desc}</p>
               </motion.div>
             )

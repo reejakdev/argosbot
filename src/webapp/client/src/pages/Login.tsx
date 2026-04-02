@@ -12,6 +12,17 @@ interface LoginProps {
 
 type Method = 'webauthn' | 'totp';
 
+function YubiKeyIcon({ size = 48 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="8" y="18" width="32" height="20" rx="4" stroke="#4f6eff" strokeWidth="1.5" />
+      <rect x="14" y="24" width="8" height="8" rx="2" fill="rgba(79,110,255,0.2)" stroke="#4f6eff" strokeWidth="1.2" />
+      <circle cx="30" cy="28" r="3" fill="rgba(79,110,255,0.3)" stroke="#4f6eff" strokeWidth="1.2" />
+      <path d="M20 18V14a4 4 0 018 0v4" stroke="#4f6eff" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function Login({ onLogin }: LoginProps) {
   const { toast } = useToast();
   const [method, setMethod] = useState<Method>('webauthn');
@@ -68,86 +79,154 @@ export default function Login({ onLogin }: LoginProps) {
   }
 
   return (
-    <div className="min-h-dvh flex items-center justify-center p-6" style={{ background: 'var(--bg)' }}>
-      <div
-        className="w-full max-w-sm rounded-2xl border p-8"
-        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-      >
-        <h1 className="text-2xl font-bold text-center mb-2">🔭 Argos</h1>
-        <p className="text-sm text-center mb-6" style={{ color: 'var(--muted)' }}>
-          Sign in to your workspace
-        </p>
-
-        {/* Method switcher */}
-        <div className="flex gap-2 mb-6">
-          <button
-            onClick={() => setMethod('webauthn')}
-            className="flex-1 py-3 rounded-xl text-sm font-medium border transition-all"
+    <div
+      className="min-h-dvh flex items-center justify-center p-6"
+      style={{ background: 'var(--bg)' }}
+    >
+      <div className="w-full max-w-sm">
+        {/* Logo */}
+        <div className="flex flex-col items-center gap-3 mb-8">
+          <div
             style={{
-              background: method === 'webauthn' ? 'rgba(37,99,235,0.1)' : 'var(--bg)',
-              borderColor: method === 'webauthn' ? 'var(--accent)' : 'var(--border)',
-              color: method === 'webauthn' ? 'var(--text)' : 'var(--muted)',
+              background: 'rgba(79,110,255,0.08)',
+              border: '1px solid rgba(79,110,255,0.2)',
+              borderRadius: '12px',
+              padding: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            🔑 YubiKey
-          </button>
-          <button
-            onClick={() => setMethod('totp')}
-            className="flex-1 py-3 rounded-xl text-sm font-medium border transition-all"
+            <YubiKeyIcon size={40} />
+          </div>
+          <div
             style={{
-              background: method === 'totp' ? 'rgba(37,99,235,0.1)' : 'var(--bg)',
-              borderColor: method === 'totp' ? 'var(--accent)' : 'var(--border)',
-              color: method === 'totp' ? 'var(--text)' : 'var(--muted)',
+              fontFamily: "'Inter', sans-serif",
+              fontSize: '1.5rem',
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              color: '#f0f4ff',
             }}
           >
-            📱 TOTP
-          </button>
+            ARGOS
+          </div>
+          <div
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '0.6rem',
+              letterSpacing: '0.15em',
+              color: 'var(--text2)',
+              textTransform: 'uppercase',
+            }}
+          >
+            Authentication Required
+          </div>
         </div>
 
-        {method === 'webauthn' && (
-          <div>
-            <p className="text-sm text-center mb-4" style={{ color: 'var(--muted)' }}>
-              Insert your YubiKey and tap it when prompted
-            </p>
-            <button
-              onClick={loginWithWebAuthn}
-              disabled={loading}
-              className="w-full py-4 rounded-xl text-white font-semibold text-base transition-opacity"
-              style={{ background: 'var(--accent)', opacity: loading ? 0.5 : 1 }}
-            >
-              {loading ? 'Waiting for key…' : 'Touch your YubiKey'}
-            </button>
+        <div
+          style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: '8px',
+            padding: '1.5rem',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+          }}
+        >
+          {/* Method switcher */}
+          <div
+            className="flex mb-5"
+            style={{
+              background: 'var(--bg2)',
+              borderRadius: '6px',
+              padding: '3px',
+            }}
+          >
+            {(['webauthn', 'totp'] as Method[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMethod(m)}
+                style={{
+                  flex: 1,
+                  fontFamily: "'Inter', sans-serif",
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  padding: '0.5rem',
+                  background: method === m ? 'var(--surface2)' : 'transparent',
+                  color: method === m ? '#f0f4ff' : 'var(--text2)',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  outline: 'none',
+                }}
+              >
+                {m === 'webauthn' ? 'YubiKey' : 'TOTP'}
+              </button>
+            ))}
           </div>
-        )}
 
-        {method === 'totp' && (
-          <div>
-            <input
-              type="text"
-              inputMode="numeric"
-              maxLength={6}
-              placeholder="000000"
-              value={totpCode}
-              onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
-              onKeyDown={(e) => e.key === 'Enter' && loginWithTOTP()}
-              className="w-full py-3 px-4 rounded-xl border text-center text-xl tracking-widest mb-3"
-              style={{
-                background: 'var(--bg)',
-                borderColor: 'var(--border)',
-                color: 'var(--text)',
-              }}
-              autoFocus
-            />
-            <button
-              onClick={loginWithTOTP}
-              disabled={loading || totpCode.length < 6}
-              className="w-full py-4 rounded-xl text-white font-semibold text-base transition-opacity"
-              style={{ background: 'var(--accent)', opacity: loading || totpCode.length < 6 ? 0.5 : 1 }}
-            >
-              {loading ? 'Verifying…' : 'Sign In'}
-            </button>
-          </div>
-        )}
+          {method === 'webauthn' && (
+            <div className="flex flex-col gap-4">
+              <p
+                style={{
+                  fontFamily: "'Inter', sans-serif",
+                  fontSize: '0.8125rem',
+                  color: 'var(--text2)',
+                  textAlign: 'center',
+                  lineHeight: 1.6,
+                }}
+              >
+                Insert your YubiKey and tap when prompted to authenticate.
+              </p>
+              <button
+                onClick={loginWithWebAuthn}
+                disabled={loading}
+                className="btn-primary w-full"
+                style={{ padding: '0.75rem', fontSize: '0.875rem' }}
+              >
+                {loading ? 'Waiting for key...' : 'Touch YubiKey'}
+              </button>
+            </div>
+          )}
+
+          {method === 'totp' && (
+            <div className="flex flex-col gap-3">
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="000 000"
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
+                onKeyDown={(e) => e.key === 'Enter' && loginWithTOTP()}
+                style={{
+                  width: '100%',
+                  background: 'var(--bg2)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '6px',
+                  color: '#f0f4ff',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '1.5rem',
+                  fontWeight: 500,
+                  letterSpacing: '0.3em',
+                  textAlign: 'center',
+                  padding: '0.75rem',
+                  outline: 'none',
+                  transition: 'border-color 0.15s ease',
+                }}
+                autoFocus
+              />
+              <button
+                onClick={loginWithTOTP}
+                disabled={loading || totpCode.length < 6}
+                className="btn-primary w-full"
+                style={{ padding: '0.75rem', fontSize: '0.875rem' }}
+              >
+                {loading ? 'Verifying...' : 'Sign In'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -6,37 +6,37 @@ import { Lock, Database, Cpu, ShieldAlert } from 'lucide-react'
 const rules = [
   {
     icon: Database,
-    color: '#00ff88',
+    color: '#10b981',
     title: 'Raw content is never stored',
     desc: 'Messages exist in memory only during processing. No raw text ever touches the database. Only SHA-256 hashes and anonymized summaries are persisted.',
   },
   {
     icon: Lock,
-    color: '#00d4ff',
+    color: '#4f6eff',
     title: 'PII anonymized before any LLM',
     desc: 'ETH/BTC addresses, transaction hashes, amounts, names, emails, phone numbers — all replaced with typed placeholders before the first token is sent to any model.',
   },
   {
     icon: Cpu,
-    color: '#00ff88',
+    color: '#10b981',
     title: 'LLM anonymizer runs local-only',
     desc: 'The model that strips your PII never runs on a cloud provider. Sending raw data to a cloud model to anonymize it would defeat the purpose entirely. Local model only.',
   },
   {
     icon: ShieldAlert,
-    color: '#ff4466',
+    color: '#ef4444',
     title: 'Every action requires approval',
     desc: 'No autonomous execution. Every proposal from the planner hits a human checkpoint with expiry. High-risk actions require a fresh YubiKey/passkey assertion cryptographically bound to the proposal ID.',
   },
 ]
 
 const flowSteps = [
-  { label: 'Raw Message', sub: 'From Telegram / WhatsApp / Email', color: '#ff4466', dot: true },
-  { label: 'Regex Anonymizer', sub: 'Replaces addresses, amounts, PII', color: '#00d4ff', dot: false },
-  { label: 'LLM Anonymizer', sub: 'Local model only — deep semantic anon', color: '#00ff88', dot: false },
-  { label: 'Classify + Plan', sub: 'Cloud LLM sees only [PLACEHOLDERS]', color: '#00d4ff', dot: false },
-  { label: 'De-anonymize', sub: 'Real values restored from local map', color: '#00ff88', dot: false },
-  { label: 'You Approve', sub: 'WebAuthn / passkey / TOTP', color: '#ff4466', dot: true },
+  { label: 'Raw Message', sub: 'From Telegram / WhatsApp / Email', color: '#ef4444', dot: true },
+  { label: 'Regex Anonymizer', sub: 'Replaces addresses, amounts, PII', color: '#4f6eff', dot: false },
+  { label: 'LLM Anonymizer', sub: 'Local model only — deep semantic anon', color: '#10b981', dot: false },
+  { label: 'Classify + Plan', sub: 'Cloud LLM sees only [PLACEHOLDERS]', color: '#4f6eff', dot: false },
+  { label: 'De-anonymize', sub: 'Real values restored from local map', color: '#10b981', dot: false },
+  { label: 'You Approve', sub: 'WebAuthn / passkey / TOTP', color: '#ef4444', dot: true },
 ]
 
 export default function Privacy() {
@@ -46,8 +46,11 @@ export default function Privacy() {
   return (
     <section
       id="privacy"
-      className="py-24 border-t border-[rgba(0,212,255,0.08)]"
-      style={{ background: 'linear-gradient(to bottom, rgba(8,12,24,0.6), transparent)' }}
+      className="py-24"
+      style={{
+        borderTop: '1px solid rgba(79,110,255,0.08)',
+        background: 'linear-gradient(to bottom, rgba(13,21,48,0.5), transparent)',
+      }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -56,7 +59,7 @@ export default function Privacy() {
           animate={inView ? { opacity: 1, y: 0 } : {}}
           className="mb-14"
         >
-          <div className="section-label mb-3">// PRIVACY MODEL</div>
+          <div className="section-label mb-3">Privacy Model</div>
           <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
             Privacy is{' '}
             <span className="gradient-text">architecture</span>, not policy
@@ -69,7 +72,7 @@ export default function Privacy() {
 
         <div className="grid lg:grid-cols-2 gap-12 items-start">
           {/* Left: Rules */}
-          <div className="space-y-5">
+          <div className="space-y-4">
             {rules.map((rule, i) => {
               const Icon = rule.icon
               return (
@@ -79,12 +82,17 @@ export default function Privacy() {
                   whileInView={{ opacity: 1, x: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.1, duration: 0.5 }}
-                  className="flex items-start gap-4 p-5 hud-card rounded-sm"
+                  className="flex items-start gap-4 p-5 rounded-lg"
+                  style={{
+                    background: 'var(--surface)',
+                    border: '1px solid var(--border)',
+                    boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+                  }}
                 >
                   <div className="flex-shrink-0 mt-0.5">
                     <div
-                      className="w-8 h-8 rounded-sm flex items-center justify-center"
-                      style={{ background: `${rule.color}18`, border: `1px solid ${rule.color}30` }}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center"
+                      style={{ background: `${rule.color}12`, border: `1px solid ${rule.color}25` }}
                     >
                       <Icon size={16} style={{ color: rule.color }} />
                     </div>
@@ -104,27 +112,31 @@ export default function Privacy() {
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.6 }}
-            className="hud-card rounded-sm p-6"
+            className="rounded-lg p-6"
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+            }}
           >
-            <div className="font-mono text-xs text-cyan tracking-widest mb-6">
+            <div className="text-xs font-semibold tracking-wide mb-6" style={{ color: '#7b96ff' }}>
               DATA FLOW DIAGRAM
             </div>
             <div className="space-y-0">
               {flowSteps.map((step, i) => (
                 <div key={step.label} className="relative">
                   <div className="flex items-start gap-4">
-                    {/* Connector line + dot */}
                     <div className="flex flex-col items-center flex-shrink-0 w-6">
                       <motion.div
                         className="w-3 h-3 rounded-full border-2 flex-shrink-0"
                         style={{ borderColor: step.color, background: step.dot ? step.color : 'transparent' }}
-                        animate={{ boxShadow: [`0 0 0px ${step.color}`, `0 0 8px ${step.color}`, `0 0 0px ${step.color}`] }}
+                        animate={{ opacity: [1, 0.6, 1] }}
                         transition={{ duration: 2, repeat: Infinity, delay: i * 0.3 }}
                       />
                       {i < flowSteps.length - 1 && (
                         <motion.div
                           className="w-px flex-1 my-1"
-                          style={{ background: `linear-gradient(to bottom, ${step.color}60, ${flowSteps[i + 1].color}40)`, minHeight: '28px' }}
+                          style={{ background: `linear-gradient(to bottom, ${step.color}50, ${flowSteps[i + 1].color}30)`, minHeight: '28px' }}
                           initial={{ scaleY: 0 }}
                           whileInView={{ scaleY: 1 }}
                           viewport={{ once: true }}
@@ -132,7 +144,6 @@ export default function Privacy() {
                         />
                       )}
                     </div>
-                    {/* Content */}
                     <div className="pb-4">
                       <div className="font-semibold text-white text-sm">{step.label}</div>
                       <div className="text-text2 text-xs mt-0.5">{step.sub}</div>
@@ -143,12 +154,18 @@ export default function Privacy() {
             </div>
 
             {/* Placeholder example */}
-            <div className="mt-4 p-3 rounded-sm bg-bg/60 border border-[rgba(0,212,255,0.1)]">
-              <div className="font-mono text-xs text-text2/60 mb-2">Cloud model receives:</div>
-              <code className="text-xs leading-loose block text-text">
-                <span className="text-green">[PERSON_1]</span> wants to send{' '}
-                <span className="text-cyan">[AMT_10K-100K_USDC]</span> to{' '}
-                <span className="text-cyan">[ADDR_1]</span>
+            <div
+              className="mt-4 p-3 rounded-lg"
+              style={{
+                background: 'rgba(6,11,31,0.6)',
+                border: '1px solid rgba(79,110,255,0.1)',
+              }}
+            >
+              <div className="font-mono text-xs mb-2" style={{ color: 'rgba(148,163,184,0.55)' }}>Cloud model receives:</div>
+              <code className="text-xs leading-loose block text-text" style={{ fontFamily: 'JetBrains Mono, Courier New, monospace' }}>
+                <span style={{ color: '#7b96ff' }}>[PERSON_1]</span> wants to send{' '}
+                <span style={{ color: '#7b96ff' }}>[AMT_10K-100K_USDC]</span> to{' '}
+                <span style={{ color: '#7b96ff' }}>[ADDR_1]</span>
                 <br />
                 via <span className="text-text2">[NETWORK_1]</span>. Please draft a reply.
               </code>

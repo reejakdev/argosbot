@@ -64,17 +64,17 @@ const rows = [
 
 const boxes = [
   {
-    color: '#00d4ff',
+    color: '#4f6eff',
     title: 'Privacy by architecture',
     body: 'Generic AI assistants promise privacy in their terms of service. Argos enforces it structurally. The pipeline is designed so that raw data physically cannot reach a cloud model — not because we ask nicely, but because the anonymizer runs locally before any external call is made.',
   },
   {
-    color: '#00ff88',
+    color: '#10b981',
     title: 'Human-in-the-loop',
     body: 'Most AI tools optimize for autonomy. Argos optimizes for trust. Every proposed action is a checkpoint. You\'re not signing a blank check — you\'re reviewing a specific, reversible proposal with full context about what will happen and why.',
   },
   {
-    color: '#ff4466',
+    color: '#ef4444',
     title: 'Built for fintech & crypto',
     body: 'Ethereum addresses, transaction hashes, ENS names, DeFi protocol names, custody flows — Argos knows the vocabulary. The anonymizer has specific patterns for crypto PII that generic tools miss entirely.',
   },
@@ -85,7 +85,11 @@ export default function WhyArgos() {
   const inView = useInView(ref, { once: true })
 
   return (
-    <section id="why" className="py-24 border-t border-[rgba(0,212,255,0.08)]">
+    <section
+      id="why"
+      className="py-24"
+      style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+    >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
           ref={ref}
@@ -93,7 +97,7 @@ export default function WhyArgos() {
           animate={inView ? { opacity: 1, y: 0 } : {}}
           className="mb-14"
         >
-          <div className="section-label mb-3">// WHY ARGOS</div>
+          <div className="section-label mb-3">Why Argos</div>
           <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
             Not just another{' '}
             <span className="gradient-text">AI assistant</span>
@@ -109,20 +113,25 @@ export default function WhyArgos() {
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          className="hud-card rounded-sm overflow-hidden mb-10"
+          className="rounded-xl overflow-hidden mb-10"
+          style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            boxShadow: '0 4px 32px rgba(0,0,0,0.4)',
+          }}
         >
           <table className="w-full">
             <thead>
-              <tr className="border-b border-[rgba(0,212,255,0.1)]">
-                <th className="text-left px-5 py-4 text-text2 text-sm font-mono tracking-wide">Feature</th>
+              <tr style={{ borderBottom: '1px solid rgba(79,110,255,0.1)' }}>
+                <th className="text-left px-5 py-4 text-text2 text-sm font-medium">Feature</th>
                 <th className="px-5 py-4 text-center">
                   <div className="flex items-center justify-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-green animate-pulse" />
-                    <span className="text-green font-mono text-sm tracking-widest">ARGOS</span>
+                    <span className="font-semibold text-sm" style={{ color: '#10b981' }}>ARGOS</span>
                   </div>
                 </th>
                 <th className="px-5 py-4 text-center">
-                  <span className="text-text2 font-mono text-sm tracking-wide">Generic AI Assistant</span>
+                  <span className="text-text2 text-sm font-medium">Generic AI Assistant</span>
                 </th>
               </tr>
             </thead>
@@ -134,15 +143,21 @@ export default function WhyArgos() {
                   whileInView={{ opacity: 1, x: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.06 }}
-                  className="border-b border-[rgba(0,212,255,0.06)] hover:bg-cyan/5 transition-colors"
+                  style={{ borderBottom: '1px solid rgba(79,110,255,0.06)' }}
+                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.04)'}
+                  onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
+                  className="transition-colors"
                 >
                   <td className="px-5 py-3.5 text-sm text-text">{row.feature}</td>
                   <td className="px-5 py-3.5 text-center">
                     <div className="flex flex-col items-center gap-0.5">
-                      <div className={`flex items-center justify-center w-6 h-6 rounded-full ${row.argos ? 'bg-green/15' : 'bg-red/15'}`}>
+                      <div
+                        className="flex items-center justify-center w-6 h-6 rounded-full"
+                        style={{ background: row.argos ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)' }}
+                      >
                         {row.argos
-                          ? <Check size={12} className="text-green" />
-                          : <X size={12} className="text-red" />
+                          ? <Check size={12} style={{ color: '#10b981' }} />
+                          : <X size={12} style={{ color: '#ef4444' }} />
                         }
                       </div>
                       <span className="text-xs text-text2/60 font-mono">{row.argosNote}</span>
@@ -150,9 +165,12 @@ export default function WhyArgos() {
                   </td>
                   <td className="px-5 py-3.5 text-center">
                     <div className="flex flex-col items-center gap-0.5">
-                      <div className={`flex items-center justify-center w-6 h-6 rounded-full ${row.generic ? 'bg-red/15' : 'bg-text2/15'}`}>
+                      <div
+                        className="flex items-center justify-center w-6 h-6 rounded-full"
+                        style={{ background: row.generic ? 'rgba(239,68,68,0.12)' : 'rgba(148,163,184,0.1)' }}
+                      >
                         {row.generic
-                          ? <X size={12} className="text-red" />
+                          ? <X size={12} style={{ color: '#ef4444' }} />
                           : <Check size={12} className="text-text2" />
                         }
                       </div>
@@ -174,14 +192,18 @@ export default function WhyArgos() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: i * 0.15 }}
-              className="hud-card rounded-sm p-6"
-              style={{ borderColor: `${box.color}25` }}
+              className="rounded-lg p-6"
+              style={{
+                background: 'var(--surface)',
+                border: `1px solid ${box.color}20`,
+                boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
+              }}
             >
               <div
                 className="w-1 h-8 rounded-full mb-4"
-                style={{ background: box.color, boxShadow: `0 0 10px ${box.color}60` }}
+                style={{ background: box.color }}
               />
-              <h3 className="font-bold text-white mb-3">{box.title}</h3>
+              <h3 className="font-semibold text-white mb-3">{box.title}</h3>
               <p className="text-text2 text-sm leading-relaxed">{box.body}</p>
             </motion.div>
           ))}

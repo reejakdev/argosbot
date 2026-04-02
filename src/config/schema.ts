@@ -129,10 +129,33 @@ const SlackMonitoredChannelSchema = z.object({
   tags:      z.array(z.string()).default([]),
 });
 
+/** Listener — user token (xoxp-), read-only, sees all channels/DMs */
+const SlackListenerSchema = z.object({
+  enabled:             z.boolean().default(false),
+  monitoredChannels:   z.array(SlackMonitoredChannelSchema).default([]),
+  monitorDMs:          z.boolean().default(true),
+  /** Polling interval in seconds. Default: 60. */
+  pollIntervalSeconds: z.number().min(10).default(60),
+}).default({});
+
+/** Personal bot — bot token (xoxb-), owner-only interactions + approval notifications */
+const SlackPersonalSchema = z.object({
+  /** Bot User OAuth Token (xoxb-...) */
+  botToken:          z.string().optional(),
+  /** Channel ID where the bot listens and sends notifications (DM or private channel) */
+  approvalChannelId: z.string().optional(),
+  /** Slack user IDs allowed to issue commands (owner only). Empty = no auth check. */
+  allowedUserIds:    z.array(z.string()).default([]),
+}).default({});
+
 const SlackChannelSchema = z.object({
-  enabled:           z.boolean().default(false),
-  monitoredChannels: z.array(SlackMonitoredChannelSchema).default([]),
-  monitorDMs:        z.boolean().default(true),
+  /** Legacy flat config — mapped to listener sub-object on load */
+  enabled:             z.boolean().default(false),
+  monitoredChannels:   z.array(SlackMonitoredChannelSchema).default([]),
+  monitorDMs:          z.boolean().default(true),
+  pollIntervalSeconds: z.number().min(10).default(60),
+  listener: SlackListenerSchema,
+  personal: SlackPersonalSchema,
 }).default({});
 
 // ─── Discord channel ──────────────────────────────────────────────────────────
@@ -151,12 +174,33 @@ const DiscordChannelSchema = z.object({
   monitorDMs:        z.boolean().default(true),
 }).default({});
 
+// ─── WhatsApp channel ─────────────────────────────────────────────────────────
+
+const WhatsAppChannelSchema = z.object({
+  /** JID (phone@s.whatsapp.net or group@g.us) to send approval notifications to */
+  approvalJid: z.string().optional(),
+}).default({});
+
 // ─── Channels ─────────────────────────────────────────────────────────────────
 
 const ChannelsSchema = z.object({
   telegram: TelegramChannelSchema,
   slack:    SlackChannelSchema,
   discord:  DiscordChannelSchema,
+  whatsapp: WhatsAppChannelSchema,
+}).default({});
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+// Canal unique pour les notifications push (proposals, alertes, heartbeat).
+// Séparé des réponses conversationnelles qui utilisent toujours le canal d'origine.
+
+const NotificationsSchema = z.object({
+  /**
+   * Canal préféré pour les notifications push (proposals, alertes, heartbeat).
+   * Si absent, Argos utilise la priorité automatique : telegram_bot > telegram > slack > whatsapp.
+   * Les réponses conversationnelles ignorent ce réglage — elles répondent toujours sur le canal d'origine.
+   */
+  preferredChannel: z.enum(['telegram_bot', 'telegram', 'slack', 'whatsapp']).optional(),
 }).default({});
 
 // ─── Owner ────────────────────────────────────────────────────────────────────
@@ -270,6 +314,13 @@ const KnowledgeSourceSchema = z.discriminatedUnion('type', [
     filePath:     z.string(),
     refreshHours: z.number().default(168),
   }),
+  z.object({
+    type:         z.literal('local'),
+    name:         z.string(),
+    /** Glob patterns or exact paths, relative to HOME or absolute */
+    paths:        z.array(z.string()),
+    refreshHours: z.number().default(1),
+  }),
 ]);
 
 const KnowledgeSchema = z.object({
@@ -312,6 +363,12 @@ const NotionSchema = z.object({
   agentDatabaseId: z.string(),
   ownerDatabaseId: z.string().optional(),
   mode:            z.enum(['agent', 'owner', 'both']).default('agent'),
+});
+
+// ─── Linear ───────────────────────────────────────────────────────────────────
+
+const LinearSchema = z.object({
+  apiKey: z.string(),
 });
 
 // ─── Calendar ─────────────────────────────────────────────────────────────────
@@ -382,6 +439,12 @@ const ClaudeSchema = z.object({
   maxTokens:                 z.number().default(4096),
   classificationTemperature: z.number().default(0),
   planningTemperature:       z.number().default(0.3),
+  /**
+   * Instructions personnalisées ajoutées à la fin du system prompt du planner et du heartbeat.
+   * Utilisez ça pour des règles métier spécifiques à votre usage — whitelist, workflows, priorités.
+   * Ces instructions ne sont PAS partagées avec le classifier ni avec les autres rôles.
+   */
+  customInstructions:        z.string().optional(),
 });
 
 // ─── Wallet ───────────────────────────────────────────────────────────────────
@@ -419,6 +482,13 @@ const WalletSchema = z.object({
     dailyLimitNative: z.string().optional(),
     /** Require elevated YubiKey auth for every signing (default: true). */
     requireElevatedAuth: z.boolean().default(true),
+    /**
+     * Address whitelist — if non-empty, ONLY these addresses can receive funds.
+     * EVM addresses are compared case-insensitively.
+     * Solana addresses are compared exactly.
+     * If empty or unset: no whitelist restriction.
+     */
+    whitelist: z.array(z.string()).default([]),
   }).default({}),
 });
 
@@ -451,8 +521,10 @@ export const ConfigSchema = z.object({
   anonymizer: AnonymizerSchema.default({}),
   approval:   ApprovalSchema.default({}),
   notion:     NotionSchema.optional(),
+  linear:     LinearSchema.optional(),
   calendar:   CalendarSchema.optional(),
-  wallet:     WalletSchema.optional(),
+  wallet:         WalletSchema.optional(),
+  notifications:  NotificationsSchema,
   smtp:       SmtpSchema.optional(),
   // MCP servers — tools externes disponibles au planner
   mcpServers: z.array(McpServerSchema).default([]),

@@ -30,6 +30,7 @@ import { createTelegramChannel } from './ingestion/channels/telegram.js';
 import { createWhatsAppChannel } from './ingestion/channels/whatsapp.js';
 import { createEmailChannel } from './ingestion/channels/email.js';
 import { createSlackChannel } from './ingestion/channels/slack.js';
+import { createSlackBot } from './ingestion/channels/slack-bot.js';
 import { createDiscordChannel } from './ingestion/channels/discord.js';
 import { loadKnowledge, refreshStaleKnowledge } from './knowledge/index.js';
 import { startWebApp } from './webapp/server.js';
@@ -37,6 +38,7 @@ import { pluginRegistry } from './plugins/registry.js';
 import { buildPrivacyLlmConfig } from './core/privacy.js';
 import { runProactivePlan } from './core/heartbeat.js';
 import { ingestMessage, processWindow, sendDailyBriefing, setSendToApprovalChat } from './core/pipeline.js';
+import { writeSelfDoc } from './core/self-doc.js';
 import { sendTaskBriefing } from './core/briefing.js';
 import type { RawMessage } from './types.js';
 import type { LLMConfig } from './llm/index.js';
@@ -141,16 +143,39 @@ async function boot() {
     }
   }
 
+  let whatsappChannel: InstanceType<typeof import('./ingestion/channels/whatsapp.js').WhatsAppChannel> | null = null;
   if (process.env.WHATSAPP_ENABLED === 'true' || config.secrets?.WHATSAPP_ENABLED === 'true') {
-    registerChannel(createWhatsAppChannel(getDataDir()));
+    whatsappChannel = createWhatsAppChannel(getDataDir());
+    if (config.channels.whatsapp?.approvalJid) {
+      whatsappChannel.configure({ partnerJids: {}, approvalJid: config.channels.whatsapp.approvalJid });
+    }
+    registerChannel(whatsappChannel);
     log.info('WhatsApp listener registered');
   }
 
-  if (config.channels.slack?.enabled && (process.env.SLACK_BOT_TOKEN || config.secrets?.SLACK_BOT_TOKEN)) {
-    if (config.secrets?.SLACK_BOT_TOKEN) process.env.SLACK_BOT_TOKEN = config.secrets.SLACK_BOT_TOKEN;
-    if (config.secrets?.SLACK_APP_TOKEN) process.env.SLACK_APP_TOKEN = config.secrets.SLACK_APP_TOKEN;
+  let slackBot: InstanceType<typeof import('./ingestion/channels/slack-bot.js').SlackBot> | null = null;
+
+  if (config.channels.slack?.enabled && (process.env.SLACK_USER_TOKEN || config.secrets?.SLACK_USER_TOKEN)) {
+    if (config.secrets?.SLACK_USER_TOKEN) process.env.SLACK_USER_TOKEN = config.secrets.SLACK_USER_TOKEN;
     const slackChannel = createSlackChannel(config.channels.slack);
-    if (slackChannel) { registerChannel(slackChannel); log.info('Slack listener registered'); }
+    if (slackChannel) { registerChannel(slackChannel); log.info('Slack user-token listener registered'); }
+  }
+
+  // Slack personal bot — owner notifications + commands (/proposals, /approve, /reject, …)
+  const slackBotToken = config.channels.slack?.personal?.botToken ?? config.secrets?.SLACK_BOT_TOKEN ?? process.env.SLACK_BOT_TOKEN;
+  const slackApprovalChannelId = config.channels.slack?.personal?.approvalChannelId;
+  if (slackBotToken && slackApprovalChannelId) {
+    slackBot = createSlackBot(
+      {
+        botToken:          slackBotToken,
+        approvalChannelId: slackApprovalChannelId,
+        allowedUserIds:    config.channels.slack?.personal?.allowedUserIds ?? [],
+      },
+      llmConfig,
+      config,
+    );
+    await slackBot.start();
+    log.info(`Slack personal bot started — approval channel: ${slackApprovalChannelId}`);
   }
 
   if (config.channels.discord?.enabled && (process.env.DISCORD_BOT_TOKEN || config.secrets?.DISCORD_BOT_TOKEN)) {
@@ -159,7 +184,7 @@ async function boot() {
     if (discordChannel) { registerChannel(discordChannel); log.info('Discord listener registered'); }
   }
 
-  // 7. Approval gateway — bot en priorité (notifications owner), MTProto fallback
+  // 7. Approval gateway — Telegram bot > MTProto > Slack bot > web app only
   if (telegramBot) {
     initApprovalGateway(
       async (chatId, text) => { await telegramBot!.sendMessage(chatId, text); return { message_id: 0 }; },
@@ -170,6 +195,12 @@ async function boot() {
       (chatId, text, opts) => telegramChannel!.sendMessage(chatId, text, opts),
       approvalChatId,
     );
+  } else if (slackBot) {
+    initApprovalGateway(
+      async (_chatId, text) => { await slackBot!.sendToApprovalChat(text); return { message_id: 0 }; },
+      slackApprovalChannelId!,
+    );
+    log.info('Approval gateway wired via Slack bot');
   } else {
     log.warn('No messaging channel configured — approvals via web app only');
   }
@@ -191,16 +222,55 @@ async function boot() {
   }
 
   // 8. Knowledge sources
+  // Generate self-description first — then auto-index it + config.json
+  writeSelfDoc(config);
+
+  // Auto-inject built-in self-knowledge sources (no user config needed)
+  const builtinSelf = { type: 'local' as const, name: 'Argos self', paths: ['~/.argos/argos-self.md'], refreshHours: 1 };
+  const builtinCfg  = { type: 'local' as const, name: 'Argos config', paths: ['~/.argos/config.json'], refreshHours: 1 };
+  const autoSources = [builtinSelf, builtinCfg].filter(
+    a => !config.knowledge.sources.some(s => s.type === 'local' && (s as { name: string }).name === a.name),
+  );
+  if (autoSources.length) {
+    config.knowledge.sources.push(...autoSources);
+  }
+
   await loadKnowledge(config);
 
-  // Late-bind notification function
-  // Bot takes priority for notifications — it delivers to the owner's real Telegram account.
-  // MTProto fallback sends to Saved Messages of the listener account (may differ from owner).
-  const sendToApprovalChat = telegramBot
-    ? async (text: string) => { await telegramBot!.sendMessage(approvalChatId, text); }
-    : telegramChannel
-      ? (text: string) => telegramChannel!.sendToApprovalChat(text)
-      : async (_text: string) => { log.warn('No messaging channel — message not sent'); };
+  // Late-bind notification function.
+  // Notifications push (proposals, alertes, heartbeat) → canal unique choisi via config.notifications.preferredChannel.
+  // Les réponses conversationnelles utilisent toujours le canal d'origine (géré par chaque bot séparément).
+  const preferred = config.notifications?.preferredChannel;
+
+  function buildSendToApprovalChat(): (text: string) => Promise<void> {
+    // Explicit preference — use the requested channel if available, warn + fallback if not.
+    if (preferred === 'telegram_bot') {
+      if (telegramBot) return async (t) => { await telegramBot!.sendMessage(approvalChatId, t); };
+      log.warn('notifications.preferredChannel=telegram_bot but no bot token configured — falling back');
+    }
+    if (preferred === 'telegram') {
+      if (telegramChannel) return (t) => telegramChannel!.sendToApprovalChat(t);
+      log.warn('notifications.preferredChannel=telegram but MTProto not configured — falling back');
+    }
+    if (preferred === 'slack') {
+      if (slackBot) return (t) => slackBot!.sendToApprovalChat(t);
+      log.warn('notifications.preferredChannel=slack but no Slack bot configured — falling back');
+    }
+    if (preferred === 'whatsapp') {
+      if (whatsappChannel) return (t) => whatsappChannel!.sendToApprovalChat(t);
+      log.warn('notifications.preferredChannel=whatsapp but WhatsApp not configured — falling back');
+    }
+
+    // Auto-detect priority: telegram_bot > telegram > slack > whatsapp
+    if (telegramBot)     return async (t) => { await telegramBot!.sendMessage(approvalChatId, t); };
+    if (telegramChannel) return (t) => telegramChannel!.sendToApprovalChat(t);
+    if (slackBot)        return (t) => slackBot!.sendToApprovalChat(t);
+    if (whatsappChannel) return (t) => whatsappChannel!.sendToApprovalChat(t);
+    return async (_t) => { log.warn('No messaging channel configured — notification not sent'); };
+  }
+
+  const sendToApprovalChat = buildSendToApprovalChat();
+  if (preferred) log.info(`Notification channel: ${preferred}`);
 
   setSendToApprovalChat(sendToApprovalChat);
 
@@ -273,6 +343,7 @@ async function boot() {
     await pluginRegistry.emitShutdown();
     await windowManager.flushAll();
     await stopAllChannels();
+    slackBot?.stop();
     stopCrons();
     db.close();
     process.exit(0);

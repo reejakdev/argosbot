@@ -45,7 +45,8 @@ export default function MultiModel() {
   return (
     <section
       id="models"
-      className="py-24 border-t border-[rgba(0,212,255,0.08)]"
+      className="py-24"
+      style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
     >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
@@ -54,7 +55,7 @@ export default function MultiModel() {
           animate={inView ? { opacity: 1, y: 0 } : {}}
           className="mb-14"
         >
-          <div className="section-label mb-3">// MULTI-MODEL</div>
+          <div className="section-label mb-3">Multi-Model</div>
           <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
             15+ LLM providers.{' '}
             <span className="gradient-text">One config.</span>
@@ -72,11 +73,18 @@ export default function MultiModel() {
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
-              className="space-y-4 mb-6"
+              className="space-y-3 mb-6"
             >
-              <div className="hud-card rounded-sm p-4">
+              <div
+                className="rounded-lg p-4"
+                style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+                }}
+              >
                 <div className="flex items-center gap-2 mb-2">
-                  <div className="w-2 h-2 rounded-full bg-cyan" />
+                  <div className="w-2 h-2 rounded-full" style={{ background: '#4f6eff' }} />
                   <span className="text-sm font-semibold text-white">Primary LLM</span>
                   <Badge label="cloud" variant="cloud" />
                 </div>
@@ -84,9 +92,16 @@ export default function MultiModel() {
                   Used for classification and planning. Must support tool use. Any OpenAI-compatible endpoint works.
                 </p>
               </div>
-              <div className="hud-card hud-card-green rounded-sm p-4">
+              <div
+                className="rounded-lg p-4"
+                style={{
+                  background: 'var(--surface)',
+                  border: '1px solid rgba(16,185,129,0.2)',
+                  boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+                }}
+              >
                 <div className="flex items-center gap-2 mb-2">
-                  <div className="w-2 h-2 rounded-full bg-green" />
+                  <div className="w-2 h-2 rounded-full" style={{ background: '#10b981' }} />
                   <span className="text-sm font-semibold text-white">Local LLM</span>
                   <Badge label="local" variant="local" />
                 </div>
@@ -94,7 +109,14 @@ export default function MultiModel() {
                   Runs the LLM anonymizer — the only model that ever sees raw PII. Stays on your machine. Ollama or LM Studio recommended.
                 </p>
               </div>
-              <div className="hud-card rounded-sm p-4">
+              <div
+                className="rounded-lg p-4"
+                style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+                }}
+              >
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-2 h-2 rounded-full bg-text2" />
                   <span className="text-sm font-semibold text-white">Fallback LLM</span>
@@ -122,13 +144,21 @@ export default function MultiModel() {
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.5 }}
-            className="hud-card rounded-sm overflow-hidden"
+            className="rounded-lg overflow-hidden"
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+            }}
           >
-            <div className="px-4 py-3 border-b border-[rgba(0,212,255,0.1)] flex items-center gap-2">
-              <div className="font-mono text-xs text-cyan tracking-widest">SUPPORTED PROVIDERS</div>
+            <div
+              className="px-4 py-3 border-b flex items-center gap-2"
+              style={{ borderColor: 'rgba(79,110,255,0.1)' }}
+            >
+              <div className="text-xs font-semibold tracking-wide" style={{ color: '#7b96ff' }}>SUPPORTED PROVIDERS</div>
               <span className="ml-auto text-xs text-text2 font-mono">{providers.length} total</span>
             </div>
-            <div className="divide-y divide-[rgba(0,212,255,0.06)]">
+            <div style={{ borderColor: 'rgba(79,110,255,0.06)' }}>
               {providers.map((p, i) => (
                 <motion.div
                   key={p.name}
@@ -136,7 +166,10 @@ export default function MultiModel() {
                   whileInView={{ opacity: 1, x: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.04 }}
-                  className="flex items-center justify-between px-4 py-3 hover:bg-cyan/5 transition-colors"
+                  className="flex items-center justify-between px-4 py-3 transition-colors"
+                  style={{ borderBottom: i < providers.length - 1 ? '1px solid rgba(79,110,255,0.06)' : 'none' }}
+                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(79,110,255,0.04)'}
+                  onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'transparent'}
                 >
                   <div>
                     <div className="text-white text-sm font-medium">{p.name}</div>

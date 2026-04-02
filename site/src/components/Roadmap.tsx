@@ -81,19 +81,24 @@ function RoadmapColumn({
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
       transition={{ delay: index * 0.15, duration: 0.5 }}
-      className="hud-card rounded-sm overflow-hidden"
+      className="rounded-lg overflow-hidden"
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
+      }}
     >
       <div
-        className="px-5 py-4 border-b border-[rgba(0,212,255,0.1)]"
-        style={{ background: `${color}08` }}
+        className="px-5 py-4 border-b"
+        style={{ background: `${color}06`, borderColor: 'rgba(79,110,255,0.1)' }}
       >
         <div className="flex items-center gap-3">
           <Icon size={16} style={{ color }} />
           <div>
-            <div className="font-mono text-xs tracking-widest" style={{ color, opacity: 0.7 }}>
+            <div className="text-xs font-semibold tracking-wide" style={{ color, opacity: 0.75 }}>
               {version}
             </div>
-            <div className="font-bold text-white text-sm">{title}</div>
+            <div className="font-semibold text-white text-sm">{title}</div>
           </div>
           <span className="ml-auto text-xs font-mono text-text2">{items.length} items</span>
         </div>
@@ -110,9 +115,9 @@ function RoadmapColumn({
           >
             <Icon
               size={13}
-              style={{ color, flexShrink: 0, opacity: version === 'v1 — DONE' ? 1 : 0.5 }}
+              style={{ color, flexShrink: 0, opacity: version === 'v1 — DONE' ? 1 : 0.4 }}
             />
-            <span className={version === 'v1 — DONE' ? 'text-text' : 'text-text2'}>{item}</span>
+            <span style={{ color: version === 'v1 — DONE' ? '#f0f4ff' : '#94a3b8' }}>{item}</span>
           </motion.div>
         ))}
       </div>
@@ -125,7 +130,10 @@ export default function Roadmap() {
   const inView = useInView(ref, { once: true })
 
   return (
-    <section className="py-24 border-t border-[rgba(0,212,255,0.08)]">
+    <section
+      className="py-24"
+      style={{ borderTop: '1px solid rgba(79,110,255,0.08)' }}
+    >
       <div className="max-w-7xl mx-auto px-6">
         <motion.div
           ref={ref}
@@ -133,7 +141,7 @@ export default function Roadmap() {
           animate={inView ? { opacity: 1, y: 0 } : {}}
           className="mb-14"
         >
-          <div className="section-label mb-3">// ROADMAP</div>
+          <div className="section-label mb-3">Roadmap</div>
           <h2 className="text-3xl lg:text-4xl font-bold text-white mb-4">
             Built in the open.{' '}
             <span className="gradient-text">Shipped iteratively.</span>
@@ -149,7 +157,7 @@ export default function Roadmap() {
             title="Core Pipeline"
             version="v1 — DONE"
             items={v1Done}
-            color="#00ff88"
+            color="#10b981"
             icon={CheckCircle2}
             index={0}
           />
@@ -157,7 +165,7 @@ export default function Roadmap() {
             title="Native + Extended"
             version="v2 — NEXT"
             items={v2Next}
-            color="#00d4ff"
+            color="#4f6eff"
             icon={Circle}
             index={1}
           />
@@ -165,7 +173,7 @@ export default function Roadmap() {
             title="Multi-user / Enterprise"
             version="v3 — FUTURE"
             items={v3Future}
-            color="#6a80a8"
+            color="#94a3b8"
             icon={Hexagon}
             index={2}
           />

@@ -7,6 +7,69 @@ interface StatusProps {
   onLogout: () => void;
 }
 
+function StatCard({ label, value, color }: { label: string; value: number | string; color?: string }) {
+  return (
+    <div
+      className="flex flex-col gap-2"
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        borderRadius: '8px',
+        padding: '1rem',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+      }}
+    >
+      <div className="label-mono">{label}</div>
+      <div
+        style={{
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '1.75rem',
+          fontWeight: 700,
+          lineHeight: 1,
+          color: color ?? '#f0f4ff',
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function StatusRow({ label, value, dotClass }: { label: string; value: string; dotClass?: string }) {
+  return (
+    <div
+      className="flex items-center justify-between py-2.5"
+      style={{ borderBottom: '1px solid var(--border)' }}
+    >
+      <span
+        style={{
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '0.65rem',
+          fontWeight: 700,
+          letterSpacing: '0.1em',
+          textTransform: 'uppercase',
+          color: 'var(--text2)',
+        }}
+      >
+        {label}
+      </span>
+      <div className="flex items-center gap-2">
+        {dotClass && <span className={`status-dot ${dotClass}`} />}
+        <span
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '0.7rem',
+            color: '#f0f4ff',
+            letterSpacing: '0.04em',
+          }}
+        >
+          {value}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function Status({ onLogout }: StatusProps) {
   const { toast } = useToast();
   const [status, setStatus] = useState<StatusData | null>(null);
@@ -30,67 +93,157 @@ export default function Status({ onLogout }: StatusProps) {
   }
 
   if (loading) {
-    return <div className="text-center py-10 text-sm" style={{ color: 'var(--muted)' }}>Loading…</div>;
+    return (
+      <div className="flex items-center justify-center py-16">
+        <span className="label-mono">Loading...</span>
+      </div>
+    );
   }
 
   return (
-    <div>
+    <div className="flex flex-col gap-4">
       {status && (
         <>
-          <div className="rounded-xl border p-4 mb-3" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-            <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--muted)' }}>Owner</p>
-            <p className="text-base font-medium">{status.owner}</p>
+          {/* Owner card */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              padding: '1rem',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+            }}
+          >
+            <div className="label-mono mb-2">Operator</div>
+            <div
+              style={{
+                fontFamily: "'Inter', sans-serif",
+                fontSize: '1rem',
+                fontWeight: 600,
+                color: '#f0f4ff',
+              }}
+            >
+              {status.owner}
+            </div>
             {status.teams.length > 0 && (
-              <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Teams: {status.teams.join(', ')}</p>
+              <div className="flex gap-1.5 mt-2.5 flex-wrap">
+                {status.teams.map((team) => (
+                  <span
+                    key={team}
+                    style={{
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: '0.6rem',
+                      fontWeight: 700,
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
+                      color: '#7b96ff',
+                      background: 'rgba(79,110,255,0.1)',
+                      border: '1px solid rgba(79,110,255,0.25)',
+                      borderRadius: '4px',
+                      padding: '0.15rem 0.5rem',
+                    }}
+                  >
+                    {team}
+                  </span>
+                ))}
+              </div>
             )}
             {status.readOnly && (
-              <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded" style={{ background: '#713f12', color: '#fde68a' }}>
-                Read-only mode
-              </span>
+              <div className="flex items-center gap-2 mt-2.5">
+                <span className="status-dot status-dot-yellow" />
+                <span
+                  style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '0.6rem',
+                    fontWeight: 700,
+                    letterSpacing: '0.1em',
+                    color: '#f59e0b',
+                  }}
+                >
+                  READ-ONLY MODE
+                </span>
+              </div>
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5 mb-3">
-            <div className="rounded-xl border p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-              <p className="text-3xl font-bold">{status.tasks.open}</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Open tasks</p>
-            </div>
-            <div className="rounded-xl border p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-              <p className="text-3xl font-bold" style={{ color: status.tasks.mine > 0 ? 'var(--accent)' : 'var(--text)' }}>
-                {status.tasks.mine}
-              </p>
-              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>My tasks</p>
-            </div>
-            <div className="rounded-xl border p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-              <p className="text-3xl font-bold" style={{ color: status.proposals.pending > 0 ? 'var(--yellow)' : 'var(--text)' }}>
-                {status.proposals.pending}
-              </p>
-              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Pending approvals</p>
-            </div>
-            <div className="rounded-xl border p-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-              <p className="text-3xl font-bold">{status.memories.active}</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Active memories</p>
-            </div>
+          {/* Stats grid */}
+          <div className="grid grid-cols-2 gap-3">
+            <StatCard
+              label="Open Tasks"
+              value={status.tasks.open}
+              color={status.tasks.open > 0 ? '#4f6eff' : undefined}
+            />
+            <StatCard
+              label="My Tasks"
+              value={status.tasks.mine}
+              color={status.tasks.mine > 0 ? '#4f6eff' : undefined}
+            />
+            <StatCard
+              label="Pending Approvals"
+              value={status.proposals.pending}
+              color={status.proposals.pending > 0 ? '#f59e0b' : undefined}
+            />
+            <StatCard
+              label="Active Memories"
+              value={status.memories.active}
+            />
+          </div>
+
+          {/* System info */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: '8px',
+              padding: '0.75rem 1rem',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+            }}
+          >
+            <div className="label-mono mb-1">System</div>
+            <StatusRow
+              label="Status"
+              value="Operational"
+              dotClass="status-dot-online"
+            />
+            <StatusRow
+              label="Mode"
+              value={status.readOnly ? 'Read-Only' : 'Read-Write'}
+              dotClass={status.readOnly ? 'status-dot-yellow' : 'status-dot-green'}
+            />
           </div>
         </>
       )}
 
-      <button
-        onClick={() => { void logout(); }}
-        className="w-full py-3 rounded-xl text-sm font-medium border transition-opacity active:opacity-70"
-        style={{ borderColor: 'var(--red)', color: 'var(--red)', background: 'transparent' }}
-      >
-        Sign Out
-      </button>
+      {/* Actions */}
+      <div className="flex flex-col gap-2 mt-2">
+        <button
+          onClick={() => { void load(); toast('Refreshed'); }}
+          style={{
+            fontFamily: "'Inter', sans-serif",
+            fontSize: '0.8125rem',
+            fontWeight: 500,
+            padding: '0.625rem 1rem',
+            background: 'transparent',
+            color: 'var(--text2)',
+            border: '1px solid var(--border)',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            outline: 'none',
+            width: '100%',
+          }}
+        >
+          Refresh
+        </button>
 
-      {/* Refresh */}
-      <button
-        onClick={() => { void load(); toast('Refreshed'); }}
-        className="w-full py-3 mt-2 rounded-xl text-sm font-medium border transition-opacity active:opacity-70"
-        style={{ borderColor: 'var(--border)', color: 'var(--muted)', background: 'transparent' }}
-      >
-        Refresh
-      </button>
+        <button
+          onClick={() => { void logout(); }}
+          className="btn-danger w-full"
+          style={{ padding: '0.625rem 1rem' }}
+        >
+          Sign Out
+        </button>
+      </div>
     </div>
   );
 }

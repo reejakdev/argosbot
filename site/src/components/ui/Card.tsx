@@ -9,13 +9,19 @@ interface CardProps {
 }
 
 export function Card({ children, className = '', variant = 'default', hover = false }: CardProps) {
-  const variantClass = variant === 'green' ? 'hud-card-green' : variant === 'red' ? 'hud-card-red' : ''
+  const variantStyle =
+    variant === 'green'
+      ? { borderColor: 'rgba(16,185,129,0.2)' }
+      : variant === 'red'
+      ? { borderColor: 'rgba(239,68,68,0.2)' }
+      : {}
 
   if (hover) {
     return (
       <motion.div
-        className={`hud-card ${variantClass} rounded-sm p-5 ${className}`}
-        whileHover={{ borderColor: 'rgba(0,212,255,0.4)', y: -2 }}
+        className={`card p-5 ${className}`}
+        style={variantStyle}
+        whileHover={{ borderColor: 'rgba(79,110,255,0.35)', y: -2, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
         transition={{ duration: 0.2 }}
       >
         {children}
@@ -24,7 +30,7 @@ export function Card({ children, className = '', variant = 'default', hover = fa
   }
 
   return (
-    <div className={`hud-card ${variantClass} rounded-sm p-5 ${className}`}>
+    <div className={`card p-5 ${className}`} style={variantStyle}>
       {children}
     </div>
   )
