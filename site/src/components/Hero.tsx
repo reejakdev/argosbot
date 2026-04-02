@@ -1,16 +1,16 @@
 import { motion } from 'framer-motion'
 import { ArrowRight, GitBranch, Shield } from 'lucide-react'
 
+// 8 nodes × 45° = 121px arc gap at labelR=155 — no overlap possible
 const channels = [
-  { label: 'Telegram',  angle: -80,  color: '#4f6eff' },
-  { label: 'WhatsApp',  angle: -40,  color: '#059669' },
-  { label: 'Discord',   angle:   0,  color: '#6366f1' },
-  { label: 'Email',     angle:  40,  color: '#059669' },
-  { label: 'Slack',     angle:  80,  color: '#d97706' },
-  { label: 'GitHub',    angle: 140,  color: '#3a56e8' },
-  { label: 'Notion',    angle: 180,  color: '#3a56e8' },
-  { label: 'Linear',    angle: 220,  color: '#4f6eff' },
-  { label: '+ any MCP', angle: 280,  color: '#9ca3af' },
+  { label: 'Telegram',  angle:   0,  color: '#4f6eff' },
+  { label: 'WhatsApp',  angle:  45,  color: '#059669' },
+  { label: 'Discord',   angle:  90,  color: '#6366f1' },
+  { label: 'Slack',     angle: 135,  color: '#d97706' },
+  { label: 'Email',     angle: 180,  color: '#059669' },
+  { label: 'GitHub',    angle: 225,  color: '#3a56e8' },
+  { label: 'Notion',    angle: 270,  color: '#3a56e8' },
+  { label: '+ any MCP', angle: 315,  color: '#9ca3af' },
 ]
 
 function HUDDiagram() {
@@ -103,7 +103,7 @@ function HUDDiagram() {
             const rad    = (ch.angle * Math.PI) / 180
             const nx     = r1 * Math.cos(rad)
             const ny     = r1 * Math.sin(rad)
-            const labelR = r1 + (i % 2 === 0 ? 28 : 46)
+            const labelR = r1 + 37
             const lx     = labelR * Math.cos(rad)
             const ly     = labelR * Math.sin(rad)
 
