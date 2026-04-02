@@ -59,7 +59,7 @@ function StatusRow({ label, value, dotClass }: { label: string; value: string; d
           style={{
             fontFamily: "'JetBrains Mono', monospace",
             fontSize: '0.7rem',
-            color: '#f0f4ff',
+            color: 'var(--text)',
             letterSpacing: '0.04em',
           }}
         >
@@ -120,7 +120,7 @@ export default function Status({ onLogout }: StatusProps) {
                 fontFamily: "'Inter', sans-serif",
                 fontSize: '1rem',
                 fontWeight: 600,
-                color: '#f0f4ff',
+                color: 'var(--text)',
               }}
             >
               {status.owner}

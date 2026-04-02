@@ -77,7 +77,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               style={{
                 fontFamily: "'Inter', sans-serif",
                 fontSize: '0.8125rem',
-                color: '#f0f4ff',
+                color: 'var(--text)',
                 lineHeight: 1.4,
               }}
             >

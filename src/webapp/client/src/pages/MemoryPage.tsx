@@ -80,7 +80,7 @@ export default function MemoryPage() {
             {/* Content */}
             <p
               className="text-sm leading-relaxed mb-3"
-              style={{ color: '#f0f4ff', fontFamily: "'Inter', sans-serif" }}
+              style={{ color: 'var(--text)', fontFamily: "'Inter', sans-serif" }}
             >
               {m.content}
             </p>

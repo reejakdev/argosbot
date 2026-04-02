@@ -92,7 +92,7 @@ export default function History() {
               >
                 <p
                   className="text-sm leading-snug mb-1.5"
-                  style={{ color: '#f0f4ff', fontFamily: "'Inter', sans-serif" }}
+                  style={{ color: 'var(--text)', fontFamily: "'Inter', sans-serif" }}
                 >
                   {t.title}
                 </p>
@@ -169,7 +169,7 @@ export default function History() {
               >
                 <p
                   className="text-sm leading-snug mb-1.5"
-                  style={{ color: '#f0f4ff', fontFamily: "'Inter', sans-serif" }}
+                  style={{ color: 'var(--text)', fontFamily: "'Inter', sans-serif" }}
                 >
                   {p.context_summary}
                 </p>

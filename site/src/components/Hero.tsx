@@ -2,11 +2,11 @@ import { motion } from 'framer-motion'
 import { ArrowRight, GitBranch, Shield } from 'lucide-react'
 
 const channels = [
-  { label: 'Telegram', angle: -90,  color: '#4f6eff' },
-  { label: 'WhatsApp', angle: -18,  color: '#3a56e8' },
-  { label: 'Email',    angle:  54,  color: '#4f6eff' },
-  { label: 'Discord',  angle: 126,  color: '#3a56e8' },
-  { label: 'Slack',    angle: 198,  color: '#4f6eff' },
+  { label: 'GitHub',   angle: -90,  color: '#4f6eff' },
+  { label: 'Notion',   angle: -18,  color: '#3a56e8' },
+  { label: 'Web',      angle:  54,  color: '#4f6eff' },
+  { label: 'Docs',     angle: 126,  color: '#3a56e8' },
+  { label: 'Linear',   angle: 198,  color: '#4f6eff' },
 ]
 
 function HUDDiagram() {
@@ -124,10 +124,10 @@ function HUDDiagram() {
                   x={lx}
                   y={ly + 4}
                   textAnchor="middle"
-                  fill={ch.color}
+                  fill="#374151"
                   fontSize="9"
                   fontFamily="JetBrains Mono, Courier New"
-                  opacity="0.85"
+                  opacity="1"
                   style={{ userSelect: 'none' }}
                 >
                   {ch.label}
