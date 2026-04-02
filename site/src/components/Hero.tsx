@@ -10,6 +10,7 @@ const channels = [
   { label: 'GitHub',    angle: 135,  color: '#3a56e8' },
   { label: 'Notion',    angle: 180,  color: '#3a56e8' },
   { label: 'Linear',    angle: 225,  color: '#4f6eff' },
+  { label: '+ any MCP', angle: 270,  color: '#9ca3af' },
 ]
 
 function HUDDiagram() {
