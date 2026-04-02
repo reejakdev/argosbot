@@ -54,14 +54,14 @@ export default function App() {
     return (
       <div
         className="flex items-center justify-center min-h-screen"
-        style={{ background: '#04050d' }}
+        style={{ background: 'var(--bg)' }}
       >
         <span
           style={{
-            fontFamily: "'Courier New', monospace",
+            fontFamily: "'JetBrains Mono', monospace",
             fontSize: '0.65rem',
             letterSpacing: '0.2em',
-            color: 'rgba(0,212,255,0.4)',
+            color: 'rgba(79,110,255,0.4)',
           }}
         >
           INITIALIZING...
