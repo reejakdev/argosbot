@@ -181,6 +181,29 @@ const WhatsAppChannelSchema = z.object({
   approvalJid: z.string().optional(),
 }).default({});
 
+// ─── Signal channel ───────────────────────────────────────────────────────────
+// Requires signal-cli sidecar (Java binary):
+//   macOS: brew install signal-cli
+//   Linux: https://github.com/AsamK/signal-cli/releases
+//
+// Register your number first:
+//   signal-cli -a +YOURNUMBER register
+//   signal-cli -a +YOURNUMBER verify CODE
+
+const SignalChannelSchema = z.object({
+  enabled:        z.boolean().default(false),
+  /** Path to signal-cli binary. Default: 'signal-cli' (must be on PATH) */
+  signalCliBin:   z.string().default('signal-cli'),
+  /** Registered phone number, e.g. +33612345678 */
+  phoneNumber:    z.string(),
+  /** Allowlist of sender phone numbers. Empty = allow all (NOT recommended) */
+  allowedNumbers: z.array(z.string()).default([]),
+  /** Unix socket path for JSON-RPC daemon. Default: /tmp/argos-signal.sock */
+  socketPath:     z.string().default('/tmp/argos-signal.sock'),
+  /** signal-cli data directory (--config flag). Optional. */
+  signalDataDir:  z.string().optional(),
+}).optional();
+
 // ─── Channels ─────────────────────────────────────────────────────────────────
 
 const ChannelsSchema = z.object({
@@ -188,6 +211,7 @@ const ChannelsSchema = z.object({
   slack:    SlackChannelSchema,
   discord:  DiscordChannelSchema,
   whatsapp: WhatsAppChannelSchema,
+  signal:   SignalChannelSchema,
 }).default({});
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -305,7 +329,10 @@ const KnowledgeSourceSchema = z.discriminatedUnion('type', [
   z.object({
     type:         z.literal('google-drive'),
     name:         z.string(),
-    folderId:     z.string(),
+    /** Drive folder ID — fetch all readable files inside */
+    folderId:     z.string().optional(),
+    /** Specific file IDs to fetch (instead of or in addition to a folder) */
+    fileIds:      z.array(z.string()).default([]),
     refreshHours: z.number().default(24),
   }),
   z.object({
@@ -320,6 +347,14 @@ const KnowledgeSourceSchema = z.discriminatedUnion('type', [
     /** Glob patterns or exact paths, relative to HOME or absolute */
     paths:        z.array(z.string()),
     refreshHours: z.number().default(1),
+  }),
+  z.object({
+    type:         z.literal('github-issues'),
+    name:         z.string(),
+    /** If omitted, fetches across all repos for the authenticated user */
+    owner:        z.string().optional(),
+    repo:         z.string().optional(),
+    refreshHours: z.number().default(2),
   }),
 ]);
 
@@ -382,6 +417,40 @@ const CalendarSchema = z.object({
   calendarId: z.string().default('primary'),
 });
 
+// ─── Google Drive ─────────────────────────────────────────────────────────────
+
+const GoogleDriveSchema = z.object({
+  /**
+   * Path to the service account JSON key file downloaded from GCP Console.
+   * The service account must have read access to the shared folders/files.
+   */
+  serviceAccountKeyPath: z.string(),
+});
+
+// ─── Cloudflare Tunnel ────────────────────────────────────────────────────────
+// Expose the approval web app via Cloudflare Tunnel — no open ports on the VPS,
+// no public IP needed. Only the outbound cloudflared process needs to run.
+
+const CloudflareTunnelSchema = z.object({
+  /**
+   * Tunnel token from Cloudflare dashboard (Networks → Tunnels → Create tunnel).
+   * Run:  cloudflared tunnel run --token <TOKEN>
+   */
+  token:    z.string(),
+  /**
+   * Public hostname for the approval web app, e.g. argos.yourdomain.com
+   * Must be configured in the Cloudflare Tunnel routing rules.
+   */
+  hostname: z.string(),
+  /** Local port the approval web app listens on (defaults to webapp.port or 3000) */
+  localPort: z.number().default(3000),
+  enabled:  z.boolean().default(true),
+});
+
+const CloudflareSchema = z.object({
+  tunnel: CloudflareTunnelSchema.optional(),
+});
+
 // ─── SMTP (email sending) ─────────────────────────────────────────────────────
 
 const SmtpSchema = z.object({
@@ -395,6 +464,69 @@ const SmtpSchema = z.object({
   from:     z.string().optional(),
   /** Display name shown in From header */
   fromName: z.string().optional(),
+});
+
+// ─── User-defined agents ──────────────────────────────────────────────────────
+
+const AgentDefinitionSchema = z.object({
+  /** Unique identifier — used as tool name by the planner. snake_case, no spaces. */
+  name:          z.string().regex(/^[a-z][a-z0-9_]*$/, 'Agent name must be snake_case'),
+  /** One-line description shown to the planner when choosing tools */
+  description:   z.string(),
+  /** Full system prompt for this agent */
+  systemPrompt:  z.string(),
+  /**
+   * Tools this agent can use.
+   * Use "*" to allow all BUILTIN_TOOLS.
+   * Or list specific tool names: ["web_search", "fetch_url", "semantic_search"]
+   * Other registered skills (e.g. "verify_protocol_address") can also be listed.
+   */
+  tools:         z.array(z.string()).default(['web_search', 'fetch_url', 'semantic_search']),
+  maxIterations: z.number().default(8),
+  temperature:   z.number().default(0.3),
+  maxTokens:     z.number().default(2048),
+  /** If true, the agent is available to the planner as a tool */
+  enabled:        z.boolean().default(true),
+  /**
+   * Channel refs that route directly to this agent (bypass planner).
+   * Format: "<channel_type>:<chatId>"
+   * Examples: "telegram:-1001234567890", "slack:C0123ABCD", "whatsapp:33612345678@s.whatsapp.net"
+   */
+  linkedChannels: z.array(z.string()).default([]),
+  /**
+   * Trigger conditions — when matched, agent runs automatically before the planner
+   * and its output is injected into the planner context.
+   * All conditions within one trigger object are ANDed.
+   * Multiple trigger objects are ORed.
+   */
+  triggers: z.array(z.object({
+    /** Keywords to match in the anonymized message text (case-insensitive, any match = true) */
+    keywords:   z.array(z.string()).default([]),
+    /** Classification categories that activate this trigger */
+    categories: z.array(z.string()).default([]),
+    /** Only activate for messages from these channel types: "telegram", "slack", "whatsapp", "email" */
+    channels:   z.array(z.string()).default([]),
+    /** Min importance score (0-10) from classifier */
+    minImportance: z.number().default(0),
+  })).default([]),
+  /**
+   * LLM provider key (must match a key in config.llm.providers).
+   * If omitted, uses the global activeProvider.
+   * Examples: "anthropic", "openai", "ollama", "mistral"
+   */
+  provider:       z.string().optional(),
+  /**
+   * Model name for this agent.
+   * If omitted, uses the provider's default/active model.
+   * Examples: "claude-opus-4-6", "gpt-4o", "llama3:8b", "mistral-medium"
+   */
+  model:          z.string().optional(),
+  /**
+   * Isolated workspace — memories stored by this agent are tagged agent:<name>
+   * and semantic search is scoped to this namespace by default.
+   * Set to false to share the global memory pool.
+   */
+  isolatedWorkspace: z.boolean().default(true),
 });
 
 // ─── Web app ──────────────────────────────────────────────────────────────────
@@ -467,6 +599,19 @@ const ChainConfigSchema = z.union([
 const WalletSchema = z.object({
   /** Enable the bot hot wallet */
   enabled: z.boolean().default(false),
+  /** Monitor incoming transactions to the bot wallet */
+  monitor: z.object({
+    enabled:             z.boolean().default(false),
+    pollIntervalSeconds: z.number().min(10).default(60),
+    /** Also alert on native coin (ETH, MATIC, SOL…) balance increases */
+    watchNative:         z.boolean().default(true),
+    /** ERC-20 / SPL tokens to watch for incoming transfers */
+    watchTokens: z.array(z.object({
+      address:  z.string(),
+      symbol:   z.string(),
+      decimals: z.number().default(18),
+    })).default([]),
+  }).default({}),
   /**
    * AES-256-GCM key derivation secret.
    * Generate: openssl rand -base64 32
@@ -496,6 +641,53 @@ const WalletSchema = z.object({
 
 const SecretsSchema = z.record(z.string()).default({});
 
+// ─── Voice I/O ────────────────────────────────────────────────────────────────
+// Transcription (Whisper) + TTS (OpenAI / ElevenLabs).
+// Disabled by default — explicit opt-in required (voice.enabled: true).
+// Audio bytes are NEVER persisted; transcripts flow through the normal pipeline.
+
+const VoiceSchema = z.object({
+  enabled:           z.boolean().default(false),
+  // Transcription
+  whisperEndpoint:   z.string().default('https://api.openai.com/v1'),
+  whisperApiKey:     z.string().optional(),
+  whisperModel:      z.string().default('whisper-1'),
+  // TTS
+  ttsEnabled:        z.boolean().default(false),
+  ttsProvider:       z.enum(['openai', 'elevenlabs']).default('openai'),
+  openAiTtsApiKey:   z.string().optional(),
+  openAiTtsModel:    z.string().default('tts-1'),
+  openAiTtsVoice:    z.string().default('onyx'),
+  elevenLabsApiKey:  z.string().optional(),
+  elevenLabsVoiceId: z.string().optional(),
+}).optional();
+
+// ─── Knowledge graph ─────────────────────────────────────────────────────────
+
+const KnowledgeGraphSchema = z.object({
+  enabled:       z.boolean().default(false),
+  minImportance: z.number().default(5),  // only extract for important messages
+}).optional();
+
+// ─── Orchestration ────────────────────────────────────────────────────────────
+// Controls multi-agent spawn_agent behaviour.
+// The spawn_agent builtin tool is always available — this section lets you
+// tune limits without touching code.
+
+const OrchestrationSchema = z.object({
+  enabled:        z.boolean().default(false),
+  maxSubAgents:   z.number().default(5),
+  timeoutSeconds: z.number().default(90),
+}).optional();
+
+// ─── Shell exec ───────────────────────────────────────────────────────────────
+
+const ShellExecSchema = z.object({
+  enabled:         z.boolean().default(false),
+  allowedCommands: z.array(z.string()).default([]),
+  workingDir:      z.string().optional(),
+}).optional();
+
 // ─── Root config ──────────────────────────────────────────────────────────────
 
 export const ConfigSchema = z.object({
@@ -524,7 +716,10 @@ export const ConfigSchema = z.object({
   linear:     LinearSchema.optional(),
   calendar:   CalendarSchema.optional(),
   wallet:         WalletSchema.optional(),
+  googleDrive:    GoogleDriveSchema.optional(),
+  cloudflare:     CloudflareSchema.optional(),
   notifications:  NotificationsSchema,
+  agents:         z.array(AgentDefinitionSchema).default([]),
   smtp:       SmtpSchema.optional(),
   // MCP servers — tools externes disponibles au planner
   mcpServers: z.array(McpServerSchema).default([]),
@@ -532,6 +727,13 @@ export const ConfigSchema = z.object({
   skills:     z.array(SkillConfigSchema).default([]),
   // Embeddings (local, pour vector search)
   embeddings: EmbeddingsSchema,
+  // Shell exec — whitelisted commands, always requires approval
+  shellExec:     ShellExecSchema,
+  // Orchestration — multi-agent spawn_agent config (disabled by default)
+  orchestration: OrchestrationSchema,
+  // Voice I/O — Whisper transcription + optional TTS reply (opt-in)
+  voice:      VoiceSchema,
+  knowledgeGraph: KnowledgeGraphSchema,
   logLevel:   z.enum(['debug', 'info', 'warn', 'error']).default('debug'),
   dataDir:    z.string().default('~/.argos'),
   readOnly:   z.boolean().default(true),
@@ -573,9 +775,11 @@ export type ChannelsConfig  = z.infer<typeof ChannelsSchema>;
 export type KnowledgeSource = z.infer<typeof KnowledgeSourceSchema>;
 export type KnowledgeConfig = z.infer<typeof KnowledgeSchema>;
 export type McpServer       = z.infer<typeof McpServerSchema>;
-export type SkillConfig     = z.infer<typeof SkillConfigSchema>;
-export type EmbeddingsConfig = z.infer<typeof EmbeddingsSchema>;
-export type AnonymizerConfig = z.infer<typeof AnonymizerSchema>;
+export type SkillConfig         = z.infer<typeof SkillConfigSchema>;
+export type AgentDefinition     = z.infer<typeof AgentDefinitionSchema>;
+export type EmbeddingsConfig    = z.infer<typeof EmbeddingsSchema>;
+export type AnonymizerConfig    = z.infer<typeof AnonymizerSchema>;
+export type OrchestrationConfig = z.infer<typeof OrchestrationSchema>;
 
 // Legacy — gardé pour compat avec le code existant
 /** @deprecated utiliser ChannelsConfig */

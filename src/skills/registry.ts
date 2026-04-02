@@ -101,6 +101,7 @@ export async function loadBuiltinSkills(): Promise<void> {
     import('./builtins/notion-search.js'),
     import('./builtins/memory-search.js'),
     import('./builtins/verify-address.js'),
+    import('./builtins/graph-search.js'),
   ];
 
   const results = await Promise.allSettled(modules);
@@ -146,5 +147,9 @@ export const SKILL_CATALOG: Array<{
   {
     name:        'verify_protocol_address',
     description: 'Verify a partner-provided crypto address against official protocol documentation — DOCS FIRST, returns APPROVE / MANUAL REVIEW / REJECT with score',
+  },
+  {
+    name:        'graph_search',
+    description: 'Search the knowledge graph for everything known about a person, company, or entity. Returns related entities and relationships.',
   },
 ];

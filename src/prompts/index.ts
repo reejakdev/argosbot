@@ -12,12 +12,37 @@
  * The files live in src/prompts/ and are bundled at build time.
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
 import { join, dirname } from 'path';
+import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import type { Config } from '../config/schema.js';
+import { createLogger } from '../logger.js';
+const log = createLogger('prompts');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// ─── SOUL.md hot-reload cache ─────────────────────────────────────────────────
+
+interface SoulCache { content: string; mtimeMs: number; }
+let _soulCache: SoulCache | null = null;
+
+function loadSoul(dataDir?: string): string {
+  const resolvedDataDir = dataDir
+    ? (dataDir.startsWith('~') ? join(homedir(), dataDir.slice(1)) : dataDir)
+    : join(homedir(), '.argos');
+  const userSoulPath = join(resolvedDataDir, 'SOUL.md');
+  try {
+    const stat = statSync(userSoulPath);
+    if (!_soulCache || _soulCache.mtimeMs !== stat.mtimeMs) {
+      _soulCache = { content: readFileSync(userSoulPath, 'utf-8'), mtimeMs: stat.mtimeMs };
+      log.info('SOUL.md hot-reloaded from ~/.argos/SOUL.md');
+    }
+    return _soulCache.content;
+  } catch {
+    return loadMd('soul');
+  }
+}
 
 function loadMd(name: string): string {
   try {
@@ -58,7 +83,7 @@ export type PromptRole = 'classifier' | 'planner' | 'heartbeat' | 'setup' | 'cha
 export function buildSystemPrompt(role: PromptRole, config: Config): string {
   const vars = buildVars(config);
 
-  const soul       = interpolate(loadMd('soul'), vars);
+  const soul       = interpolate(loadSoul(config.dataDir), vars);
   const security   = interpolate(loadMd('security'), vars);
   const user       = interpolate(loadMd('user'), vars);
   const operations = interpolate(loadMd('operations'), vars);

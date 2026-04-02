@@ -162,6 +162,36 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
       required: ['path', 'content'],
     },
   },
+  {
+    name: 'spawn_agent',
+    description:
+      'Spawn specialized sub-agents to run tasks in parallel. Each sub-agent runs independently ' +
+      'with its own context and tool subset. Use when you need to research multiple topics ' +
+      'simultaneously or parallelize independent work. Max 5 agents. Results are collected and ' +
+      'returned together. Sub-agents CANNOT spawn more agents (depth = 1 only).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        agents: {
+          type: 'array',
+          description: 'List of sub-agent tasks to run in parallel (max 5)',
+          items: {
+            type: 'object',
+            properties: {
+              name:         { type: 'string', description: 'Label for this agent (used in result headers)' },
+              systemPrompt: { type: 'string', description: 'Role and goal for this sub-agent' },
+              tools:        { type: 'array', items: { type: 'string' }, description: 'Tool names this agent can use — empty array means all available tools' },
+              input:        { type: 'string', description: 'The task description / question for this agent' },
+              maxIterations: { type: 'number', description: 'Max tool-use iterations (default 4, max 6)' },
+            },
+            required: ['name', 'systemPrompt', 'input'],
+          },
+          maxItems: 5,
+        },
+      },
+      required: ['agents'],
+    },
+  },
 ];
 
 /**
@@ -207,6 +237,8 @@ export const executeBuiltinTool: ToolExecutor = async (name, input) => {
       return await toolCreateProposal(input.action as string, input.details as string, input.risk as string | undefined);
     case 'api_call':
       return await toolApiCall(input);
+    case 'spawn_agent':
+      return await toolSpawnAgent(input);
     default:
       return { output: `Unknown tool: ${name}`, error: true };
   }
@@ -262,34 +294,68 @@ function ssrfBlock(rawUrl: string): string | null {
 // ─── Tool implementations ─────────────────────────────────────────────────────
 
 async function toolWebSearch(query: string): Promise<{ output: string; error?: boolean }> {
+  // Helper to decode DDG redirect URLs and filter out DDG-hosted ad links
+  const extractUrl = (raw: string): string => {
+    try {
+      const decoded = decodeURIComponent(raw);
+      const uddg = decoded.match(/[?&]uddg=([^&]+)/)?.[1];
+      if (uddg) {
+        const real = decodeURIComponent(uddg);
+        try { if (!new URL(real).hostname.endsWith('duckduckgo.com')) return real; } catch { /* ignore */ }
+      }
+      if (decoded.startsWith('http')) {
+        try { if (!new URL(decoded.split('?')[0]).hostname.endsWith('duckduckgo.com')) return decoded.split('&')[0]; } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+    return '';
+  };
+
   try {
     // DuckDuckGo HTML search (no API key needed)
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Argos/1.0)' },
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
+        },
+        signal: AbortSignal.timeout(12_000),
+      });
+    } catch (e) {
+      return { output: `Impossible d'effectuer la recherche web (réseau inaccessible): ${String(e)}`, error: true };
+    }
+
+    if (!res.ok) {
+      return { output: `Erreur de recherche web (HTTP ${res.status}) — impossible de trouver des résultats pour "${query}"`, error: true };
+    }
+
     const html = await res.text();
 
-    // Extract results from HTML
-    const results: string[] = [];
-    const resultRegex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-    let match;
-    while ((match = resultRegex.exec(html)) !== null && results.length < 5) {
-      const title = match[2].replace(/<[^>]+>/g, '').trim();
-      const snippet = match[3].replace(/<[^>]+>/g, '').trim();
-      const link = match[1];
-      results.push(`${title}\n${link}\n${snippet}`);
+    // Extract title + URL + snippet
+    const titleRe   = /<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]+(?:<[^/][^>]*>[^<]*<\/[^>]+>)*[^<]*)<\/a>/g;
+    const snippetRe = /<a[^>]+class="result__snippet"[^>]*>([^<]+(?:<[^/][^>]*>[^<]*<\/[^>]+>)*[^<]*)<\/a>/g;
+
+    const titles:   Array<{ title: string; url: string }> = [];
+    const snippets: string[] = [];
+
+    let m: RegExpExecArray | null;
+    while ((m = titleRe.exec(html)) !== null && titles.length < 5) {
+      const link = extractUrl(m[1]);
+      const text = m[2].replace(/<[^>]+>/g, '').trim();
+      if (text && link.startsWith('http')) titles.push({ title: text, url: link });
+    }
+    while ((m = snippetRe.exec(html)) !== null && snippets.length < 5) {
+      const text = m[1].replace(/<[^>]+>/g, '').trim();
+      if (text) snippets.push(text);
     }
 
-    if (results.length === 0) {
-      // Fallback: simpler extraction
-      const simpleRegex = /<a[^>]*class="result__a"[^>]*>([\s\S]*?)<\/a>/g;
-      while ((match = simpleRegex.exec(html)) !== null && results.length < 5) {
-        results.push(match[1].replace(/<[^>]+>/g, '').trim());
-      }
+    if (titles.length === 0) {
+      return { output: `Aucun résultat trouvé pour "${query}". La recherche web n'a rien retourné.`, error: true };
     }
 
-    return { output: results.length > 0 ? results.join('\n\n---\n\n') : 'No results found.' };
+    const lines = titles.map((t, i) => `**${t.title}**\n${snippets[i] ?? ''}\n${t.url}`.trim());
+    return { output: lines.join('\n\n') };
   } catch (e) {
     return { output: `Search failed: ${e instanceof Error ? e.message : String(e)}`, error: true };
   }
@@ -767,5 +833,40 @@ async function toolWriteFileProposal(relPath: string, content: string, reason?: 
     };
   } catch (e) {
     return { output: `Proposal creation failed: ${e instanceof Error ? e.message : String(e)}`, error: true };
+  }
+}
+
+async function toolSpawnAgent(input: Record<string, unknown>): Promise<{ output: string; error?: boolean }> {
+  try {
+    const { loadConfig } = await import('../config/index.js');
+    const { llmConfigFromConfig } = await import('./index.js');
+    const { runOrchestrated } = await import('../agents/orchestrator.js');
+    type AgentTask = import('../agents/orchestrator.js').AgentTask;
+
+    const config    = loadConfig();
+    const llmConfig = llmConfigFromConfig(config);
+
+    const rawAgents = (input.agents as Array<Record<string, unknown>>) ?? [];
+    if (!rawAgents.length) {
+      return { output: 'spawn_agent: no agents provided', error: true };
+    }
+
+    const tasks: AgentTask[] = rawAgents.slice(0, 5).map(a => ({
+      name:          String(a.name ?? 'agent'),
+      systemPrompt:  String(a.systemPrompt ?? 'You are a helpful assistant.'),
+      tools:         Array.isArray(a.tools) ? (a.tools as string[]) : [],
+      input:         String(a.input ?? ''),
+      maxIterations: typeof a.maxIterations === 'number' ? a.maxIterations : 4,
+    }));
+
+    const results = await runOrchestrated(tasks, config, llmConfig);
+
+    const formatted = results
+      .map(r => `**[${r.name}]** ${r.success ? '✅' : '❌'}\n${r.output || r.error || '(no output)'}`)
+      .join('\n\n');
+
+    return { output: formatted };
+  } catch (e) {
+    return { output: `spawn_agent failed: ${e instanceof Error ? e.message : String(e)}`, error: true };
   }
 }

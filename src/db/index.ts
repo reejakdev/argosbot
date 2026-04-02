@@ -57,6 +57,8 @@ function runMigrations(db: Database.Database): void {
     { version: 7, sql: MIGRATION_7 },
     { version: 8, sql: MIGRATION_8 },
     { version: 9, sql: MIGRATION_9 },
+    { version: 10, sql: MIGRATION_10 },
+    { version: 11, sql: MIGRATION_11 },
   ];
 
   for (const migration of migrations) {
@@ -335,6 +337,49 @@ const MIGRATION_8 = `
 // Never sent to any LLM — resolved locally at worker execution time only.
 const MIGRATION_9 = `
   ALTER TABLE proposals ADD COLUMN anon_lookup TEXT;
+`;
+
+// Ephemeral execution tokens — generated at approval time, consumed on execution.
+// A second independent gate: even if DB status is manually set to 'approved',
+// execution is blocked without the token that only exists after a real human approval.
+const MIGRATION_10 = `
+  CREATE TABLE IF NOT EXISTS execution_tokens (
+    proposal_id  TEXT PRIMARY KEY,
+    token        TEXT NOT NULL,       -- 64 hex chars (32 random bytes, crypto.randomBytes)
+    created_at   INTEGER NOT NULL,
+    expires_at   INTEGER NOT NULL,    -- 5-minute TTL from approval time
+    used         INTEGER NOT NULL DEFAULT 0
+  );
+`;
+
+// ─── Migration 11: knowledge graph ───────────────────────────────────────────
+const MIGRATION_11 = `
+  CREATE TABLE IF NOT EXISTS entities (
+    id           TEXT PRIMARY KEY,
+    type         TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    properties   TEXT NOT NULL DEFAULT '{}',
+    first_seen   INTEGER NOT NULL,
+    last_seen    INTEGER NOT NULL,
+    source_ref   TEXT,
+    channel      TEXT,
+    chat_id      TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_entities_type_name ON entities(type, name);
+  CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(name, properties, content=entities, content_rowid=rowid);
+
+  CREATE TABLE IF NOT EXISTS entity_relations (
+    id           TEXT PRIMARY KEY,
+    from_id      TEXT NOT NULL,
+    to_id        TEXT NOT NULL,
+    relation     TEXT NOT NULL,
+    context      TEXT,
+    confidence   REAL NOT NULL DEFAULT 0.7,
+    source_ref   TEXT,
+    created_at   INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_relations_from ON entity_relations(from_id);
+  CREATE INDEX IF NOT EXISTS idx_relations_to   ON entity_relations(to_id);
 `;
 
 // ─── Audit helper ─────────────────────────────────────────────────────────────

@@ -136,6 +136,25 @@ export async function ingestMessage(
   // Populate anonText so plugins and triage have access to the anonymized version
   msg.anonText = anon.text;
 
+  // ── Agent routing — channel-linked agents bypass the planner entirely ─────────
+  // If this chat is linked to a user-defined agent, route directly to it and skip
+  // the context window + planner pipeline.
+  {
+    const { getAgentForChannel, runAgent } = await import('../agents/index.js');
+    const agentName = getAgentForChannel(msg.channel, msg.chatId);
+    if (agentName) {
+      const agentDef = (config.agents ?? []).find(a => a.name === agentName);
+      if (agentDef?.enabled !== false) {
+        log.info(`Routing message to agent "${agentName}" (channel: ${msg.channel}:${msg.chatId})`);
+        db.prepare(`UPDATE messages SET status = 'processed', processed_at = ? WHERE id = ?`).run(Date.now(), msg.id);
+        runAgent(agentDef as import('../agents/index.js').AgentDefinition, anon.text, config)
+          .then(result => _sendToApprovalChat(`🤖 *${agentName}*\n\n${result.output}`))
+          .catch(e => log.warn(`Agent "${agentName}" error:`, e));
+        return; // skip normal window/planner
+      }
+    }
+  }
+
   // Feed into context window (batching)
   // Pass raw content only when storeRaw=true — kept in-memory until window closes,
   // then persisted in memories.raw_content (accessible to privacy LLM only).
@@ -287,6 +306,32 @@ export async function processWindow(
     autoArchiveThreshold: config.memory.autoArchiveThreshold,
   });
 
+  // Entity extraction — fire-and-forget, non-blocking, only for important messages
+  const kgConfig = (config as unknown as { knowledgeGraph?: { enabled?: boolean; minImportance?: number } }).knowledgeGraph;
+  if (kgConfig?.enabled && (result.importance ?? 0) >= (kgConfig.minImportance ?? 5)) {
+    const anonText  = window.messages.map(m => m.content).join('\n');
+    const windowRef = window.id;
+    const chan       = window.channel;
+    const cId        = window.chatId;
+    Promise.resolve()
+      .then(async () => {
+        const { extractEntities } = await import('../knowledge-graph/extractor.js');
+        const { upsertEntity, addRelation } = await import('../knowledge-graph/store.js');
+        const { entities, relations } = await extractEntities(anonText, llmConfig);
+        const entityIds = new Map<string, string>();
+        for (const ent of entities) {
+          const id = upsertEntity(ent, windowRef, chan, cId);
+          entityIds.set(ent.name, id);
+        }
+        for (const rel of relations) {
+          const fromId = entityIds.get(rel.from);
+          const toId   = entityIds.get(rel.to);
+          if (fromId && toId) addRelation(fromId, toId, rel.relation, rel.context, windowRef);
+        }
+      })
+      .catch(e => log.warn(`KG extraction failed: ${e}`));
+  }
+
   // Vectorize full conversation — fire-and-forget, enables semantic retrieval over 30d rolling window
   const { vectorizeConversationAsync } = await import('../memory/store.js');
   vectorizeConversationAsync(window, result).catch(e => log.warn('Conversation vectorization failed:', e));
@@ -306,6 +351,47 @@ export async function processWindow(
   if (!result.requiresAction && (result.importance ?? 0) < 4) {
     log.debug(`Window ${window.id} — no action required (importance ${result.importance})`);
     return;
+  }
+
+  // ── Triggered agents — run before planner, inject results into context ────────
+  // Agents whose trigger conditions match this message run in parallel here.
+  // Their output is appended to the window context so the planner can use it
+  // without re-doing the same work.
+  const triggerText = window.messages.map(m => m.content).join('\n');
+  {
+    const { getTriggeredAgents, runAgent } = await import('../agents/index.js');
+    const triggered = getTriggeredAgents(
+      config,
+      triggerText,
+      window.messages[0]?.channel ?? '',
+      result.category,
+      result.importance,
+    );
+
+    if (triggered.length > 0) {
+      log.info(`${triggered.length} agent trigger(s) matched for window ${window.id}: ${triggered.map(a => a.name).join(', ')}`);
+
+      const agentResults = await Promise.allSettled(
+        triggered.map(def => runAgent(def, triggerText, config)),
+      );
+
+      const injections: string[] = [];
+      for (let i = 0; i < triggered.length; i++) {
+        const r = agentResults[i];
+        if (r.status === 'fulfilled' && r.value.success) {
+          injections.push(`## Agent: ${triggered[i].name}\n\n${r.value.output}`);
+          log.debug(`Trigger agent "${triggered[i].name}" completed`);
+        } else {
+          const err = r.status === 'rejected' ? String(r.reason) : r.value.output;
+          log.warn(`Trigger agent "${triggered[i].name}" failed: ${err}`);
+        }
+      }
+
+      if (injections.length > 0) {
+        // Attach agent results to the window so the planner prompt builder picks them up
+        window.agentContext = injections.join('\n\n---\n\n');
+      }
+    }
   }
 
   const proposal = await plan(window, result, config);

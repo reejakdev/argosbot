@@ -18,6 +18,7 @@
  *                               → expired (after TTL)
  */
 
+import { randomBytes, timingSafeEqual } from 'crypto';
 import { monotonicFactory } from 'ulid';
 import { getDb, audit } from '../db/index.js';
 import { createLogger } from '../logger.js';
@@ -116,6 +117,97 @@ function buildInlineKeyboard(proposalId: string, actions: ProposedAction[]) {
   };
 }
 
+// ─── Ephemeral execution tokens ───────────────────────────────────────────────
+//
+// Two-layer security model:
+//   Layer 1 — DB status gate:    `WHERE id = ? AND status = 'approved'`
+//   Layer 2 — execution token:   generated ONLY during a real human approval action
+//
+// The token is a 32-byte random value stored with a 5-min TTL and a single-use flag.
+// Workers must present it before executing — without it, execution is blocked even if
+// the DB was directly modified to set status='approved'.
+
+const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export function generateExecutionToken(proposalId: string): string {
+  const token = randomBytes(32).toString('hex');
+  const now   = Date.now();
+  const db    = getDb();
+
+  // INSERT OR REPLACE — handles the edge case where a token already exists
+  // (e.g. re-approval after a snooze). The old token is invalidated.
+  db.prepare(`
+    INSERT OR REPLACE INTO execution_tokens (proposal_id, token, created_at, expires_at, used)
+    VALUES (?, ?, ?, ?, 0)
+  `).run(proposalId, token, now, now + TOKEN_TTL_MS);
+
+  audit('execution_token_issued', proposalId, 'security');
+  log.info(`Execution token issued for proposal ${proposalId.slice(-8)} (TTL: 5min)`);
+  return token;
+}
+
+/**
+ * Validate and atomically consume an execution token.
+ * Returns true only if:
+ *   - A token exists for this proposalId
+ *   - It matches the provided value (constant-time comparison)
+ *   - It hasn't expired
+ *   - It hasn't already been used
+ *   - The atomic mark-as-used succeeded (no race)
+ */
+export function validateAndConsumeToken(proposalId: string, token: string): boolean {
+  const db = getDb();
+
+  const row = db.prepare(
+    'SELECT token, expires_at, used FROM execution_tokens WHERE proposal_id = ?'
+  ).get(proposalId) as { token: string; expires_at: number; used: number } | undefined;
+
+  if (!row) {
+    log.warn(`Execution blocked: no token for proposal ${proposalId.slice(-8)}`);
+    audit('execution_blocked', proposalId, 'security', { reason: 'no_token' });
+    return false;
+  }
+  if (row.used) {
+    log.warn(`Execution blocked: token already consumed for proposal ${proposalId.slice(-8)}`);
+    audit('execution_blocked', proposalId, 'security', { reason: 'token_already_used' });
+    return false;
+  }
+  if (row.expires_at < Date.now()) {
+    log.warn(`Execution blocked: token expired for proposal ${proposalId.slice(-8)}`);
+    audit('execution_blocked', proposalId, 'security', { reason: 'token_expired' });
+    return false;
+  }
+
+  // Constant-time comparison — prevents timing-based token enumeration
+  let match = false;
+  try {
+    match = timingSafeEqual(Buffer.from(row.token, 'hex'), Buffer.from(token, 'hex'));
+  } catch {
+    // Length mismatch — definitely invalid
+    match = false;
+  }
+  if (!match) {
+    log.warn(`Execution blocked: token mismatch for proposal ${proposalId.slice(-8)}`);
+    audit('execution_blocked', proposalId, 'security', { reason: 'token_mismatch' });
+    return false;
+  }
+
+  // Atomically mark as used — WHERE used = 0 prevents race conditions
+  const result = db.prepare(
+    'UPDATE execution_tokens SET used = 1 WHERE proposal_id = ? AND used = 0'
+  ).run(proposalId);
+
+  if (result.changes === 0) {
+    // Race condition: another request consumed it between our check and the update
+    log.warn(`Execution blocked: token race condition for proposal ${proposalId.slice(-8)}`);
+    audit('execution_blocked', proposalId, 'security', { reason: 'token_race' });
+    return false;
+  }
+
+  audit('execution_token_consumed', proposalId, 'security');
+  return true;
+}
+
 // ─── Send approval request ────────────────────────────────────────────────────
 
 export async function requestApproval(proposal: Proposal): Promise<ApprovalRequest> {
@@ -166,7 +258,7 @@ export async function requestApproval(proposal: Proposal): Promise<ApprovalReque
 export async function handleCallback(
   callbackData: string,
   callbackId: string,
-  executeApprovedProposal: (proposal: Proposal, actions: ProposedAction[]) => Promise<void>,
+  executeApprovedProposal: (proposal: Proposal, actions: ProposedAction[], token: string) => Promise<void>,
 ): Promise<string> {
   const [action, proposalId] = callbackData.split(':');
   if (!proposalId) return 'Invalid callback';
@@ -202,9 +294,13 @@ export async function handleCallback(
       }
       // ─────────────────────────────────────────────────────────────────────
 
+      // Generate ephemeral execution token INSIDE the transaction — it only
+      // exists after a real human approval action. Workers must present it.
+      let executionToken = '';
       db.transaction(() => {
         db.prepare(`UPDATE proposals SET status = 'approved', approved_at = ? WHERE id = ?`).run(now, proposalId);
         db.prepare(`UPDATE approvals SET status = 'approved', responded_at = ? WHERE proposal_id = ?`).run(now, proposalId);
+        executionToken = generateExecutionToken(proposalId);
       })();
 
       log.info(`Proposal ${proposalId} APPROVED`);
@@ -223,7 +319,7 @@ export async function handleCallback(
       };
 
       // Execute in background — don't block the callback response
-      void executeApprovedProposal(proposal, proposal.actions).catch(e => {
+      void executeApprovedProposal(proposal, proposal.actions, executionToken).catch(e => {
         log.error(`Execution failed for proposal ${proposalId}`, e);
       });
 

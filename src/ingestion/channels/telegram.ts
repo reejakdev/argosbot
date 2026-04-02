@@ -245,6 +245,41 @@ export class TelegramChannel implements Channel {
       },
     };
 
+    // Download photo for multimodal LLM processing (cap at 5MB, never logged)
+    if (rawMessage.mediaType === 'photo') {
+      try {
+        const buffer = await this.client.downloadMedia(msg, { outputFile: undefined }) as Buffer;
+        if (buffer && buffer.length < 5 * 1024 * 1024) {
+          rawMessage.meta = {
+            ...rawMessage.meta,
+            imageData: buffer.toString('base64'),
+            imageMimeType: 'image/jpeg',
+          };
+        }
+      } catch (e) {
+        log.warn(`Photo download failed: ${(e as Error).message}`);
+      }
+    }
+
+    // Transcribe voice/audio messages via Whisper (opt-in, audio never persisted)
+    if ((rawMessage.mediaType === 'voice' || rawMessage.mediaType === 'audio')) {
+      const voiceConfig = getConfig()?.voice;
+      if (voiceConfig?.enabled) {
+        try {
+          const buffer = await this.client.downloadMedia(msg, { outputFile: undefined }) as Buffer;
+          if (buffer) {
+            const { transcribeAudio } = await import('../../voice/transcribe.js');
+            const transcript = await transcribeAudio(buffer, 'voice.ogg', voiceConfig);
+            rawMessage.content = `[Voice]: ${transcript}`;
+            log.info(`Voice transcribed: ${transcript.slice(0, 80)}`);
+          }
+        } catch (e) {
+          log.warn(`Voice transcription failed: ${(e as Error).message}`);
+          rawMessage.content = '[Voice message — transcription unavailable]';
+        }
+      }
+    }
+
     log.debug(`Message from ${monitored.name}`, {
       sender: rawMessage.senderName,
       length: msg.text.length,
@@ -447,9 +482,9 @@ export class TelegramChannel implements Channel {
         if (!fullId) { await this.sendMessage('me', `❌ Proposal ${shortId} not found`); break; }
         const resp = await handleCallback(
           `approve:${fullId}`, '',
-          async (proposal: Proposal, actions: ProposedAction[]) => {
+          async (proposal: Proposal, actions: ProposedAction[], token: string) => {
             const config = getConfig();
-            await executeProposal(proposal, actions, config, t => this.sendToApprovalChat(t));
+            await executeProposal(proposal, actions, config, t => this.sendToApprovalChat(t), token);
           },
         );
         await this.sendMessage('me', resp);

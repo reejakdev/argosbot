@@ -26,7 +26,7 @@ import { createLogger } from '../logger.js';
 import { search as memorySearch } from '../memory/store.js';
 import { getSkillToolDefinitions, executeSkill } from '../skills/registry.js';
 import { buildSystemPrompt } from '../prompts/index.js';
-import { llmConfigFromConfig, callWithTools, buildToolResultMessages } from '../llm/index.js';
+import { llmConfigFromConfig, callWithTools, buildToolResultMessages, type LLMContentBlock } from '../llm/index.js';
 import type {
   ContextWindow,
   ClassificationResult,
@@ -223,6 +223,25 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'create_agent',
+    description: 'Propose creating a new user-defined agent. Only the owner can approve this. Use when the owner explicitly asks to create an agent, or when you identify a recurring sub-task that would benefit from a dedicated specialized agent.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name:          { type: 'string', description: 'Agent name in snake_case (e.g. deal_analyzer)' },
+        description:   { type: 'string', description: 'One-line description of what this agent does' },
+        systemPrompt:  { type: 'string', description: 'Full system prompt defining the agent persona, rules, and domain' },
+        tools:         { type: 'array', items: { type: 'string' }, description: 'Tool names: ["web_search","fetch_url","semantic_search"] or ["*"] for all' },
+        provider:      { type: 'string', description: 'LLM provider key (e.g. "anthropic", "openai", "ollama") — omit to use global' },
+        model:         { type: 'string', description: 'Model name — omit to use provider default' },
+        linkedChannels: { type: 'array', items: { type: 'string' }, description: 'Channel refs to route directly to this agent, e.g. ["telegram:-100123"]' },
+        isolatedWorkspace: { type: 'boolean', description: 'true = private memory namespace (recommended). false = shared global pool' },
+        reason:        { type: 'string', description: 'Why this agent is useful — shown to owner in approval request' },
+      },
+      required: ['name', 'description', 'systemPrompt', 'tools', 'reason'],
+    },
+  },
+  {
     name: 'add_knowledge_source',
     description: 'Index a new knowledge source (URL, raw GitHub file, GitHub repo) so Argos can search it in future replies. Use when you realize you are missing information that could be indexed from a known source.',
     input_schema: {
@@ -239,6 +258,59 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
 ];
+
+// Linear tools — injected only when config.linear.apiKey is set.
+const LINEAR_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'linear_create_issue',
+    description: 'Create a new issue in Linear. Use when the owner asks to track something in Linear, or when a partner request maps to a concrete engineering/ops task that belongs in the backlog. Requires owner approval.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title:       { type: 'string', description: 'Issue title' },
+        teamId:      { type: 'string', description: 'Linear team ID (e.g. "ENG", "OPS") — use the team that owns this work' },
+        description: { type: 'string', description: 'Detailed description in Markdown (optional)' },
+        priority:    { type: 'number', enum: [0, 1, 2, 3, 4], description: '0=no priority 1=urgent 2=high 3=medium 4=low' },
+      },
+      required: ['title', 'teamId'],
+    },
+  },
+  {
+    name: 'linear_update_issue',
+    description: 'Update or close an existing Linear issue. Use when a task is completed, reprioritized, or needs a description update. Pass close=true to mark as done.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        issueId:     { type: 'string', description: 'Linear issue ID or identifier (e.g. "ENG-42")' },
+        close:       { type: 'boolean', description: 'Set true to mark as completed' },
+        title:       { type: 'string', description: 'New title (optional)' },
+        description: { type: 'string', description: 'Updated description (optional)' },
+        priority:    { type: 'number', enum: [0, 1, 2, 3, 4] },
+      },
+      required: ['issueId'],
+    },
+  },
+];
+
+// Shell exec tool — injected only when config.shellExec.enabled is true.
+const SHELL_EXEC_TOOL: Anthropic.Tool[] = [{
+  name: 'shell_exec',
+  description: 'Run a whitelisted shell command on the owner\'s machine. ALWAYS set requiresApproval=true and risk="high". ' +
+    'Allowed commands: git, ls, cat, grep, find, node, npm, npx, curl (HTTPS only), jq, ps, df. ' +
+    'Never propose: rm, sudo, chmod, kill, or commands with shell metacharacters (;|&`). ' +
+    'Always provide a clear reason.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      command:        { type: 'string', description: 'The command name (no path, no args)' },
+      args:           { type: 'array', items: { type: 'string' }, description: 'Arguments as separate strings' },
+      workingDir:     { type: 'string', description: 'Working directory (must be within HOME)' },
+      timeoutSeconds: { type: 'number', description: 'Max seconds to wait (1-60)' },
+      reason:         { type: 'string', description: 'Why this command is needed' },
+    },
+    required: ['command', 'args', 'reason'],
+  },
+}];
 
 // Injected at call-time when wallet is enabled — kept separate to avoid leaking
 // chain/address info when wallet is disabled.
@@ -286,6 +358,10 @@ function buildUserPrompt(
     `[${i + 1}] ${new Date(m.receivedAt).toISOString()}\n${m.content}`
   ).join('\n\n');
 
+  const agentSection = window.agentContext
+    ? `\n=== AGENT PRE-ANALYSIS ===\n${window.agentContext}\n`
+    : '';
+
   return `=== INCOMING MESSAGES (${window.messages.length} in batch) ===
 Partner: ${window.partnerName ?? 'unknown'} | Chat: ${window.chatId}
 Category: ${result.category} | Urgency: ${result.urgency} | Importance: ${result.importance}/10
@@ -298,8 +374,8 @@ ${messages}
 
 === RELEVANT MEMORY CONTEXT ===
 ${relevantMemories || '(no relevant previous context)'}
-
-Based on this, propose the appropriate actions using the available tools.
+${agentSection}
+Based on this, propose the appropriate actions using the available tools.${window.agentContext ? '\nAgent pre-analysis is provided above — use it directly, do not re-run the same analysis.' : ''}
 If this is category "ignore" or importance < 3, you may propose nothing.`;
 }
 
@@ -319,7 +395,11 @@ function toolCallToAction(
     create_cron_job: 'low',
     delete_cron_job: 'medium',
     add_knowledge_source: 'low',
+    linear_create_issue: 'medium',
+    linear_update_issue: 'low',
     sign_tx: 'high',
+    create_agent: 'medium',
+    shell_exec: 'high',
   };
 
   const workerMap: Record<string, WorkerType> = {
@@ -332,7 +412,11 @@ function toolCallToAction(
     create_cron_job: 'scheduler',
     delete_cron_job: 'scheduler',
     add_knowledge_source: 'notion',
-    sign_tx: 'tx_sign',
+    linear_create_issue: 'notion',
+    linear_update_issue: 'notion',
+    sign_tx:      'tx_sign',
+    create_agent: 'agent',
+    shell_exec:   'shell_exec',
   };
 
   // Actions on the owner's own workspace don't need approval
@@ -367,8 +451,14 @@ function humanizeAction(name: string, input: Record<string, unknown>): string {
       return `Delete scheduled job "${input.name}"${input.reason ? ` — ${input.reason}` : ''}`;
     case 'add_knowledge_source':
       return `Index knowledge source: ${input.name} (${input.url ?? `github:${input.owner}/${input.repo}`})`;
+    case 'linear_create_issue':
+      return `Create Linear issue: "${input.title}" in team ${input.teamId}${input.priority !== undefined ? ` (priority ${input.priority})` : ''}`;
+    case 'linear_update_issue':
+      return `${input.close ? 'Close' : 'Update'} Linear issue ${input.issueId}${input.title ? ` → "${input.title}"` : ''}`;
     case 'sign_tx':
       return `Sign tx on ${input.chain}: ${input.value} → ${input.to}${input.note ? ` (${input.note})` : ''}`;
+    case 'create_agent':
+      return `Create agent "${input.name}" — ${input.description}${input.reason ? ` (${input.reason})` : ''}`;
     default:
       return `${name}: ${JSON.stringify(input).slice(0, 100)}`;
   }
@@ -431,9 +521,11 @@ export async function plan(
 
   // Skill tools + proposal tools. MCP excluded — too many tokens per call.
   type ToolDef = { name: string; description: string; input_schema: unknown };
-  const skillTools = getSkillToolDefinitions(config.skills) as ToolDef[];
+  const skillTools  = getSkillToolDefinitions(config.skills) as ToolDef[];
   const walletTools: ToolDef[] = config.wallet?.enabled ? [PROPOSE_TX_TOOL as unknown as ToolDef] : [];
-  const allTools: ToolDef[] = [...(TOOLS as unknown as ToolDef[]), ...walletTools, ...skillTools];
+  const linearTools: ToolDef[] = config.linear?.apiKey ? LINEAR_TOOLS as unknown as ToolDef[] : [];
+  const shellTools: ToolDef[] = (config as unknown as { shellExec?: { enabled?: boolean } }).shellExec?.enabled ? SHELL_EXEC_TOOL as unknown as ToolDef[] : [];
+  const allTools: ToolDef[] = [...(TOOLS as unknown as ToolDef[]), ...walletTools, ...linearTools, ...shellTools, ...skillTools];
 
   let planText = '';
   const actions: ProposedAction[] = [];
@@ -447,7 +539,16 @@ export async function plan(
     ? { ...llmCfg, temperature: undefined, thinking: { enabled: true, budgetTokens: 1024 } }
     : { ...llmCfg, temperature: llmCfg.temperature ?? config.claude.planningTemperature };
 
-  const messages: unknown[] = [{ role: 'user', content: userPrompt }];
+  // Build multimodal user content if any message in the window carries image data
+  const imgMsg = window.messages.find(m => m.imageData);
+  const userContent: LLMContentBlock[] | string = imgMsg?.imageData
+    ? [
+        { type: 'text' as const, text: userPrompt },
+        { type: 'image' as const, source: { type: 'base64' as const, media_type: imgMsg.imageMimeType ?? 'image/jpeg', data: imgMsg.imageData } },
+      ]
+    : userPrompt;
+
+  const messages: unknown[] = [{ role: 'user', content: userContent }];
 
   let iterations = 0;
   const MAX_ITERATIONS = 5;

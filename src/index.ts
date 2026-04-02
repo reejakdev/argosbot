@@ -56,6 +56,12 @@ async function boot() {
   const db = initDb(getDataDir());
   await loadUlid();
 
+  // 3a. Skills — load builtin skills + user-defined agents into registry
+  const { loadBuiltinSkills } = await import('./skills/registry.js');
+  const { loadUserAgents }    = await import('./agents/index.js');
+  await loadBuiltinSkills();
+  await loadUserAgents(config);
+
   setAuditCallback((level, module, msg, data) => {
     if (level === 'error' || level === 'warn') {
       try { audit(`log.${level}`, undefined, module, { msg, data }); } catch {}
@@ -64,6 +70,7 @@ async function boot() {
   log.info('DB initialized');
 
   // 3b. Wallet init — generate keys if enabled and not yet created
+  let walletMonitorStop: (() => void) | null = null;
   if (config.wallet?.enabled) {
     const { ensureWallet } = await import('./wallet/index.js');
     const addrs = await ensureWallet(
@@ -76,6 +83,26 @@ async function boot() {
     );
     if (addrs.evm)    log.info(`Wallet EVM:    ${addrs.evm}`);
     if (addrs.solana) log.info(`Wallet Solana: ${addrs.solana}`);
+
+    // Wallet monitor — detects incoming txs and injects them into the pipeline
+    if (config.wallet.monitor?.enabled) {
+      const { createWalletMonitor } = await import('./wallet/monitor.js');
+      const monitor = createWalletMonitor(
+        addrs,
+        config.wallet.chains ?? {},
+        {
+          pollIntervalSeconds: config.wallet.monitor.pollIntervalSeconds,
+          watchNative:         config.wallet.monitor.watchNative,
+          watchTokens:         config.wallet.monitor.watchTokens,
+        },
+        async (msg) => {
+          await ingestMessage(msg, llmConfig, privacyConfig, config, anonymizer, windowManager);
+        },
+      );
+      monitor.start();
+      walletMonitorStop = monitor.stop;
+      log.info('Wallet monitor started');
+    }
   }
 
   // 3. LLM configs
@@ -182,6 +209,21 @@ async function boot() {
     if (config.secrets?.DISCORD_BOT_TOKEN) process.env.DISCORD_BOT_TOKEN = config.secrets.DISCORD_BOT_TOKEN;
     const discordChannel = createDiscordChannel(config.channels.discord);
     if (discordChannel) { registerChannel(discordChannel); log.info('Discord listener registered'); }
+  }
+
+  // Signal channel — signal-cli sidecar (JSON-RPC over Unix socket)
+  let signalChannel: InstanceType<typeof import('./ingestion/channels/signal.js').SignalChannel> | null = null;
+  if (config.channels.signal?.enabled && config.channels.signal.phoneNumber) {
+    const { createSignalChannel } = await import('./ingestion/channels/signal.js');
+    signalChannel = createSignalChannel({
+      signalCliBin:   config.channels.signal.signalCliBin ?? 'signal-cli',
+      phoneNumber:    config.channels.signal.phoneNumber,
+      allowedNumbers: config.channels.signal.allowedNumbers ?? [],
+      socketPath:     config.channels.signal.socketPath ?? '/tmp/argos-signal.sock',
+      signalDataDir:  config.channels.signal.signalDataDir,
+    });
+    registerChannel(signalChannel);
+    log.info('Signal listener registered');
   }
 
   // 7. Approval gateway — Telegram bot > MTProto > Slack bot > web app only
@@ -344,6 +386,8 @@ async function boot() {
     await windowManager.flushAll();
     await stopAllChannels();
     slackBot?.stop();
+    await signalChannel?.stop();
+    walletMonitorStop?.();
     stopCrons();
     db.close();
     process.exit(0);

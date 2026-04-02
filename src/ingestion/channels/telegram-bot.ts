@@ -10,6 +10,7 @@ import path from 'path';
 import os from 'os';
 import { createLogger } from '../../logger.js';
 import type { LLMConfig } from '../../llm/index.js';
+import type { } from '../../llm/index.js'; // types only — llmCall imported dynamically
 import type { Config } from '../../config/schema.js';
 import type { CompactableHistory } from '../../llm/compaction.js';
 import type { TelegramChannel } from './telegram.js';
@@ -142,6 +143,74 @@ export class TelegramBot {
       return;
     }
 
+    // Handle voice messages — transcribe via Whisper, optionally reply with TTS
+    if (msg.voice && this.argosConfig?.voice?.enabled) {
+      const voice = msg.voice as { file_id: string; duration: number };
+      try {
+        // 1. Get file path from Telegram
+        const fileInfo = await this.api('getFile', { file_id: voice.file_id }) as { result: { file_path: string } };
+        const filePath = fileInfo.result.file_path;
+
+        // 2. Download audio (never persisted beyond this scope)
+        const fileRes = await fetch(`https://api.telegram.org/file/bot${this.token}/${filePath}`);
+        const buffer = Buffer.from(await fileRes.arrayBuffer());
+
+        // 3. Transcribe
+        const { transcribeAudio } = await import('../../voice/transcribe.js');
+        const transcript = await transcribeAudio(buffer, 'voice.ogg', this.argosConfig.voice);
+        log.info(`Voice transcribed (bot): ${transcript.slice(0, 80)}`);
+
+        // 4. Send typing indicator then process as text
+        const typingInterval = setInterval(() => {
+          this.api('sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
+        }, 4000);
+        this.api('sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
+
+        let reply: string;
+        try {
+          reply = await this.onMessage(userId, transcript);
+          clearInterval(typingInterval);
+        } catch (e) {
+          clearInterval(typingInterval);
+          throw e;
+        }
+
+        // 5. Reply with voice note if TTS enabled, otherwise text
+        if (this.argosConfig.voice.ttsEnabled && reply) {
+          try {
+            const { synthesizeSpeech } = await import('../../voice/synthesize.js');
+            const ttsConfig = {
+              ttsProvider:       this.argosConfig.voice.ttsProvider,
+              openAiTtsApiKey:   this.argosConfig.voice.openAiTtsApiKey,
+              openAiTtsModel:    this.argosConfig.voice.openAiTtsModel,
+              openAiTtsVoice:    this.argosConfig.voice.openAiTtsVoice,
+              elevenLabsApiKey:  this.argosConfig.voice.elevenLabsApiKey,
+              elevenLabsVoiceId: this.argosConfig.voice.elevenLabsVoiceId,
+            };
+            const audioBytes = await synthesizeSpeech(reply, ttsConfig);
+
+            // Send as voice note via multipart/form-data
+            const formData = new globalThis.FormData();
+            formData.append('chat_id', chatId);
+            formData.append('voice', new Blob([audioBytes], { type: 'audio/mpeg' }), 'reply.mp3');
+            await fetch(`https://api.telegram.org/bot${this.token}/sendVoice`, {
+              method: 'POST',
+              body: formData,
+            });
+          } catch (e) {
+            log.warn(`TTS failed, falling back to text reply: ${(e as Error).message}`);
+            if (reply) await this.sendMessage(chatId, reply);
+          }
+        } else if (reply) {
+          await this.sendMessage(chatId, reply);
+        }
+      } catch (e) {
+        log.warn(`Voice handling failed: ${(e as Error).message}`);
+        await this.sendMessage(chatId, '⚠️ Could not process voice message. Is whisperApiKey configured?');
+      }
+      return; // handled
+    }
+
     if (!msg.text) return;
     const text = msg.text.trim();
 
@@ -220,7 +289,8 @@ export class TelegramBot {
     try {
       const response = await this.onMessage(userId, safeText);
       clearInterval(typingInterval);
-      await this.sendMessage(chatId, response);
+      // Empty string means the handler already sent the reply (streaming mode)
+      if (response) await this.sendMessage(chatId, response);
     } catch (e) {
       clearInterval(typingInterval);
       const errMsg = e instanceof Error ? e.message : JSON.stringify(e);
@@ -307,6 +377,102 @@ export class TelegramBot {
         return;
       }
 
+      // Photo upload — pass as multimodal LLMMessage directly (cap at 5MB)
+      if (msg.photo && buffer.length < 5 * 1024 * 1024) {
+        const { llmCall: _llmCall } = await import('../../llm/index.js');
+        const imageData = buffer.toString('base64');
+        const textPrompt = caption
+          ? `The user sent a photo with caption: "${caption}". Describe what you see and answer their question.`
+          : 'The user sent a photo. Describe what you see and respond helpfully.';
+
+        // Build multimodal message and inject into conversation, then call LLM directly
+        let conv = await this.loadConversation(userId);
+        const { buildMessagesWithCompaction, needsCompaction, compactHistory } = await import('../../llm/compaction.js');
+
+        // Add multimodal user turn to conversation history as text-only summary (for history)
+        conv.messages.push({ role: 'user', content: caption ? `[Photo] ${caption}` : '[Photo]' });
+
+        if (needsCompaction(conv)) {
+          conv = await compactHistory(conv, this.llmConfig, _llmCall);
+          await this.saveConversation(userId, conv);
+        }
+
+        let systemPrompt = `You are Argos, a personal AI assistant. Current time: ${new Date().toISOString()}`;
+        if (this.argosConfig) {
+          const { buildSystemPrompt } = await import('../../prompts/index.js');
+          systemPrompt = buildSystemPrompt('chat', this.argosConfig);
+        }
+
+        // Build history messages then replace last user message with multimodal version
+        const historyMessages = buildMessagesWithCompaction(systemPrompt, conv, '');
+        // Override the last user message with multimodal content
+        const multimodalMessages = historyMessages.map((m, i) => {
+          if (i === historyMessages.length - 1 && m.role === 'user') {
+            return {
+              role: 'user' as const,
+              content: [
+                { type: 'text' as const, text: textPrompt },
+                { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data: imageData } },
+              ],
+            };
+          }
+          return m;
+        });
+
+        const imgResponse = await _llmCall(this.llmConfig, multimodalMessages);
+        const finalContent = imgResponse.content?.trim() || '(No response generated)';
+
+        conv.messages.push({ role: 'assistant', content: finalContent });
+        await this.saveConversation(userId, conv);
+        await this.sendMessage(chatId, finalContent);
+        return;
+      }
+
+      // PDF — pass as native document block to Anthropic (Claude reads PDFs natively)
+      const isPdf = ext === '.pdf' || msg.document?.mime_type === 'application/pdf';
+      if (isPdf && buffer.length < 20 * 1024 * 1024) {
+        const { llmCall: _llmCall } = await import('../../llm/index.js');
+        const pdfData = buffer.toString('base64');
+        const textPrompt = caption
+          ? `The user sent a PDF: "${fileName}" with note: "${caption}". Read and analyze it.`
+          : `The user sent a PDF: "${fileName}". Read it and give a useful summary or answer any question about it.`;
+
+        let conv = await this.loadConversation(userId);
+        const { buildMessagesWithCompaction, needsCompaction, compactHistory } = await import('../../llm/compaction.js');
+        conv.messages.push({ role: 'user', content: caption ? `[PDF: ${fileName}] ${caption}` : `[PDF: ${fileName}]` });
+        if (needsCompaction(conv)) {
+          conv = await compactHistory(conv, this.llmConfig, _llmCall);
+          await this.saveConversation(userId, conv);
+        }
+
+        let systemPrompt = `You are Argos, a personal AI assistant. Current time: ${new Date().toISOString()}`;
+        if (this.argosConfig) {
+          const { buildSystemPrompt } = await import('../../prompts/index.js');
+          systemPrompt = buildSystemPrompt('chat', this.argosConfig);
+        }
+
+        const historyMessages = buildMessagesWithCompaction(systemPrompt, conv, '');
+        const pdfMessages = historyMessages.map((m, i) => {
+          if (i === historyMessages.length - 1 && m.role === 'user') {
+            return {
+              role: 'user' as const,
+              content: [
+                { type: 'text' as const, text: textPrompt },
+                { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: pdfData } },
+              ],
+            };
+          }
+          return m;
+        });
+
+        const pdfResponse = await _llmCall(this.llmConfig, pdfMessages as Parameters<typeof _llmCall>[1]);
+        const pdfContent = pdfResponse.content?.trim() || '(Impossible de lire le PDF)';
+        conv.messages.push({ role: 'assistant', content: pdfContent });
+        await this.saveConversation(userId, conv);
+        await this.sendMessage(chatId, pdfContent);
+        return;
+      }
+
       // Regular upload: send to LLM for analysis
       let fileContent = '';
       if (isText) {
@@ -318,7 +484,8 @@ export class TelegramBot {
         : `The user sent a file: "${fileName}" (${buffer.length} bytes, type: ${msg.document?.mime_type ?? 'image'})\n${caption ? `Caption: "${caption}"\n` : ''}The file has been saved. Acknowledge receipt and ask if they need anything specific with it.`;
 
       const response = await this.onMessage(userId, prompt);
-      await this.sendMessage(chatId, response);
+      const safeResponse = response?.trim() || 'Fichier reçu et sauvegardé.';
+      await this.sendMessage(chatId, safeResponse);
     } catch (e) {
       log.error(`File upload error: ${e}`);
       await this.sendMessage(chatId, `⚠️ Error processing file: ${e instanceof Error ? e.message : String(e)}`);
@@ -366,6 +533,33 @@ export class TelegramBot {
     }
 
     if (data === 'noop') return;
+
+    // approve:<proposalId> / reject:<proposalId> — inline button callbacks
+    if (data.startsWith('approve:') || data.startsWith('reject:') || data.startsWith('snooze:') || data.startsWith('details:')) {
+      const { handleCallback } = await import('../../gateway/approval.js');
+      const { executeProposal } = await import('../../workers/index.js');
+      const { getConfig } = await import('../../config/index.js');
+
+      const response = await handleCallback(
+        data, cb.id,
+        async (proposal, actions, token) => {
+          const config = getConfig();
+          await executeProposal(proposal, actions, config, t => this.sendMessage(chatId, t), token);
+        },
+      );
+
+      // Edit the original message to reflect the new status
+      if (data.startsWith('approve:') || data.startsWith('reject:')) {
+        await this.api('editMessageReplyMarkup', {
+          chat_id:    chatId,
+          message_id: cb.message?.message_id,
+          reply_markup: { inline_keyboard: [] },
+        }).catch(() => {});
+      }
+
+      await this.sendMessage(chatId, response).catch(() => {});
+      return;
+    }
   }
 
   private async handleCommand(chatId: string, userId: string, text: string): Promise<void> {
@@ -469,6 +663,56 @@ export class TelegramBot {
               `📋 \`${p.id}\`\n${p.plan}\n🔒 Approve in web app`
             ).join('\n\n');
             await this.sendMessage(chatId, `📋 Pending proposals (${pending.length}):\n\n${list}\n\n🔒 Open the web app to approve/reject.`);
+          }
+        } catch (e) {
+          await this.sendMessage(chatId, `⚠️ Error: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        break;
+      }
+
+      case '/tasks': {
+        try {
+          const { getDb } = await import('../../db/index.js');
+          const db = getDb();
+          const rows = db.prepare(
+            "SELECT id, title, urgency, detected_at FROM tasks WHERE status IN ('open','in_progress') ORDER BY detected_at DESC LIMIT 15"
+          ).all() as Array<{ id: string; title: string; urgency: string; detected_at: number }>;
+          if (!rows.length) {
+            await this.sendMessage(chatId, '✅ No open tasks.');
+          } else {
+            const list = rows.map(r =>
+              `• \`${r.id.slice(-6)}\` [${r.urgency}] ${r.title.slice(0, 80)}\n  /done_${r.id.slice(-6)}`
+            ).join('\n');
+            await this.sendMessage(chatId, `📋 *Open tasks (${rows.length}):*\n\n${list}`);
+          }
+        } catch (e) {
+          await this.sendMessage(chatId, `⚠️ Error: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        break;
+      }
+
+      case '/done': {
+        try {
+          const { getDb } = await import('../../db/index.js');
+          const db = getDb();
+          const now = Date.now();
+          if (arg === 'all') {
+            const result = db.prepare(
+              "UPDATE tasks SET status = 'completed', completed_at = ? WHERE status IN ('open','in_progress')"
+            ).run(now) as { changes: number };
+            await this.sendMessage(chatId, `✅ Marked *${result.changes}* tasks as completed.`);
+          } else if (arg) {
+            const row = db.prepare(
+              "SELECT id, title FROM tasks WHERE id LIKE ? AND status IN ('open','in_progress') LIMIT 1"
+            ).get(`%${arg}`) as { id: string; title: string } | null;
+            if (!row) {
+              await this.sendMessage(chatId, `⚠️ Task \`${arg}\` not found.`);
+            } else {
+              db.prepare("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?").run(now, row.id);
+              await this.sendMessage(chatId, `✅ *${row.title.slice(0, 80)}* marked as done.`);
+            }
+          } else {
+            await this.sendMessage(chatId, '⚠️ Usage: `/done <id>` or `/done all`');
           }
         } catch (e) {
           await this.sendMessage(chatId, `⚠️ Error: ${e instanceof Error ? e.message : String(e)}`);
@@ -647,7 +891,7 @@ export class TelegramBot {
           '/remove_source <index>\n' +
           '/refresh_sources — re-indexer\n\n' +
           '*Système*\n' +
-          '/status · /proposals · /cancel · /compact · /clear\n\n' +
+          '/status · /proposals · /tasks · /done <id>|all · /cancel · /compact · /clear\n\n' +
           '🔒 Approvals: web app only',
         );
         break;
@@ -717,7 +961,51 @@ export class TelegramBot {
     }
   }
 
+  /** Detect task completion signals in owner chat messages and update DB immediately. */
+  private async detectAndCompleteTasksFromChat(text: string): Promise<void> {
+    try {
+      const { getDb } = await import('../../db/index.js');
+      const db = getDb();
+      const openTasks = db.prepare(
+        "SELECT id, title FROM tasks WHERE status IN ('open','in_progress') ORDER BY detected_at DESC LIMIT 20"
+      ).all() as Array<{ id: string; title: string }>;
+      if (!openTasks.length) return;
+
+      const { llmCall, extractJson } = await import('../../llm/index.js');
+      const taskList = openTasks.map(t => `[${t.id}] ${t.title}`).join('\n');
+
+      const response = await llmCall(this.llmConfig, [
+        {
+          role: 'system',
+          content: `You are a task completion detector. Given an owner message, determine which open tasks are now completed.
+A task is completed if the message says it's done, sent, confirmed, or resolved.
+Respond ONLY with valid JSON: {"completed": ["task_id_1"], "reasoning": "brief reason"}
+If nothing is completed, return {"completed": [], "reasoning": ""}`,
+        },
+        {
+          role: 'user',
+          content: `Open tasks:\n${taskList}\n\nOwner message: ${text.slice(0, 500)}`,
+        },
+      ]);
+
+      const result = extractJson<{ completed: string[]; reasoning: string }>(response.content);
+      if (!result.completed?.length) return;
+
+      const now = Date.now();
+      for (const taskId of result.completed) {
+        if (!openTasks.some(t => t.id === taskId)) continue;
+        db.prepare("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?").run(now, taskId);
+        log.info(`Task completed by owner via Telegram chat: ${taskId} — ${result.reasoning?.slice(0, 80)}`);
+      }
+    } catch (e) {
+      log.warn(`Task completion detection failed: ${(e as Error).message}`);
+    }
+  }
+
   private async defaultHandler(userId: string, text: string): Promise<string> {
+    // Detect completion signals — update DB before generating reply
+    await this.detectAndCompleteTasksFromChat(text);
+
     // Load conversation (from memory cache or DB)
     let conv = await this.loadConversation(userId);
 
@@ -811,51 +1099,108 @@ You are meeting this user for the first time. You MUST:
       return executeBuiltinTool(name, input);
     };
 
-    // Status message — one message that updates in place
     const chatId = this.lastChatId!;
-    let statusMsgId: number | null = null;
 
-    const updateStatus = async (text: string) => {
+    // ── Streaming state ────────────────────────────────────────────────────────
+    let statusMsgId: number | null = null;   // tool-use status bubble
+    let streamMsgId: number | null = null;   // live response bubble
+    let accText = '';
+    let lastEditMs = 0;
+    const STREAM_THROTTLE = 900; // ms between Telegram edits (rate limit safety)
+
+    const sendOrEdit = async (msgId: number | null, text: string, markdown = false): Promise<number> => {
       try {
-        if (statusMsgId) {
-          await this.api('deleteMessage', { chat_id: chatId, message_id: statusMsgId }).catch(() => {});
+        if (msgId) {
+          await this.api('editMessageText', {
+            chat_id: chatId, message_id: msgId, text,
+            ...(markdown && { parse_mode: 'Markdown' }),
+          }).catch(() => {});
+          return msgId;
         }
         const sent = await this.api('sendMessage', {
-          chat_id: chatId,
-          text: `⏳ ${text}`,
-          parse_mode: 'Markdown',
+          chat_id: chatId, text,
+          ...(markdown && { parse_mode: 'Markdown' }),
         }) as { result: { message_id: number } };
-        statusMsgId = sent.result.message_id;
-      } catch { /* non-blocking */ }
+        return sent.result.message_id;
+      } catch { return msgId ?? 0; }
     };
 
     const toolEmoji: Record<string, string> = {
       web_search: '🔍', fetch_url: '🌐', memory_search: '🧠', memory_store: '💾',
-      read_file: '📄', write_file: '✏️', current_time: '🕐',
+      read_file: '📄', write_file: '✏️', current_time: '🕐', spawn_agent: '🤖',
+      semantic_search: '🔎', create_proposal: '📋', list_knowledge: '📚',
     };
 
-    let response: { content: string };
-    if (this.llmConfig.authMode === 'bearer') {
-      response = await runToolLoop(
-        this.llmConfig, systemPrompt, messages,
-        allTools, combinedExecutor, callAnthropicBearerRaw,
-        async (event) => {
-          if (event.type === 'tool_call') {
-            const emoji = toolEmoji[event.name] ?? '🔧';
-            await updateStatus(`${emoji} Using *${event.name}*…`);
-          } else if (event.type === 'tool_result' && event.error) {
-            await updateStatus(`⚠️ ${event.name} failed`);
+    const onEvent = async (event: import('../../llm/tool-loop.js').ToolLoopEvent) => {
+      if (event.type === 'tool_call') {
+        const emoji = toolEmoji[event.name] ?? '🔧';
+        const hint = event.name === 'web_search'
+          ? ` _${String((event.input as Record<string,unknown>).query ?? '').slice(0, 50)}_`
+          : '';
+        // Delete streaming bubble if open — switch to tool status
+        if (streamMsgId) {
+          await this.api('deleteMessage', { chat_id: chatId, message_id: streamMsgId }).catch(() => {});
+          streamMsgId = null; accText = '';
+        }
+        statusMsgId = await sendOrEdit(statusMsgId, `${emoji} *${event.name}*${hint}…`, true);
+      } else if (event.type === 'tool_result') {
+        if (event.error) statusMsgId = await sendOrEdit(statusMsgId, `⚠️ *${event.name}* failed`, true);
+      } else if (event.type === 'text_chunk') {
+        accText += event.text;
+        const now = Date.now();
+        if (now - lastEditMs > STREAM_THROTTLE) {
+          if (!streamMsgId) {
+            // Hide tool status while streaming response
+            if (statusMsgId) {
+              await this.api('deleteMessage', { chat_id: chatId, message_id: statusMsgId }).catch(() => {});
+              statusMsgId = null;
+            }
+            const sent = await this.api('sendMessage', { chat_id: chatId, text: accText + ' ▌' }) as { result: { message_id: number } };
+            streamMsgId = sent.result.message_id;
+          } else {
+            await this.api('editMessageText', { chat_id: chatId, message_id: streamMsgId, text: accText + ' ▌' }).catch(() => {});
           }
-        },
-      );
-    } else {
-      response = await llmCall(this.llmConfig, messages);
-    }
+          lastEditMs = now;
+        }
+      }
+    };
 
-    // Delete status message before sending final response
-    if (statusMsgId) {
-      await this.api('deleteMessage', { chat_id: chatId, message_id: statusMsgId }).catch(() => {});
-    }
+    let response: { content: string; inputTokens?: number; outputTokens?: number };
+
+    const { callAnthropicBearerRaw: _bearerRaw } = await import('../../llm/index.js');
+    const providerRaw = this.llmConfig.authMode === 'bearer'
+      ? _bearerRaw
+      : async (cfg: import('../../llm/index.js').LLMConfig, body: Record<string, unknown>, onDelta?: (d: string) => void) => {
+          // OpenAI-compat raw (Gemini, etc.) — stream via fetch
+          const { streamLlmResponse } = await import('../../llm/index.js');
+          // Build minimal messages from body
+          const msgs = body.messages as import('../../llm/index.js').LLMMessage[];
+          const sys = body.system as string | undefined;
+          const allMsgs = sys ? [{ role: 'system' as const, content: sys }, ...msgs] : msgs;
+          let fullText = '';
+          const toolBlocks: Array<{ type: string; id: string; name: string; input: Record<string, unknown> }> = [];
+          // For OpenAI-compat we can't do tool use in streaming easily — use llmCall
+          const { llmCall: _lc } = await import('../../llm/index.js');
+          const r = await _lc(cfg, allMsgs);
+          if (onDelta && r.content) onDelta(r.content);
+          fullText = r.content;
+          void toolBlocks;
+          return {
+            content: [{ type: 'text', text: fullText }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: r.inputTokens ?? 0, output_tokens: r.outputTokens ?? 0 },
+            model: cfg.model,
+          };
+        };
+
+    response = await runToolLoop(
+      this.llmConfig, systemPrompt, messages,
+      allTools, combinedExecutor, providerRaw, onEvent,
+    );
+
+    // Clean up any remaining status/stream bubbles
+    if (statusMsgId) await this.api('deleteMessage', { chat_id: chatId, message_id: statusMsgId }).catch(() => {});
+    if (streamMsgId) await this.api('deleteMessage', { chat_id: chatId, message_id: streamMsgId }).catch(() => {});
 
     // Auto-save user.md if present in response
     const userMdMatch = response.content.match(/```user\.md\n([\s\S]*?)```/);
@@ -878,7 +1223,19 @@ You are meeting this user for the first time. You MUST:
     conv.messages.push({ role: 'assistant', content: finalContent });
     await this.saveConversation(userId, conv);
 
-    return finalContent;
+    // Token footer (debug info)
+    const inTok  = (response as { inputTokens?: number }).inputTokens;
+    const outTok = (response as { outputTokens?: number }).outputTokens;
+    const footer = inTok != null ? `\n\n_${inTok}↑ ${outTok}↓ tokens_` : '';
+
+    const displayContent = finalContent + footer;
+
+    // If streaming already sent the message, just do a final edit with complete content + footer
+    // Otherwise send fresh
+    await this.sendMessage(chatId, displayContent);
+
+    // Signal to handleUpdate that the reply was already sent
+    return '';
   }
 
   /**
@@ -1004,6 +1361,7 @@ interface TgUpdate {
     date: number;
     document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
     photo?: Array<{ file_id: string; width: number; height: number; file_size?: number }>;
+    voice?: { file_id: string; duration: number; mime_type?: string; file_size?: number };
   };
   callback_query?: TgCallbackQuery;
 }

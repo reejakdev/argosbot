@@ -294,6 +294,10 @@ function buildApi(
       // Atomic status transition — AND status = 'proposed' prevents double-execution
       // if two approval requests race (TOCTOU between the check above and the UPDATE).
       const now = Date.now();
+      // Generate execution token INSIDE the transaction — same atomic commit.
+      // Import synchronously via the module cache (already loaded at boot).
+      const { generateExecutionToken } = await import('../gateway/approval.js');
+      let executionToken = '';
       const approveResult = db.transaction(() => {
         const r = db.prepare(
           "UPDATE proposals SET status = 'approved', approved_at = ? WHERE id = ? AND status IN ('proposed', 'awaiting_approval')"
@@ -302,6 +306,7 @@ function buildApi(
           db.prepare(
             "UPDATE approvals SET status = 'approved', responded_at = ? WHERE proposal_id = ? AND status = 'pending'"
           ).run(now, proposalId);
+          executionToken = generateExecutionToken(proposalId);
         }
         return r;
       })();
@@ -322,7 +327,7 @@ function buildApi(
         const { llmConfigFromEnv } = await import('../llm/index.js');
         const llmConfig = llmConfigFromEnv();
         const notify = async (text: string) => { await sendToApprovalChat(text); };
-        const result = await executeApprovedProposal(String(proposalId), llmConfig, notify);
+        const result = await executeApprovedProposal(String(proposalId), llmConfig, notify, executionToken);
 
         // Inject execution result into the bot's conversation so it has context
         try {
@@ -470,6 +475,39 @@ function buildApi(
   });
 
   // Memories
+  // ─── Agents ────────────────────────────────────────────────────────────────
+
+  router.get('/agents', (_req, res) => {
+    const cfg = getConfig() as unknown as import('../config/schema.js').Config;
+    const agents = (cfg.agents ?? []).map(a => ({
+      name:           a.name,
+      description:    a.description,
+      tools:          a.tools,
+      linkedChannels: a.linkedChannels ?? [],
+      enabled:        a.enabled,
+    }));
+    res.json(agents);
+  });
+
+  router.post('/agents/:name/run', async (req, res) => {
+    const cfg = getConfig() as unknown as import('../config/schema.js').Config;
+    const agentName = req.params.name;
+    const input     = String((req.body as Record<string, unknown>)?.input ?? '').trim();
+
+    if (!input) { res.status(400).json({ error: 'input required' }); return; }
+
+    const agentDef = (cfg.agents ?? []).find(a => a.name === agentName && a.enabled !== false);
+    if (!agentDef) { res.status(404).json({ error: `Agent "${agentName}" not found or disabled` }); return; }
+
+    try {
+      const { runAgent } = await import('../agents/index.js');
+      const result = await runAgent(agentDef as import('../agents/index.js').AgentDefinition, input, cfg);
+      res.json({ success: result.success, output: result.output });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
   router.get('/memories', (_req, res) => {
     const db = getDb();
     const rows = db.prepare(`

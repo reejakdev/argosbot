@@ -16,6 +16,8 @@ import { getDb, audit } from '../db/index.js';
 import { createLogger } from '../logger.js';
 import { upsertCronJob, disableCronJob, validateCronSchedule } from '../scheduler/index.js';
 import { executeTelegramTool } from '../plugins/telegram.js';
+import { validateAndConsumeToken } from '../gateway/approval.js';
+import { executeShellExec } from './shell-exec.js';
 
 const ulid = monotonicFactory();
 import type { Proposal, ProposedAction } from '../types.js';
@@ -76,8 +78,22 @@ export async function executeProposal(
   actions: ProposedAction[],
   config: Config,
   sendToApprovalChat: (text: string) => Promise<void>,
+  executionToken: string,
 ): Promise<void> {
   const db = getDb();
+
+  // ── SECURITY GATE ─────────────────────────────────────────────────────────
+  // Layer 2: validate ephemeral token generated at human approval time.
+  // This is independent of the DB status check — both must pass.
+  if (!validateAndConsumeToken(proposal.id, executionToken)) {
+    log.error(`SECURITY: Execution of proposal ${proposal.id} blocked — invalid or missing token`);
+    audit('execution_rejected', proposal.id, 'security', { reason: 'invalid_execution_token' });
+    await sendToApprovalChat(
+      `🚫 *Execution blocked* — proposal \`${proposal.id.slice(-8)}\` was rejected by the security gate.\nThe approval token was invalid, expired, or already used.`
+    );
+    return;
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   log.info(`Executing proposal ${proposal.id}`, {
     actions: actions.length,
@@ -151,8 +167,21 @@ export async function executeProposal(
         case 'add_knowledge_source':
           result = await executeAddKnowledgeSource(resolvedInput, config);
           break;
+        case 'create_agent':
+          result = await executeCreateAgent(resolvedInput, config);
+          break;
         case 'edit_config':
           result = await executeEditConfig(resolvedInput, config);
+          break;
+        case 'linear_create_issue':
+          result = await executeLinearCreateIssue(resolvedInput, config);
+          break;
+        case 'linear_close_issue':
+        case 'linear_update_issue':
+          result = await executeLinearUpdateIssue(resolvedInput, config);
+          break;
+        case 'shell_exec':
+          result = await executeShellExec(resolvedInput, config);
           break;
         default:
           result = { success: false, output: `Unknown tool: ${payload.tool}`, dryRun: true };
@@ -533,4 +562,169 @@ function setNestedPath(obj: Record<string, unknown>, dotPath: string, value: unk
     cur = cur[k] as Record<string, unknown>;
   }
   cur[keys[keys.length - 1]] = value;
+}
+
+// ─── linear_create_issue ──────────────────────────────────────────────────────
+
+const LINEAR_API = 'https://api.linear.app/graphql';
+
+async function linearGql(
+  apiKey: string,
+  query:  string,
+  variables: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const res = await fetch(LINEAR_API, {
+    method:  'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': apiKey,
+    },
+    body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) throw new Error(`Linear API HTTP ${res.status}`);
+  const data = await res.json() as { data?: Record<string, unknown>; errors?: Array<{ message: string }> };
+  if (data.errors?.length) throw new Error(data.errors.map(e => e.message).join(', '));
+  return data.data ?? {};
+}
+
+async function executeLinearCreateIssue(
+  input: Record<string, unknown>,
+  config: Config,
+): Promise<WorkerResult> {
+  const apiKey = config.linear?.apiKey ?? process.env.LINEAR_API_KEY ?? '';
+  if (!apiKey) return { success: false, dryRun: false, output: 'linear_create_issue: LINEAR_API_KEY not configured' };
+
+  const title       = String(input.title ?? '');
+  const teamId      = String(input.teamId ?? '');
+  const description = input.description ? String(input.description) : undefined;
+  const priority    = typeof input.priority === 'number' ? input.priority : undefined; // 0-4
+
+  if (!title || !teamId) return { success: false, dryRun: false, output: 'linear_create_issue: title and teamId required' };
+
+  if (config.readOnly) return { success: true, dryRun: true, output: `[dry-run] Would create Linear issue: "${title}" in team ${teamId}` };
+
+  const data = await linearGql(apiKey, `
+    mutation CreateIssue($title: String!, $teamId: String!, $description: String, $priority: Int) {
+      issueCreate(input: { title: $title, teamId: $teamId, description: $description, priority: $priority }) {
+        success
+        issue { id identifier url title }
+      }
+    }
+  `, { title, teamId, description, priority });
+
+  const issue = (data.issueCreate as { issue?: { identifier: string; url: string } })?.issue;
+  if (!issue) return { success: false, dryRun: false, output: 'linear_create_issue: no issue returned' };
+
+  audit('linear_issue_created', issue.identifier, 'linear', { title, teamId, url: issue.url });
+  return { success: true, dryRun: false, output: `✅ Linear issue created: [${issue.identifier}] ${title}\n${issue.url}` };
+}
+
+async function executeLinearUpdateIssue(
+  input: Record<string, unknown>,
+  config: Config,
+): Promise<WorkerResult> {
+  const apiKey = config.linear?.apiKey ?? process.env.LINEAR_API_KEY ?? '';
+  if (!apiKey) return { success: false, dryRun: false, output: 'linear_update_issue: LINEAR_API_KEY not configured' };
+
+  const issueId = String(input.issueId ?? input.id ?? '');
+  if (!issueId) return { success: false, dryRun: false, output: 'linear_update_issue: issueId required' };
+
+  if (config.readOnly) return { success: true, dryRun: true, output: `[dry-run] Would update Linear issue ${issueId}` };
+
+  // If close/complete requested, find the team's completed state first
+  const wantClose = input.close === true || input.status === 'done' || input.status === 'completed';
+
+  let stateId: string | undefined = input.stateId ? String(input.stateId) : undefined;
+
+  if (wantClose && !stateId) {
+    // Fetch the issue's team to find completed state
+    const issueData = await linearGql(apiKey, `
+      query IssueTeam($id: String!) {
+        issue(id: $id) { team { states { nodes { id type name } } } }
+      }
+    `, { id: issueId });
+    const states = ((issueData.issue as Record<string, unknown>)?.team as Record<string, unknown>)?.states as { nodes: Array<{ id: string; type: string }> } | undefined;
+    stateId = states?.nodes.find(s => s.type === 'completed')?.id;
+  }
+
+  const updateInput: Record<string, unknown> = {};
+  if (stateId)                      updateInput.stateId     = stateId;
+  if (input.title)                  updateInput.title       = String(input.title);
+  if (input.description)            updateInput.description = String(input.description);
+  if (typeof input.priority === 'number') updateInput.priority = input.priority;
+
+  const data = await linearGql(apiKey, `
+    mutation UpdateIssue($id: String!, $input: IssueUpdateInput!) {
+      issueUpdate(id: $id, input: $input) {
+        success
+        issue { identifier url title }
+      }
+    }
+  `, { id: issueId, input: updateInput });
+
+  const issue = (data.issueUpdate as { issue?: { identifier: string; url: string; title: string } })?.issue;
+  const label = wantClose ? 'closed' : 'updated';
+  audit(`linear_issue_${label}`, issueId, 'linear', { ...updateInput });
+  return { success: true, dryRun: false, output: `✅ Linear issue ${label}: [${issue?.identifier ?? issueId}] ${issue?.title ?? ''}\n${issue?.url ?? ''}` };
+}
+
+async function executeCreateAgent(
+  input: Record<string, unknown>,
+  config: Config,
+): Promise<WorkerResult> {
+  const name = String(input.name ?? '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  if (!name || !/^[a-z][a-z0-9_]*$/.test(name)) {
+    return { success: false, dryRun: false, output: 'create_agent: invalid name — must be snake_case' };
+  }
+  if (!input.systemPrompt || !input.tools) {
+    return { success: false, dryRun: false, output: 'create_agent: systemPrompt and tools are required' };
+  }
+
+  const { getDataDir } = await import('../config/index.js');
+  const { readFileSync, writeFileSync } = await import('fs');
+  const { default: path } = await import('path');
+
+  const cfgPath = path.join(getDataDir(), 'config.json');
+  const raw     = JSON.parse(readFileSync(cfgPath, 'utf8')) as Record<string, unknown>;
+  const agents  = (raw.agents as Array<Record<string, unknown>>) ?? [];
+
+  // Dedup — update existing agent with same name rather than duplicating
+  const existing = agents.findIndex(a => a.name === name);
+  const agentDef: Record<string, unknown> = {
+    name,
+    description:       String(input.description ?? ''),
+    systemPrompt:      String(input.systemPrompt),
+    tools:             (input.tools as string[]) ?? ['web_search', 'fetch_url', 'semantic_search'],
+    linkedChannels:    (input.linkedChannels as string[]) ?? [],
+    provider:          input.provider ? String(input.provider) : undefined,
+    model:             input.model    ? String(input.model)    : undefined,
+    isolatedWorkspace: input.isolatedWorkspace !== false,
+    maxIterations:     Number(input.maxIterations ?? 8),
+    temperature:       Number(input.temperature  ?? 0.3),
+    maxTokens:         Number(input.maxTokens    ?? 2048),
+    enabled:           true,
+  };
+
+  if (existing >= 0) {
+    agents[existing] = agentDef;
+  } else {
+    agents.push(agentDef);
+  }
+
+  raw.agents = agents;
+  writeFileSync(cfgPath, JSON.stringify(raw, null, 2), 'utf8');
+
+  // Hot-reload — register the new agent immediately without restart
+  const { loadUserAgents } = await import('../agents/index.js');
+  await loadUserAgents({ ...config, agents: agents as Config['agents'] });
+
+  const verb = existing >= 0 ? 'updated' : 'created';
+  log.info(`Agent "${name}" ${verb} via worker`);
+  return {
+    success: true,
+    dryRun:  false,
+    output:  `✅ Agent "${name}" ${verb} and live — no restart needed.\n${String(input.reason ?? '')}`,
+    data:    { name },
+  };
 }

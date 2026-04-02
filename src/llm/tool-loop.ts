@@ -44,7 +44,11 @@ export async function runToolLoop(
   messages: LLMMessage[],
   tools: ToolDefinition[],
   executor: ToolExecutor,
-  callLlmRaw: (config: LLMConfig, body: Record<string, unknown>) => Promise<{
+  callLlmRaw: (
+    config: LLMConfig,
+    body: Record<string, unknown>,
+    onTextDelta?: (delta: string) => void,
+  ) => Promise<{
     content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>;
     stop_reason: string;
     usage: { input_tokens: number; output_tokens: number };
@@ -75,7 +79,11 @@ export async function runToolLoop(
       ...(tools.length > 0 && { tools }),
     };
 
-    const result = await callLlmRaw(config, body);
+    // Stream text deltas in real time via onEvent
+    const streamDelta = onEvent
+      ? (delta: string) => { void onEvent({ type: 'text_chunk', text: delta }); }
+      : undefined;
+    const result = await callLlmRaw(config, body, streamDelta);
     model = result.model;
     totalInputTokens += result.usage.input_tokens;
     totalOutputTokens += result.usage.output_tokens;
@@ -86,7 +94,7 @@ export async function runToolLoop(
 
     const newText = textBlocks.map(b => b.text ?? '').join('');
     finalText += newText;
-    if (newText && onEvent) await onEvent({ type: 'text_chunk', text: newText });
+    // text_chunk already emitted in real-time via streamDelta above — no duplicate emit needed
 
     // If no tool calls, we're done
     if (toolBlocks.length === 0 || result.stop_reason !== 'tool_use') {

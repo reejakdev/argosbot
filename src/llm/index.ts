@@ -58,9 +58,29 @@ export interface LLMConfig {
   fallback?: LLMConfig;
 }
 
+export interface LLMImageBlock {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+    data: string; // base64 string — never log this
+  };
+}
+
+export interface LLMDocumentBlock {
+  type: 'document';
+  source: {
+    type: 'base64';
+    media_type: 'application/pdf';
+    data: string;
+  };
+}
+
+export type LLMContentBlock = { type: 'text'; text: string } | LLMImageBlock | LLMDocumentBlock;
+
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | LLMContentBlock[];
 }
 
 export interface LLMResponse {
@@ -232,10 +252,18 @@ async function callAnthropic(
     model: config.model,
     max_tokens: config.maxTokens ?? 4096,
     ...(config.temperature !== undefined && { temperature: config.temperature }),
-    ...(systemMsg && { system: systemMsg.content }),
+    // system is always a plain string for the SDK path
+    ...(systemMsg && typeof systemMsg.content === 'string' && { system: systemMsg.content }),
     messages: nonSystem.map(m => ({
       role: m.role as 'user' | 'assistant',
-      content: m.content,
+      // Pass array content directly (Anthropic SDK accepts image blocks natively)
+      content: Array.isArray(m.content)
+        ? (m.content as LLMContentBlock[]).map(b =>
+            b.type === 'image'    ? { type: 'image' as const, source: b.source } :
+            b.type === 'document' ? { type: 'document' as const, source: b.source } :
+            { type: 'text' as const, text: b.text }
+          )
+        : m.content,
     })),
   });
 
@@ -282,20 +310,35 @@ async function callAnthropicBearer(
     { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude.", cache_control: { type: 'ephemeral' } },
   ];
   if (systemMsg?.content) {
-    systemBlocks.push({ type: 'text', text: systemMsg.content });
+    // system is always a string in this path
+    systemBlocks.push({ type: 'text', text: systemMsg.content as string });
   }
 
   // Only last message gets cache_control to stay under the 4-block limit
-  // Filter out empty messages
-  const nonEmpty = nonSystem.filter(m => m.content?.trim());
-  const msgBodies = nonEmpty.map((m, i) => ({
-    role: m.role,
-    content: [{
-      type: 'text',
-      text: m.content || '.',
-      ...(i === nonEmpty.length - 1 ? { cache_control: { type: 'ephemeral' } } : {}),
-    }],
-  }));
+  // Filter out empty text messages (array messages with image blocks are never empty)
+  const nonEmpty = nonSystem.filter(m =>
+    Array.isArray(m.content) ? m.content.length > 0 : (m.content as string)?.trim()
+  );
+  const msgBodies = nonEmpty.map((m, i) => {
+    const isLast = i === nonEmpty.length - 1;
+    // Array content (multimodal) — pass through; add cache_control to last text block only
+    if (Array.isArray(m.content)) {
+      const blocks = (m.content as LLMContentBlock[]).map(b =>
+        b.type === 'image'    ? { type: 'image' as const, source: b.source } :
+        b.type === 'document' ? { type: 'document' as const, source: b.source } :
+        { type: 'text' as const, text: b.text }
+      );
+      return { role: m.role, content: blocks };
+    }
+    return {
+      role: m.role,
+      content: [{
+        type: 'text',
+        text: (m.content as string) || '.',
+        ...(isLast ? { cache_control: { type: 'ephemeral' } } : {}),
+      }],
+    };
+  });
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -367,6 +410,7 @@ async function callAnthropicBearer(
 export async function callAnthropicBearerRaw(
   config: LLMConfig,
   body: Record<string, unknown>,
+  onTextDelta?: (delta: string) => void,
 ): Promise<{
   content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>;
   stop_reason: string;
@@ -440,62 +484,49 @@ export async function callAnthropicBearerRaw(
     throw new Error(`Anthropic API error ${res.status}: ${errBody.slice(0, 300)}`);
   }
 
-  // Parse SSE — collect all content blocks
-  const sseBody = await res.text();
+  // Parse SSE in streaming fashion — process events as they arrive
   const content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }> = [];
-  let currentBlock: Record<string, unknown> | null = null;
   let stopReason = 'end_turn';
   let model = config.model;
   let inputTokens = 0;
   let outputTokens = 0;
 
-  for (const line of sseBody.split('\n')) {
-    if (!line.startsWith('data: ')) continue;
-    try {
-      const evt = JSON.parse(line.slice(6)) as Record<string, unknown>;
-
-      if (evt.type === 'message_start') {
-        const msg = evt.message as Record<string, unknown>;
-        model = (msg.model as string) ?? model;
-        const usage = msg.usage as Record<string, number>;
-        if (usage) inputTokens = usage.input_tokens ?? 0;
-      } else if (evt.type === 'content_block_start') {
-        currentBlock = evt.content_block as Record<string, unknown>;
-        if (currentBlock.type === 'tool_use') {
-          content.push({
-            type: 'tool_use',
-            id: currentBlock.id as string,
-            name: currentBlock.name as string,
-            input: {},
-          });
-        } else {
-          content.push({ type: 'text', text: '' });
-        }
-      } else if (evt.type === 'content_block_delta') {
-        const delta = evt.delta as Record<string, unknown>;
-        const last = content[content.length - 1];
-        if (delta?.type === 'text_delta' && last?.type === 'text') {
-          last.text = (last.text ?? '') + (delta.text as string);
-        } else if (delta?.type === 'input_json_delta' && last?.type === 'tool_use') {
-          const partial = (last as unknown as Record<string, string>)._partialJson ?? '';
-          (last as unknown as Record<string, string>)._partialJson = partial + (delta.partial_json as string);
-        }
-      } else if (evt.type === 'content_block_stop') {
-        const last = content[content.length - 1];
-        if (last?.type === 'tool_use' && (last as unknown as Record<string, string>)._partialJson) {
-          try {
-            last.input = JSON.parse((last as unknown as Record<string, string>)._partialJson);
-          } catch { /* malformed */ }
-          delete (last as unknown as Record<string, string>)._partialJson;
-        }
-        currentBlock = null;
-      } else if (evt.type === 'message_delta') {
-        const delta = evt.delta as Record<string, string>;
-        if (delta?.stop_reason) stopReason = delta.stop_reason;
-        const usage = (evt as Record<string, unknown>).usage as Record<string, number>;
-        if (usage) outputTokens = usage.output_tokens ?? 0;
+  for await (const evt of _readSseJson(res)) {
+    if (evt.type === 'message_start') {
+      const msg = evt.message as Record<string, unknown>;
+      model = (msg.model as string) ?? model;
+      const usage = msg.usage as Record<string, number>;
+      if (usage) inputTokens = usage.input_tokens ?? 0;
+    } else if (evt.type === 'content_block_start') {
+      const block = evt.content_block as Record<string, unknown>;
+      if (block.type === 'tool_use') {
+        content.push({ type: 'tool_use', id: block.id as string, name: block.name as string, input: {} });
+      } else {
+        content.push({ type: 'text', text: '' });
       }
-    } catch { /* skip */ }
+    } else if (evt.type === 'content_block_delta') {
+      const delta = evt.delta as Record<string, unknown>;
+      const last = content[content.length - 1];
+      if (delta?.type === 'text_delta' && last?.type === 'text') {
+        const text = delta.text as string;
+        last.text = (last.text ?? '') + text;
+        if (onTextDelta && text) onTextDelta(text);
+      } else if (delta?.type === 'input_json_delta' && last?.type === 'tool_use') {
+        const partial = (last as unknown as Record<string, string>)._partialJson ?? '';
+        (last as unknown as Record<string, string>)._partialJson = partial + (delta.partial_json as string);
+      }
+    } else if (evt.type === 'content_block_stop') {
+      const last = content[content.length - 1];
+      if (last?.type === 'tool_use' && (last as unknown as Record<string, string>)._partialJson) {
+        try { last.input = JSON.parse((last as unknown as Record<string, string>)._partialJson); } catch { /* malformed */ }
+        delete (last as unknown as Record<string, string>)._partialJson;
+      }
+    } else if (evt.type === 'message_delta') {
+      const delta = evt.delta as Record<string, string>;
+      if (delta?.stop_reason) stopReason = delta.stop_reason;
+      const usage = (evt as Record<string, unknown>).usage as Record<string, number>;
+      if (usage) outputTokens = usage.output_tokens ?? 0;
+    }
   }
 
   // Clean up any leftover _partialJson fields (must not be sent back to API)
@@ -514,9 +545,24 @@ async function callOpenAICompat(
 ): Promise<LLMResponse> {
   const baseURL = config.baseUrl ?? 'https://api.openai.com/v1';
 
+  // Convert Anthropic-format image blocks to OpenAI image_url format for non-system messages
+  const mappedMessages = messages.map(m => {
+    if (Array.isArray(m.content)) {
+      return {
+        role: m.role,
+        content: (m.content as LLMContentBlock[]).map(b =>
+          b.type === 'image'    ? { type: 'image_url' as const, image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } } :
+          b.type === 'document' ? { type: 'text' as const, text: '[PDF document attached — not supported by this provider]' } :
+          { type: 'text' as const, text: b.text }
+        ),
+      };
+    }
+    return m;
+  });
+
   const body = {
     model: config.model,
-    messages,
+    messages: mappedMessages,
     max_tokens: config.maxTokens ?? 4096,
     ...(config.temperature !== undefined && { temperature: config.temperature }),
   };
@@ -807,6 +853,196 @@ export async function llmCall(
   };
 
   return config.authMode === 'bearer' ? withBearerQueue(run) : run();
+}
+
+// ─── Streaming helpers ────────────────────────────────────────────────────────
+
+/**
+ * Shared SSE reader — yields parsed JSON objects from a streaming fetch response.
+ * Stops on `[DONE]` or when the stream ends.
+ */
+async function* _readSseJson(response: Response): AsyncGenerator<Record<string, unknown>> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6).trim();
+      if (data === '[DONE]') return;
+      try {
+        yield JSON.parse(data) as Record<string, unknown>;
+      } catch { /* skip malformed lines */ }
+    }
+  }
+}
+
+/**
+ * Stream Anthropic OAuth (bearer) response — yields text chunks as they arrive.
+ */
+async function* _streamAnthropicBearer(
+  config: LLMConfig,
+  messages: LLMMessage[],
+): AsyncGenerator<string> {
+  // Auto-refresh OAuth token if needed
+  let accessToken = config.apiKey;
+  if (config.oauthTokens) {
+    const { getValidAccessToken } = await import('../auth/anthropic-oauth.js');
+    accessToken = await getValidAccessToken(config.oauthTokens, (refreshed) => {
+      config.oauthTokens = refreshed;
+      config.apiKey = refreshed.access;
+      config._onTokenRefresh?.(refreshed);
+    });
+  }
+
+  const systemMsg = messages.find(m => m.role === 'system');
+  const nonSystem = messages.filter(m => m.role !== 'system');
+
+  const systemBlocks: Array<{ type: string; text: string; cache_control?: { type: string } }> = [
+    { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude.", cache_control: { type: 'ephemeral' } },
+  ];
+  if (systemMsg?.content) {
+    systemBlocks.push({ type: 'text', text: systemMsg.content as string });
+  }
+
+  const nonEmpty = nonSystem.filter(m =>
+    Array.isArray(m.content) ? m.content.length > 0 : (m.content as string)?.trim()
+  );
+  const msgBodies = nonEmpty.map((m, i) => {
+    const isLast = i === nonEmpty.length - 1;
+    if (Array.isArray(m.content)) {
+      const blocks = (m.content as LLMContentBlock[]).map(b =>
+        b.type === 'image'    ? { type: 'image' as const, source: b.source } :
+        b.type === 'document' ? { type: 'document' as const, source: b.source } :
+        { type: 'text' as const, text: b.text }
+      );
+      return { role: m.role, content: blocks };
+    }
+    return {
+      role: m.role,
+      content: [{
+        type: 'text',
+        text: (m.content as string) || '.',
+        ...(isLast ? { cache_control: { type: 'ephemeral' } } : {}),
+      }],
+    };
+  });
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'authorization': `Bearer ${accessToken}`,
+      'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,mcp-client-2025-04-04',
+      'anthropic-dangerous-direct-browser-access': 'true',
+      'user-agent': 'claude-cli/2.1.75',
+      'x-app': 'cli',
+      'accept': 'application/json',
+    },
+    body: JSON.stringify({
+      model: config.model,
+      max_tokens: config.maxTokens ?? 4096,
+      stream: true,
+      ...(config.temperature !== undefined && { temperature: config.temperature }),
+      system: systemBlocks,
+      messages: msgBodies,
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Anthropic OAuth streaming error ${res.status}: ${errBody.slice(0, 300)}`);
+  }
+
+  for await (const evt of _readSseJson(res)) {
+    if (evt.type === 'content_block_delta') {
+      const delta = evt.delta as Record<string, string>;
+      if (delta?.type === 'text_delta' && delta.text) {
+        yield delta.text;
+      }
+    } else if (evt.type === 'message_stop') {
+      return;
+    }
+  }
+}
+
+/**
+ * Stream OpenAI-compatible response — yields text chunks as they arrive.
+ */
+async function* _streamOpenAICompat(
+  config: LLMConfig,
+  messages: LLMMessage[],
+): AsyncGenerator<string> {
+  const baseURL = config.baseUrl ?? 'https://api.openai.com/v1';
+
+  const mappedMessages = messages.map(m => {
+    if (Array.isArray(m.content)) {
+      return {
+        role: m.role,
+        content: (m.content as LLMContentBlock[]).map(b =>
+          b.type === 'image'    ? { type: 'image_url' as const, image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } } :
+          b.type === 'document' ? { type: 'text' as const, text: '[PDF document attached — not supported by this provider]' } :
+          { type: 'text' as const, text: b.text }
+        ),
+      };
+    }
+    return m;
+  });
+
+  const res = await fetch(`${baseURL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages: mappedMessages,
+      max_tokens: config.maxTokens ?? 4096,
+      ...(config.temperature !== undefined && { temperature: config.temperature }),
+      stream: true,
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`OpenAI streaming error ${res.status}: ${errBody.slice(0, 300)}`);
+  }
+
+  for await (const parsed of _readSseJson(res)) {
+    const choices = parsed.choices as Array<{ delta: { content?: string | null } }> | undefined;
+    const text = choices?.[0]?.delta?.content;
+    if (text) yield text;
+  }
+}
+
+/**
+ * Stream LLM response as text chunks.
+ * Supported: Anthropic bearer (SSE) and OpenAI-compatible (SSE).
+ * For providers without streaming support, yields the full response as one chunk.
+ */
+export async function* streamLlmResponse(
+  config: LLMConfig,
+  messages: LLMMessage[],
+): AsyncGenerator<string> {
+  if (config.provider === 'anthropic' && config.authMode === 'bearer') {
+    yield* _streamAnthropicBearer(config, messages);
+    return;
+  }
+  if (config.provider === 'compatible' || config.provider === 'openai') {
+    yield* _streamOpenAICompat(config, messages);
+    return;
+  }
+  // Fallback: non-streaming Anthropic SDK path — yield full response as one chunk
+  const response = await llmCall(config, messages);
+  yield response.content;
 }
 
 // ─── JSON extraction helper ───────────────────────────────────────────────────

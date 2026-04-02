@@ -14,7 +14,7 @@
  *   - injectionDetected: safety flag from the classifier itself
  */
 
-import { llmCall, extractJson, type LLMConfig } from '../llm/index.js';
+import { llmCall, extractJson, type LLMConfig, type LLMContentBlock } from '../llm/index.js';
 import { createLogger } from '../logger.js';
 import { getDb } from '../db/index.js';
 import { buildSystemPrompt } from '../prompts/index.js';
@@ -139,11 +139,20 @@ export async function classify(
     openTasks:    openTasks.length,
   });
 
+  // Build multimodal user content if any message in the window carries image data
+  const imgMsg = window.messages.find(m => m.imageData);
+  const userContent: LLMContentBlock[] | string = imgMsg?.imageData
+    ? [
+        { type: 'text' as const, text: prompt },
+        { type: 'image' as const, source: { type: 'base64' as const, media_type: imgMsg.imageMimeType ?? 'image/jpeg', data: imgMsg.imageData } },
+      ]
+    : prompt;
+
   const response = await llmCall(
     { ...llmConfig, temperature: llmConfig.temperature ?? 0 },  // default 0 — deterministic
     [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: prompt },
+      { role: 'user', content: userContent },
     ],
   );
 

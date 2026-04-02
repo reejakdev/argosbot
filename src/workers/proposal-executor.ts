@@ -12,6 +12,7 @@ import path from 'path';
 import os from 'os';
 import { createLogger } from '../logger.js';
 import { getDb } from '../db/index.js';
+import { validateAndConsumeToken } from '../gateway/approval.js';
 import type { LLMConfig } from '../llm/index.js';
 
 const log = createLogger('executor');
@@ -34,7 +35,19 @@ export async function executeApprovedProposal(
   proposalId: string,
   llmConfig: LLMConfig,
   notifyUser: (text: string) => Promise<void>,
+  executionToken: string,
 ): Promise<ExecutionResult> {
+  // ── SECURITY GATE ─────────────────────────────────────────────────────────
+  // Layer 2: validate ephemeral token — independent of DB status check.
+  if (!validateAndConsumeToken(proposalId, executionToken)) {
+    log.error(`SECURITY: Execution of proposal ${proposalId} blocked — invalid or missing token`);
+    await notifyUser(
+      `🚫 *Execution blocked* — proposal \`${proposalId.slice(-8)}\` rejected by security gate.\nThe approval token was invalid, expired, or already used.`
+    ).catch(() => {});
+    return { success: false, results: [], errors: ['Blocked: invalid execution token'] };
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   const db = getDb();
   const proposal = db.prepare(
     "SELECT id, plan, actions, context_summary FROM proposals WHERE id = ?"

@@ -279,6 +279,23 @@ async function checkOptionalIntegrations(): Promise<void> {
   } else {
     skip('Google Calendar', 'not configured');
   }
+
+  // Signal
+  const cfg = readConfigFile();
+  const signalCfg = (cfg?.channels as Record<string, unknown> | undefined)?.signal as
+    Record<string, unknown> | undefined;
+  if (signalCfg?.enabled) {
+    const { execSync } = await import('child_process');
+    const bin = String(signalCfg.signalCliBin ?? 'signal-cli');
+    try {
+      execSync(`which ${bin} 2>/dev/null || ${bin} --version 2>/dev/null`, { timeout: 3000 });
+      pass('signal-cli', `binary found: ${bin}`);
+    } catch {
+      warn('signal-cli', `binary not found: ${bin}`, 'brew install signal-cli  (macOS) or download from https://github.com/AsamK/signal-cli/releases');
+    }
+  } else {
+    skip('Signal', 'not enabled  (set channels.signal.enabled: true in config.json)');
+  }
 }
 
 async function checkYubiKey(): Promise<void> {

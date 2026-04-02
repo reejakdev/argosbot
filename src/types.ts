@@ -1,6 +1,6 @@
 // ─── Shared domain types ──────────────────────────────────────────────────────
 
-export type MessageSource = 'telegram' | 'whatsapp' | 'email' | 'slack' | 'discord' | 'calendar' | 'notion' | 'github';
+export type MessageSource = 'telegram' | 'whatsapp' | 'email' | 'slack' | 'discord' | 'calendar' | 'notion' | 'github' | 'wallet' | 'signal';
 
 export type MessageCategory =
   | 'task'
@@ -40,7 +40,9 @@ export type WorkerType =
   | 'notion'
   | 'linear'
   | 'scheduler'
-  | 'tx_sign';
+  | 'tx_sign'
+  | 'agent'
+  | 'shell_exec';
 
 // ─── Raw message as received from source ─────────────────────────────────────
 export interface RawMessage {
@@ -120,6 +122,9 @@ export interface SanitizedMessage {
   /** Original send time from the channel (unix ms) */
   timestamp?:   number;
   receivedAt:   number;
+  /** Base64-encoded image bytes — ephemeral, never persisted to DB */
+  imageData?:     string;
+  imageMimeType?: 'image/jpeg' | 'image/png' | 'image/webp';
 }
 
 // ─── Context window: batch of messages from same chat ─────────────────────────
@@ -139,6 +144,11 @@ export interface ContextWindow {
    * NEVER send to cloud LLM. Local/privacy LLM only.
    */
   rawContent?:      string;
+  /**
+   * Output from triggered agents — injected before planning.
+   * Appended to the planner prompt so the planner can reference agent findings.
+   */
+  agentContext?:    string;
   openedAt:         number;
   closedAt?:        number;
   status:           'open' | 'processing' | 'done';

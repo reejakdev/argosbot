@@ -1521,6 +1521,70 @@ async function stepContextSources(config: Record<string, unknown>): Promise<void
     }
   }
 
+  // Google Drive
+  const addDrive = await confirm('Add Google Drive folders/files as context?', false);
+  if (addDrive) {
+    tutorial('Google Drive — service account setup', [
+      '1. Go to console.cloud.google.com → IAM & Admin → Service Accounts',
+      '2. Create a service account (any name, no roles needed)',
+      '3. Keys tab → Add Key → JSON → download the file',
+      '4. Copy the service account email (looks like xxx@yyy.iam.gserviceaccount.com)',
+      '5. In Google Drive, right-click the folder/file → Share → paste the email (Viewer)',
+      '',
+      'Argos will only read files — the service account has no write access.',
+    ]);
+
+    const keyPath = (await ask('  Path to service account JSON key file')).trim();
+    if (keyPath) {
+      setPath(config, 'googleDrive.serviceAccountKeyPath', keyPath);
+      ok(`Service account key: ${keyPath}`);
+
+      const knowledge = (config.knowledge ?? { sources: [] }) as { sources: unknown[] };
+      if (!config.knowledge) config.knowledge = knowledge;
+
+      let more = true;
+      while (more) {
+        const sourceType = await select('  What to add', [
+          { label: 'Folder  (fetch all files inside)', value: 'folder' },
+          { label: 'File    (specific file by ID)',     value: 'file'   },
+        ]);
+
+        const name = (await ask('  Label for this source')).trim() || 'Drive';
+
+        if (sourceType === 'folder') {
+          tutorial('Finding a folder ID', [
+            'Open the folder in Google Drive → look at the URL:',
+            '  drive.google.com/drive/folders/<FOLDER_ID>',
+          ]);
+          const folderId = (await ask('  Folder ID')).trim();
+          if (folderId) {
+            (knowledge.sources as Array<Record<string, unknown>>).push({
+              type: 'google-drive', name, folderId, fileIds: [], refreshHours: 24,
+            });
+            ok(`Drive folder added: ${name}`);
+          }
+        } else {
+          tutorial('Finding a file ID', [
+            'Open the file in Google Drive → look at the URL:',
+            '  docs.google.com/document/d/<FILE_ID>/edit',
+            '  drive.google.com/file/d/<FILE_ID>/view',
+          ]);
+          const fileId = (await ask('  File ID')).trim();
+          if (fileId) {
+            (knowledge.sources as Array<Record<string, unknown>>).push({
+              type: 'google-drive', name, fileIds: [fileId], refreshHours: 24,
+            });
+            ok(`Drive file added: ${name}`);
+          }
+        }
+
+        more = await confirm('  Add another Drive source?', false);
+      }
+    } else {
+      warn('No key path provided — Google Drive skipped.');
+    }
+  }
+
   const total = context.urls.length + context.github.length + context.notion.length;
   if (total > 0) {
     config.context = context;
@@ -1832,6 +1896,226 @@ async function stepSkills(config: Record<string, unknown>): Promise<void> {
   ok(`${skills.length} skill(s) enabled`);
 }
 
+// ─── Cloudflare Tunnel ────────────────────────────────────────────────────────
+
+async function stepVoice(config: Record<string, unknown>): Promise<void> {
+  console.log('\n' + rule(`${c.magenta}🎙 Voice I/O${c.reset}`));
+  nl();
+
+  tutorial('What voice I/O enables', [
+    'You send a voice note on Telegram → Argos transcribes it (Whisper) and processes it',
+    'as if you had typed it — same pipeline, same approvals, same privacy model.',
+    '',
+    'With TTS enabled: Argos replies with a voice note (ElevenLabs or OpenAI TTS).',
+    'Full voice workflow — send a voice note, get one back.',
+    '',
+    'Privacy: audio bytes are NEVER stored. Only the anonymized transcript flows through the pipeline.',
+  ]);
+  nl();
+
+  const enable = await confirm('Enable voice messages (Whisper transcription)?', false);
+  if (!enable) {
+    skip('Voice I/O', 'skipped');
+    return;
+  }
+
+  config.voice = config.voice ?? {};
+  const voice = config.voice as Record<string, unknown>;
+  voice.enabled = true;
+
+  // ── Whisper ─────────────────────────────────────────────────────────────────
+  nl();
+  console.log(rule('Whisper — speech-to-text'));
+  nl();
+  info('Whisper is used to transcribe incoming voice messages.');
+  info('Default: OpenAI Whisper API (whisper-1). Compatible with any OpenAI-compatible endpoint.');
+  note('You can use a self-hosted Whisper server (e.g. faster-whisper) for full local transcription.');
+  nl();
+
+  const useCustomWhisper = await confirm('Use a custom Whisper endpoint (self-hosted / Groq / etc.)?', false);
+  if (useCustomWhisper) {
+    note('Example: http://localhost:8080/v1');
+    const endpoint = await ask('Whisper endpoint URL');
+    voice.whisperEndpoint = endpoint.trim() || 'https://api.openai.com/v1';
+    ok(`Whisper endpoint: ${voice.whisperEndpoint}`);
+  } else {
+    voice.whisperEndpoint = 'https://api.openai.com/v1';
+  }
+
+  const whisperKeyHint = useCustomWhisper ? '(leave blank if no auth required)' : '(sk-...)';
+  const whisperKey = await askSecret(`Whisper API key ${whisperKeyHint}`);
+  if (whisperKey.trim()) {
+    voice.whisperApiKey = whisperKey.trim();
+    ok('Whisper API key saved.');
+  } else if (!useCustomWhisper) {
+    warn('No Whisper API key — transcription will fail unless you set WHISPER_API_KEY in .env');
+  } else {
+    note('No API key — assuming endpoint requires no auth.');
+  }
+
+  const whisperModel = await ask('Whisper model (default: whisper-1)', 'whisper-1');
+  voice.whisperModel = whisperModel.trim() || 'whisper-1';
+
+  nl();
+  ok(`Whisper configured → ${voice.whisperEndpoint} (model: ${voice.whisperModel})`);
+
+  // ── TTS ─────────────────────────────────────────────────────────────────────
+  nl();
+  console.log(rule('TTS — text-to-voice replies  (optional)'));
+  nl();
+  info('When enabled, Argos will reply with a voice note instead of plain text.');
+  note('Providers:');
+  note('  • ElevenLabs — highest quality, cloneable voice, requires API key + Voice ID');
+  note('  • OpenAI TTS — good quality, simpler setup, uses your existing OpenAI key');
+  nl();
+
+  const ttsEnable = await confirm('Enable TTS voice replies?', false);
+  if (!ttsEnable) {
+    voice.ttsEnabled = false;
+    skip('TTS', 'disabled — Argos will reply with text only');
+    return;
+  }
+
+  voice.ttsEnabled = true;
+
+  const provider = await select('TTS provider', [
+    { label: 'ElevenLabs  (best quality, clone your voice)', value: 'elevenlabs' },
+    { label: 'OpenAI TTS  (simpler, uses existing OpenAI key)', value: 'openai' },
+  ]);
+  voice.ttsProvider = provider;
+
+  if (provider === 'elevenlabs') {
+    nl();
+    info('ElevenLabs setup:');
+    note('  1. Create account at https://elevenlabs.io');
+    note('  2. Go to Profile → API Key');
+    note('  3. Copy your Voice ID from the Voices library');
+    nl();
+
+    const elKey = await askSecret('ElevenLabs API key (sk_...)');
+    if (elKey.trim()) {
+      voice.elevenLabsApiKey = elKey.trim();
+      ok('ElevenLabs API key saved.');
+    } else {
+      warn('No API key — TTS will fail. Set ELEVENLABS_API_KEY in .env');
+    }
+
+    note('Find your Voice ID in the ElevenLabs Voices library (e.g. EXAVITQu4vr4xnSDxMaL for Adam)');
+    const voiceId = await ask('ElevenLabs Voice ID');
+    voice.elevenLabsVoiceId = voiceId.trim();
+    ok(`Voice ID: ${voiceId.trim()}`);
+
+  } else {
+    // OpenAI TTS
+    nl();
+    info('OpenAI TTS setup:');
+    note('  Uses the same API key as your LLM provider if you\'re on OpenAI.');
+    nl();
+
+    const oaiKey = await askSecret('OpenAI TTS API key (leave blank to reuse your main OpenAI key)');
+    if (oaiKey.trim()) {
+      voice.openAiTtsApiKey = oaiKey.trim();
+      ok('OpenAI TTS API key saved.');
+    } else {
+      note('Will reuse the main OpenAI API key at runtime.');
+    }
+
+    const ttsVoice = await select('Voice', [
+      { label: 'onyx  (deep, professional — default)', value: 'onyx' },
+      { label: 'alloy  (neutral)', value: 'alloy' },
+      { label: 'echo  (smooth)', value: 'echo' },
+      { label: 'fable  (warm)', value: 'fable' },
+      { label: 'nova  (bright)', value: 'nova' },
+      { label: 'shimmer  (clear)', value: 'shimmer' },
+    ]);
+    voice.openAiTtsVoice = ttsVoice;
+
+    const ttsModel = await select('Model', [
+      { label: 'tts-1  (faster, lower latency)', value: 'tts-1' },
+      { label: 'tts-1-hd  (higher quality)', value: 'tts-1-hd' },
+    ]);
+    voice.openAiTtsModel = ttsModel;
+
+    ok(`OpenAI TTS configured → ${ttsModel} / ${ttsVoice}`);
+  }
+
+  nl();
+  ok('Voice I/O fully configured — send a voice note to Argos and get one back.');
+}
+
+async function stepCloudflare(config: Record<string, unknown>): Promise<void> {
+  console.log('\n' + rule(`${c.cyan}☁ Cloudflare Tunnel${c.reset}`));
+  nl();
+  info('Cloudflare Tunnel exposes your approval web app without opening any ports.');
+  info('Access it securely from your phone or anywhere — no VPN needed.');
+  nl();
+  note('What you get:');
+  note('  • Public HTTPS URL for the approval web app (e.g. argos.yourdomain.com)');
+  note('  • No public IP, no open port — only an outbound cloudflared process');
+  note('  • Free on Cloudflare\'s free tier (you need a domain on Cloudflare)');
+  nl();
+
+  const enable = await confirm('Set up Cloudflare Tunnel?');
+  if (!enable) {
+    skip('Cloudflare', 'skipped — web app accessible on localhost only');
+    return;
+  }
+
+  nl();
+  info('Step 1: Go to https://one.dash.cloudflare.com → Networks → Tunnels');
+  info('Step 2: Create a tunnel, name it "argos"');
+  info('Step 3: Add a public hostname pointing to http://localhost:3000');
+  info('Step 4: Copy the tunnel token shown in "Install connector"');
+  nl();
+
+  note('Token starts with eyJhIjoiM...');
+  const token = await askSecret('Paste your tunnel token');
+
+  note('Example: argos.yourdomain.com');
+  const hostname = await ask('Public hostname for the web app');
+
+  const port = Number((config.webapp as Record<string, unknown>)?.port ?? 3000);
+
+  config.cloudflare = {
+    tunnel: { token, hostname, localPort: port, enabled: true },
+  };
+
+  // Write a ready-to-run startup script to ~/.argos/start-tunnel.sh
+  try {
+    const dataDir = (config.dataDir as string | undefined) ?? '~/.argos';
+    const resolvedDir = dataDir.startsWith('~')
+      ? path.join(os.homedir(), dataDir.slice(1))
+      : dataDir;
+    fs.mkdirSync(resolvedDir, { recursive: true });
+
+    const scriptPath = path.join(resolvedDir, 'start-tunnel.sh');
+    const script = [
+      '#!/bin/sh',
+      '# Argos — Cloudflare Tunnel startup script',
+      '# Run this in a separate terminal (or add it to your process manager)',
+      '#',
+      `# Your web app will be available at: https://${hostname}`,
+      '#',
+      `exec cloudflared tunnel run --token "${token}"`,
+    ].join('\n');
+    fs.writeFileSync(scriptPath, script, { mode: 0o700 });
+
+    ok(`Startup script written: ${scriptPath}`);
+  } catch {
+    warn('Could not write startup script — run cloudflared manually');
+  }
+
+  nl();
+  ok(`Tunnel configured → https://${hostname}`);
+  nl();
+  info('To start the tunnel, run:');
+  note(`  cloudflared tunnel run --token "${token.slice(0, 12)}…"`);
+  info('Or use the generated script:');
+  note(`  ~/.argos/start-tunnel.sh`);
+  nl();
+  info('To install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/');
+}
+
 async function stepWriteConfig(config: object, total: number): Promise<void> {
   stepHeader(6, total, 'Permissions & write config');
   const cfg = config as Record<string, unknown>;
@@ -1853,6 +2137,185 @@ async function stepWriteConfig(config: object, total: number): Promise<void> {
   writeConfig(cfg);
   ok(`Config written to  ${c.cyan}${CONFIG_PATH}${c.reset}  ${c.gray}(chmod 600)${c.reset}`);
   note('All secrets, LLM providers, and settings are in this single file.');
+}
+
+// ─── Step: User-defined agents ───────────────────────────────────────────────
+
+const BUILTIN_TOOL_NAMES = [
+  'web_search', 'fetch_url', 'memory_search', 'memory_store',
+  'semantic_search', 'current_time', 'api_call', 'list_proposals',
+  'create_proposal', 'list_knowledge', 'read_file',
+];
+
+async function stepAgents(config: Record<string, unknown>): Promise<void> {
+  console.log(rule('Multi-agent mode  (optional)'));
+  nl();
+
+  tutorial('What are user-defined agents?', [
+    'Agents are specialized sub-agents you program with a custom role and toolset.',
+    '',
+    'Each agent:',
+    '  • Has its own system prompt (persona, rules, domain)',
+    '  • Can use a subset of Argos tools (web_search, fetch_url, semantic_search…)',
+    '  • Is available to the planner as a callable tool',
+    '  • Can be linked to a chat channel — messages from that channel go directly to it',
+    '',
+    'Example: a "deal_analyzer" agent linked to your DeFi Telegram group.',
+    'Every message in that group gets analyzed by the agent automatically.',
+    '',
+    'You can also call agents from the web app (/api/agents/:name/run).',
+  ]);
+
+  const existing = (config.agents as Array<Record<string, unknown>> | undefined) ?? [];
+  if (existing.length > 0) {
+    ok(`${existing.length} existing agent(s):`);
+    existing.forEach(a => note(`  • ${a.name as string} — ${a.description as string}`));
+    nl();
+  }
+
+  const addAgent = await confirm('Add a user-defined agent?', false);
+  if (!addAgent) {
+    note('Skip — add agents later in config.json → "agents" array.');
+    return;
+  }
+
+  const agents: Array<Record<string, unknown>> = [...existing];
+
+  let more = true;
+  while (more) {
+    nl();
+    console.log(rule('New agent'));
+
+    const name = (await ask('Agent name  (snake_case, e.g. deal_analyzer)')).trim()
+      .toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    if (!name || !/^[a-z][a-z0-9_]*$/.test(name)) {
+      warn('Invalid name — must be snake_case starting with a letter. Skipped.');
+      more = await confirm('Add another agent?', false);
+      continue;
+    }
+
+    const description = (await ask('One-line description (shown to the planner)')).trim();
+
+    note('System prompt — define the agent\'s role, rules, and behavior.');
+    note('End with an empty line.');
+    const lines: string[] = [];
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const line = await ask('');
+      if (line === '') break;
+      lines.push(line);
+    }
+    const systemPrompt = lines.join('\n').trim();
+    if (!systemPrompt) { warn('Empty system prompt — agent skipped.'); more = await confirm('Add another agent?', false); continue; }
+
+    const selectedTools = await multiSelect(
+      'Tools this agent can use  (Space = toggle)',
+      [
+        { label: '* — all builtin tools',        value: '*',              checked: false },
+        { label: 'web_search — search the web',  value: 'web_search',     checked: true  },
+        { label: 'fetch_url — read any URL',     value: 'fetch_url',      checked: true  },
+        { label: 'semantic_search — memory',     value: 'semantic_search', checked: true },
+        { label: 'memory_store — save memories', value: 'memory_store',   checked: false },
+        { label: 'current_time',                 value: 'current_time',   checked: false },
+        { label: 'api_call — HTTP requests',     value: 'api_call',       checked: false },
+        ...BUILTIN_TOOL_NAMES.filter(t => !['web_search','fetch_url','semantic_search','memory_store','current_time','api_call','*'].includes(t))
+          .map(t => ({ label: t, value: t, checked: false })),
+      ],
+    );
+    const tools = selectedTools.includes('*') ? ['*'] : selectedTools;
+
+    // Optional: linked channels
+    nl();
+    const linkChannel = await confirm('Link this agent to a communication channel?', false);
+    const linkedChannels: string[] = [];
+    if (linkChannel) {
+      note('Format: <channel_type>:<chatId>');
+      note('Examples:');
+      note('  telegram:-1001234567890   (group chat ID)');
+      note('  slack:C0123ABCD           (channel ID)');
+      note('  whatsapp:33612345678@s.whatsapp.net');
+      let moreChannels = true;
+      while (moreChannels) {
+        const ref = (await ask('  Channel ref')).trim();
+        if (ref) linkedChannels.push(ref);
+        moreChannels = await confirm('  Add another channel?', false);
+      }
+    }
+
+    // Optional: model override
+    nl();
+    const overrideModel = await confirm('Use a different LLM for this agent?', false);
+    let agentProvider: string | undefined;
+    let agentModel:    string | undefined;
+    if (overrideModel) {
+      note('Provider must match a key in config.llm.providers (e.g. "anthropic", "openai", "ollama").');
+      agentProvider = (await ask('  Provider key')).trim() || undefined;
+      agentModel    = (await ask('  Model name  (e.g. gpt-4o, llama3:8b)')).trim() || undefined;
+      if (agentProvider && agentModel) ok(`Agent will use: ${agentProvider}/${agentModel}`);
+    }
+
+    // Optional: triggers
+    nl();
+    const addTriggers = await confirm('Auto-trigger this agent on matching messages?', false);
+    const triggers: Array<Record<string, unknown>> = [];
+    if (addTriggers) {
+      tutorial('Triggers — when to run this agent automatically', [
+        'Before the planner runs, Argos checks if any agent trigger matches.',
+        'If yes, it runs the agent and injects the result into the planner context.',
+        '',
+        'Example: keywords ["whitelist","add address"] → runs on every whitelist request.',
+        'You can combine keywords + categories + channels in one trigger (all must match).',
+        'Multiple triggers are OR\'d — any one matching is enough.',
+      ]);
+
+      let moreTriggers = true;
+      while (moreTriggers) {
+        nl();
+        const kwRaw = (await ask('  Keywords (comma-separated, leave empty to skip)')).trim();
+        const keywords = kwRaw ? kwRaw.split(',').map(k => k.trim()).filter(Boolean) : [];
+
+        const catRaw = (await ask('  Categories (comma-separated: tx_request,client_request,task… leave empty)')).trim();
+        const categories = catRaw ? catRaw.split(',').map(k => k.trim()).filter(Boolean) : [];
+
+        const chRaw = (await ask('  Channels (comma-separated: telegram,slack,whatsapp,email… leave empty)')).trim();
+        const channels = chRaw ? chRaw.split(',').map(k => k.trim()).filter(Boolean) : [];
+
+        if (keywords.length || categories.length || channels.length) {
+          triggers.push({ keywords, categories, channels, minImportance: 0 });
+          ok(`Trigger added${keywords.length ? ` — keywords: ${keywords.join(', ')}` : ''}${categories.length ? ` — categories: ${categories.join(', ')}` : ''}`);
+        } else {
+          warn('Empty trigger — skipped.');
+        }
+
+        moreTriggers = await confirm('  Add another trigger?', false);
+      }
+    }
+
+    // Isolated workspace (default true)
+    nl();
+    const isolated = await confirm('Isolated workspace (private memory namespace)?', true);
+
+    agents.push({
+      name, description, systemPrompt, tools,
+      linkedChannels,
+      triggers,
+      provider:          agentProvider,
+      model:             agentModel,
+      isolatedWorkspace: isolated,
+      maxIterations: 8,
+      temperature:   0.3,
+      maxTokens:     2048,
+      enabled:       true,
+    });
+    ok(`Agent "${name}" added`);
+
+    more = await confirm('Add another agent?', false);
+  }
+
+  if (agents.length > 0) {
+    config.agents = agents;
+    ok(`${agents.length} agent(s) configured`);
+  }
 }
 
 // ─── Step: Notifications + custom instructions ───────────────────────────────
@@ -2215,7 +2678,10 @@ async function main(): Promise<void> {
       await stepMcpServers(cfg);
       await stepSkills(cfg);
       await stepWallet(cfg);
+      await stepAgents(cfg);
       await stepNotifications(cfg);
+      await stepVoice(cfg);
+      await stepCloudflare(cfg);
     }},
     { name: STEP_NAMES[6], run: async (total, cfg) => {
       await stepWriteConfig(cfg, total);
