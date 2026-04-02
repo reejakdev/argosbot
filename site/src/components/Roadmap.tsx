@@ -32,16 +32,18 @@ const v1Done = [
 ]
 
 const v2Next = [
+  'Vision / OCR — multimodal images in Telegram & WhatsApp',
+  'Voice I/O — Whisper transcription + ElevenLabs TTS',
+  'SOUL.md — user-editable system prompt, hot-reload',
+  'Shell exec worker — whitelisted commands, always approved',
+  'Streaming responses — Telegram & Slack bot token-by-token',
+  'Multi-agent orchestration — spawn_agent coordinator pattern',
+  'Knowledge graph — entity extraction, relation queries',
+  'Signal channel adapter',
   'React Native / Expo mobile app',
   'macOS menu bar (Tauri)',
-  'Discord channel integration',
-  'Slack channel integration',
-  'Linear worker',
-  'GitHub PRs + issues reader',
-  'Fordefi simulation API',
-  'On-chain RPC data reads',
-  'Knowledge base UI',
   'Proposal diff editor',
+  'Knowledge base UI',
 ]
 
 const v3Future = [
