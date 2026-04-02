@@ -32,7 +32,7 @@ export default function Footer() {
                 ARGOS
               </span>
             </div>
-            <p className="text-sm leading-relaxed mb-4" style={{ color: '#888888' }}>
+            <p className="text-sm leading-relaxed mb-4" style={{ color: '#555555' }}>
               A local-first, privacy-preserving AI assistant for fintech and crypto teams.
               Read by default. Sanitize before memory. Approve before action.
             </p>
@@ -51,7 +51,7 @@ export default function Footer() {
                   key={link.href}
                   href={link.href}
                   className="text-sm transition-colors"
-                  style={{ color: '#888888' }}
+                  style={{ color: '#555555' }}
                 >
                   {link.label}
                 </a>
@@ -68,7 +68,7 @@ export default function Footer() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 text-sm transition-colors"
-                style={{ color: '#888888' }}
+                style={{ color: '#555555' }}
               >
                 <GitBranch size={14} />
                 GitHub Repository
@@ -78,7 +78,7 @@ export default function Footer() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 text-sm transition-colors"
-                style={{ color: '#888888' }}
+                style={{ color: '#555555' }}
               >
                 <span className="w-3.5 h-3.5 flex items-center justify-center font-mono text-xs">D</span>
                 Documentation
@@ -88,7 +88,7 @@ export default function Footer() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 text-sm transition-colors"
-                style={{ color: '#888888' }}
+                style={{ color: '#555555' }}
               >
                 <span className="w-3.5 h-3.5 flex items-center justify-center font-mono text-xs">!</span>
                 Report an Issue

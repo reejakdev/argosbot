@@ -28,7 +28,7 @@ export function CodeBlock({ code, language = 'json', title }: CodeBlockProps) {
             <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#f59e0b', opacity: 0.7 }} />
             <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#10b981', opacity: 0.7 }} />
           </div>
-          <span className="font-mono text-xs ml-2" style={{ color: '#888888' }}>{title}</span>
+          <span className="font-mono text-xs ml-2" style={{ color: '#555555' }}>{title}</span>
           <span className="ml-auto font-mono text-xs" style={{ color: 'rgba(136,136,136,0.4)' }}>{language}</span>
         </div>
       )}

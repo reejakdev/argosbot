@@ -10,7 +10,7 @@ const channels = [
   { label: 'Email',     angle: 180,  color: '#16a34a' },
   { label: 'GitHub',    angle: 225,  color: '#4455e8' },
   { label: 'Notion',    angle: 270,  color: '#4455e8' },
-  { label: '+ any MCP', angle: 315,  color: '#888888' },
+  { label: '+ any MCP', angle: 315,  color: '#555555' },
 ]
 
 function HUDDiagram() {

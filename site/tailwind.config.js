@@ -18,7 +18,7 @@ export default {
         yellow: '#d97706',
         text: '#1a1a1a',
         text2: '#444444',
-        text3: '#888888',
+        text3: '#555555',
         border: '#e2e2e2',
         // Legacy alias
         cyan: '#5b6cf8',

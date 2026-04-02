@@ -91,7 +91,7 @@ function StepCard({ step, index }: { step: typeof steps[0]; index: number }) {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2">
-              <span className="font-mono text-xs" style={{ color: '#888888' }}>{step.num}</span>
+              <span className="font-mono text-xs" style={{ color: '#555555' }}>{step.num}</span>
               <h3 className="font-semibold text-base" style={{ color: '#1a1a1a' }}>{step.title}</h3>
               <Badge
                 label={step.badgeLabel}

@@ -73,7 +73,7 @@ const categories = [
 
 const statusStyle = {
   live: { dot: '#16a34a', text: '#1a1a1a', border: 'rgba(22,163,74,0.15)' },
-  v2:   { dot: '#888888', text: '#888888', border: 'rgba(136,136,136,0.15)' },
+  v2:   { dot: '#555555', text: '#555555', border: 'rgba(136,136,136,0.15)' },
 }
 
 export default function Integrations() {

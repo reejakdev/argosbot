@@ -46,7 +46,7 @@ export default function Ticker() {
             <span
               key={i}
               className="inline-block mx-6 font-mono text-xs tracking-widest"
-              style={{ color: phrase.startsWith('◆') ? '#5b6cf8' : '#888888' }}
+              style={{ color: phrase.startsWith('◆') ? '#5b6cf8' : '#555555' }}
             >
               {phrase}
             </span>

@@ -161,13 +161,13 @@ export default function Privacy() {
                 border: '1px solid #e2e2e2',
               }}
             >
-              <div className="font-mono text-xs mb-2" style={{ color: '#888888' }}>Cloud model receives:</div>
+              <div className="font-mono text-xs mb-2" style={{ color: '#555555' }}>Cloud model receives:</div>
               <code className="text-xs leading-loose block" style={{ color: '#1a1a1a', fontFamily: 'JetBrains Mono, Courier New, monospace' }}>
                 <span style={{ color: '#5b6cf8' }}>[PERSON_1]</span> wants to send{' '}
                 <span style={{ color: '#5b6cf8' }}>[AMT_10K-100K_USDC]</span> to{' '}
                 <span style={{ color: '#5b6cf8' }}>[ADDR_1]</span>
                 <br />
-                via <span style={{ color: '#888888' }}>[NETWORK_1]</span>. Please draft a reply.
+                via <span style={{ color: '#555555' }}>[NETWORK_1]</span>. Please draft a reply.
               </code>
             </div>
           </motion.div>

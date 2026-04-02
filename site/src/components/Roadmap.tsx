@@ -117,7 +117,7 @@ function RoadmapColumn({
               size={13}
               style={{ color, flexShrink: 0, opacity: version === 'v1 — DONE' ? 1 : 0.4 }}
             />
-            <span style={{ color: version === 'v1 — DONE' ? '#1a1a1a' : '#888888' }}>{item}</span>
+            <span style={{ color: version === 'v1 — DONE' ? '#1a1a1a' : '#555555' }}>{item}</span>
           </motion.div>
         ))}
       </div>
@@ -173,7 +173,7 @@ export default function Roadmap() {
             title="Multi-user / Enterprise"
             version="v3 — FUTURE"
             items={v3Future}
-            color="#888888"
+            color="#555555"
             icon={Hexagon}
             index={2}
           />
