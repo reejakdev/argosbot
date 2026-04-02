@@ -12,13 +12,16 @@ interface LoginProps {
 
 type Method = 'webauthn' | 'totp';
 
-function YubiKeyIcon({ size = 48 }: { size?: number }) {
+function EyeIcon({ size = 48 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="8" y="18" width="32" height="20" rx="4" stroke="#4f6eff" strokeWidth="1.5" />
-      <rect x="14" y="24" width="8" height="8" rx="2" fill="rgba(79,110,255,0.2)" stroke="#4f6eff" strokeWidth="1.2" />
-      <circle cx="30" cy="28" r="3" fill="rgba(79,110,255,0.3)" stroke="#4f6eff" strokeWidth="1.2" />
-      <path d="M20 18V14a4 4 0 018 0v4" stroke="#4f6eff" strokeWidth="1.5" strokeLinecap="round" />
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M2 16 C6 8, 26 8, 30 16 C26 24, 6 24, 2 16 Z" stroke="#4f6eff" strokeWidth="1.2" fill="none" />
+      <circle cx="16" cy="16" r="6.5" stroke="#4f6eff" strokeWidth="1" fill="none" opacity="0.9" />
+      <circle cx="16" cy="16" r="4" stroke="#7b96ff" strokeWidth="0.8" fill="none" opacity="0.7" />
+      <circle cx="16" cy="16" r="2" fill="#4f6eff" />
+      <circle cx="16" cy="16" r="1" fill="white" opacity="0.9" />
+      <line x1="2" y1="16" x2="4.5" y2="16" stroke="#4f6eff" strokeWidth="0.8" opacity="0.5" />
+      <line x1="27.5" y1="16" x2="30" y2="16" stroke="#4f6eff" strokeWidth="0.8" opacity="0.5" />
     </svg>
   );
 }
@@ -86,25 +89,13 @@ export default function Login({ onLogin }: LoginProps) {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex flex-col items-center gap-3 mb-8">
-          <div
-            style={{
-              background: 'rgba(79,110,255,0.08)',
-              border: '1px solid rgba(79,110,255,0.2)',
-              borderRadius: '12px',
-              padding: '16px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <YubiKeyIcon size={40} />
-          </div>
+          <EyeIcon size={48} />
           <div
             style={{
               fontFamily: "'Inter', sans-serif",
-              fontSize: '1.5rem',
+              fontSize: '1.25rem',
               fontWeight: 700,
-              letterSpacing: '0.06em',
+              letterSpacing: '0.18em',
               color: '#0f1117',
             }}
           >
