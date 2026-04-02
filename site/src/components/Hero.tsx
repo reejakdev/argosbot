@@ -3,27 +3,27 @@ import { ArrowRight, GitBranch, Shield } from 'lucide-react'
 
 const channels = [
   { label: 'Telegram',  angle: -90,  color: '#4f6eff' },
-  { label: 'GitHub',    angle: -45,  color: '#3a56e8' },
-  { label: 'WhatsApp',  angle:   0,  color: '#059669' },
-  { label: 'Notion',    angle:  45,  color: '#3a56e8' },
-  { label: 'Discord',   angle:  90,  color: '#6366f1' },
-  { label: 'Linear',    angle: 135,  color: '#3a56e8' },
-  { label: 'Slack',     angle: 180,  color: '#d97706' },
-  { label: 'Web',       angle: 225,  color: '#4f6eff' },
-  { label: 'Email',     angle: 270,  color: '#059669' },
-  { label: 'Docs',      angle: 315,  color: '#4f6eff' },
+  { label: 'WhatsApp',  angle: -45,  color: '#059669' },
+  { label: 'Discord',   angle:   0,  color: '#6366f1' },
+  { label: 'Slack',     angle:  45,  color: '#d97706' },
+  { label: 'Email',     angle:  90,  color: '#059669' },
+  { label: 'GitHub',    angle: 135,  color: '#3a56e8' },
+  { label: 'Notion',    angle: 180,  color: '#3a56e8' },
+  { label: 'Linear',    angle: 225,  color: '#4f6eff' },
+  { label: 'Web',       angle: 270,  color: '#4f6eff' },
+  { label: 'Docs',      angle: 315,  color: '#3a56e8' },
 ]
 
 function HUDDiagram() {
-  const size = 320
+  const size = 380
   const cx   = size / 2
   const cy   = size / 2
-  const r1   = 108
-  const r2   = 70
-  const r3   = 38
+  const r1   = 118
+  const r2   = 76
+  const r3   = 40
 
   return (
-    <div className="relative mx-auto" style={{ width: size, height: size }}>
+    <div className="relative mx-auto" style={{ width: size, height: size, overflow: 'visible' }}>
       <svg
         width={size}
         height={size}
@@ -104,7 +104,7 @@ function HUDDiagram() {
             const rad    = (ch.angle * Math.PI) / 180
             const nx     = r1 * Math.cos(rad)
             const ny     = r1 * Math.sin(rad)
-            const labelR = r1 + 26
+            const labelR = r1 + 34
             const lx     = labelR * Math.cos(rad)
             const ly     = labelR * Math.sin(rad)
 
