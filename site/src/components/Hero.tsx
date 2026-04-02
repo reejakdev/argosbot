@@ -5,13 +5,11 @@ const channels = [
   { label: 'Telegram',  angle: -90,  color: '#4f6eff' },
   { label: 'WhatsApp',  angle: -45,  color: '#059669' },
   { label: 'Discord',   angle:   0,  color: '#6366f1' },
-  { label: 'Slack',     angle:  45,  color: '#d97706' },
-  { label: 'Email',     angle:  90,  color: '#059669' },
+  { label: 'Email',     angle:  45,  color: '#059669' },
+  { label: 'Slack',     angle:  90,  color: '#d97706' },
   { label: 'GitHub',    angle: 135,  color: '#3a56e8' },
   { label: 'Notion',    angle: 180,  color: '#3a56e8' },
   { label: 'Linear',    angle: 225,  color: '#4f6eff' },
-  { label: 'Web',       angle: 270,  color: '#4f6eff' },
-  { label: 'Docs',      angle: 315,  color: '#3a56e8' },
 ]
 
 function HUDDiagram() {
@@ -104,7 +102,7 @@ function HUDDiagram() {
             const rad    = (ch.angle * Math.PI) / 180
             const nx     = r1 * Math.cos(rad)
             const ny     = r1 * Math.sin(rad)
-            const labelR = r1 + 34
+            const labelR = r1 + (i % 2 === 0 ? 28 : 46)
             const lx     = labelR * Math.cos(rad)
             const ly     = labelR * Math.sin(rad)
 
