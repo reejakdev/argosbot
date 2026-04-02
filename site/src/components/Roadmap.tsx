@@ -9,11 +9,13 @@ const v1Done = [
   'Email IMAP + SMTP',
   'Discord Bot (Gateway WebSocket)',
   'Slack user-token + bot listener',
+  'Signal channel (signal-cli sidecar)',
   'Injection sanitizer',
   'Regex anonymizer',
   'LLM anonymizer (local model)',
   'Claude classifier',
   'Multi-provider LLM (15+ providers)',
+  'Streaming responses — token-by-token (Telegram + Slack)',
   'Planning with tool use',
   'Proposal queue + approval gateway',
   'WebAuthn / YubiKey + TOTP auth',
@@ -23,7 +25,12 @@ const v1Done = [
   'GitHub issues + PRs connector',
   'Google Drive connector',
   'EVM + Solana wallet + tx signing',
-  'Shell exec worker (whitelisted)',
+  'Shell exec worker (22 whitelisted cmds)',
+  'Vision / OCR — multimodal images in Telegram & WhatsApp',
+  'Voice I/O — Whisper transcription + TTS',
+  'SOUL.md — editable system prompt, hot-reload',
+  'Multi-agent — spawn_agent, 5 concurrent, depth 1',
+  'Knowledge graph — entity extraction + graph_search',
   'Browser automation (Puppeteer)',
   'Credentials worker (1Password)',
   'LanceDB vector search + hybrid',
@@ -37,17 +44,13 @@ const v1Done = [
 ]
 
 const v2Next = [
-  'Vision / OCR — multimodal images in Telegram & WhatsApp',
-  'Voice I/O — Whisper transcription + ElevenLabs TTS',
-  'SOUL.md — user-editable system prompt, hot-reload',
-  'Streaming responses — token-by-token in Telegram & Slack',
-  'Multi-agent orchestration — spawn_agent coordinator',
-  'Knowledge graph — entity extraction, relation queries',
-  'Signal channel adapter',
   'React Native / Expo mobile app',
   'macOS menu bar (Tauri)',
   'Proposal diff editor',
   'Knowledge base UI',
+  'FIDO2-bound execution token',
+  'Tamper-evident audit log (hash chain)',
+  'Cloudflare D1 + Pages deployment',
 ]
 
 const v3Future = [
@@ -121,9 +124,9 @@ function RoadmapColumn({
           >
             <Icon
               size={13}
-              style={{ color, flexShrink: 0, opacity: version === 'v1 — DONE' ? 1 : 0.4 }}
+              style={{ color, flexShrink: 0, opacity: version.includes('DONE') ? 1 : 0.4 }}
             />
-            <span style={{ color: version === 'v1 — DONE' ? '#1a1a1a' : '#555555' }}>{item}</span>
+            <span style={{ color: version.includes('DONE') ? '#1a1a1a' : '#555555' }}>{item}</span>
           </motion.div>
         ))}
       </div>
@@ -153,15 +156,15 @@ export default function Roadmap() {
             <span className="gradient-text">Shipped iteratively.</span>
           </h2>
           <p className="text-text2 max-w-2xl leading-relaxed">
-            v1 ships with the full privacy pipeline and 5 channels. Mobile and enterprise features follow.
-            Everything is open source and community-driven.
+            37 features shipped — channels, AI pipeline, vision, voice, shell, multi-agent, streaming.
+            Mobile and enterprise features are next. Open source, MIT.
           </p>
         </motion.div>
 
         <div className="grid md:grid-cols-3 gap-5">
           <RoadmapColumn
-            title="Core Pipeline"
-            version="v1 — DONE"
+            title="Full Stack"
+            version="v1 + v2 — DONE"
             items={v1Done}
             color="#16a34a"
             icon={CheckCircle2}
