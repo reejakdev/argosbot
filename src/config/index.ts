@@ -3,6 +3,8 @@ import path from 'path';
 import os from 'os';
 import { ConfigSchema, type Config } from './schema.js';
 import { createLogger } from '../logger.js';
+import { initSecretsStoreSync } from '../secrets/store.js';
+import { migrateSecretsFromRaw, resolveSecretRefs, redactSecretsForDisk } from '../secrets/migrate.js';
 
 const log = createLogger('config');
 
@@ -80,10 +82,25 @@ export function loadConfig(): Config {
   const configPath = process.env.CONFIG_PATH ?? '~/.argos/config.json';
   log.info(`Loading config from ${configPath}`);
 
+  // ── Init secrets store (sync file read, async keychain probe) ──────────────
+  const dataDir = resolvePath(process.env.DATA_DIR ?? '~/.argos');
+  initSecretsStoreSync(dataDir);
+
   const raw    = loadConfigFile(configPath);
   const merged = mergeEnv(raw as Record<string, unknown>);
 
-  const result = ConfigSchema.safeParse(merged);
+  // ── Migrate old format (actual values → secrets store + $REF in config) ───
+  const resolvedConfigPath = resolvePath(configPath);
+  const { cleaned, migrated } = migrateSecretsFromRaw(merged);
+  if (migrated > 0) {
+    fs.writeFileSync(resolvedConfigPath, JSON.stringify(cleaned, null, 2), { encoding: 'utf-8', mode: 0o600 });
+    log.info(`Migrated ${migrated} secret(s) from config.json → secrets store`);
+  }
+
+  // ── Resolve "$KEY" references → actual values before Zod parse ─────────────
+  const resolved = resolveSecretRefs(cleaned) as Record<string, unknown>;
+
+  const result = ConfigSchema.safeParse(resolved);
   if (!result.success) {
     log.error('Invalid config', result.error.format());
     throw new Error('Config validation failed. Check your ~/.argos/config.json');
@@ -143,7 +160,59 @@ export function patchConfig(patch: (cfg: Config) => void): void {
   if (!_config) throw new Error('Config not loaded');
   patch(_config);
   const configPath = resolvePath(process.env.CONFIG_PATH ?? '~/.argos/config.json');
-  fs.writeFileSync(configPath, JSON.stringify(_config, null, 2), 'utf-8');
+  // Strip actual secret values → "$KEY" refs before writing to disk
+  const forDisk = redactSecretsForDisk(_config);
+  fs.writeFileSync(configPath, JSON.stringify(forDisk, null, 2), { encoding: 'utf-8', mode: 0o600 });
+}
+
+/**
+ * Harden file permissions on all sensitive files in the data directory.
+ * - data dir itself   → 0700 (only owner can list/enter)
+ * - config.json       → 0600
+ * - secrets.json      → 0600
+ * - argos.db*         → 0600
+ * - telegram_session  → 0600
+ * - *.bak             → 0600
+ *
+ * Safe to call at every boot — silently skips files that don't exist.
+ */
+export function hardenDataDir(): void {
+  const dataDir = resolvePath(process.env.DATA_DIR ?? '~/.argos');
+
+  const sensitiveFiles = [
+    'config.json',
+    'secrets.json',
+    'secrets.json.tmp',
+    'argos.db',
+    'argos.db-shm',
+    'argos.db-wal',
+    'telegram_session',
+  ];
+
+  // chmod the directory itself to 0700 so other users can't list its contents
+  try { fs.chmodSync(dataDir, 0o700); } catch {}
+
+  for (const file of sensitiveFiles) {
+    const p = path.join(dataDir, file);
+    try { if (fs.existsSync(p)) fs.chmodSync(p, 0o600); } catch {}
+  }
+
+  // All other sensitive file patterns in the data dir root
+  try {
+    for (const entry of fs.readdirSync(dataDir)) {
+      const sensitive =
+        entry.includes('.bak')     ||  // config backups
+        entry.includes('session')  ||  // Telegram/WhatsApp session files
+        entry.includes('_key')     ||  // private key files
+        entry.endsWith('.pem')     ||  // TLS private keys
+        entry.endsWith('.key');        // generic key files
+      if (sensitive) {
+        try { fs.chmodSync(path.join(dataDir, entry), 0o600); } catch {}
+      }
+    }
+  } catch {}
+
+  log.debug('Data dir permissions hardened');
 }
 
 /** Ajoute un chat à la liste monitorée et persiste. */

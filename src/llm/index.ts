@@ -307,7 +307,7 @@ async function callAnthropicBearer(
   // First system block MUST be exact. Extra goes in second block (no cache_control).
   // Max 4 cache_control blocks total — use only on first system + last message.
   const systemBlocks: Array<{ type: string; text: string; cache_control?: { type: string } }> = [
-    { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude.", cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: 'You are Argos, a personal AI assistant.', cache_control: { type: 'ephemeral' } },
   ];
   if (systemMsg?.content) {
     // system is always a string in this path
@@ -383,7 +383,7 @@ async function callAnthropicBearer(
         const msg = evt.message as Record<string, unknown>;
         model = (msg.model as string) ?? model;
         const usage = msg.usage as Record<string, number>;
-        if (usage) inputTokens = usage.input_tokens ?? 0;
+        if (usage) inputTokens = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
       } else if (evt.type === 'content_block_delta') {
         const delta = evt.delta as Record<string, string>;
         if (delta?.type === 'text_delta') content += delta.text ?? '';
@@ -427,7 +427,7 @@ export async function callAnthropicBearerRaw(
   }
 
   const systemBlocks: Array<Record<string, unknown>> = [
-    { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude.", cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: 'You are Argos, a personal AI assistant.', cache_control: { type: 'ephemeral' } },
   ];
 
   // Merge system from body if present
@@ -496,7 +496,7 @@ export async function callAnthropicBearerRaw(
       const msg = evt.message as Record<string, unknown>;
       model = (msg.model as string) ?? model;
       const usage = msg.usage as Record<string, number>;
-      if (usage) inputTokens = usage.input_tokens ?? 0;
+      if (usage) inputTokens = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
     } else if (evt.type === 'content_block_start') {
       const block = evt.content_block as Record<string, unknown>;
       if (block.type === 'tool_use') {
@@ -905,7 +905,7 @@ async function* _streamAnthropicBearer(
   const nonSystem = messages.filter(m => m.role !== 'system');
 
   const systemBlocks: Array<{ type: string; text: string; cache_control?: { type: string } }> = [
-    { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude.", cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: 'You are Argos, a personal AI assistant.', cache_control: { type: 'ephemeral' } },
   ];
   if (systemMsg?.content) {
     systemBlocks.push({ type: 'text', text: systemMsg.content as string });

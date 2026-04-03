@@ -17,7 +17,7 @@
  */
 
 import 'dotenv/config';
-import { loadConfig, getDataDir } from './config/index.js';
+import { loadConfig, getDataDir, hardenDataDir } from './config/index.js';
 import { initDb, loadUlid, audit } from './db/index.js';
 import { setLogLevel, setAuditCallback, createLogger } from './logger.js';
 import { Anonymizer } from './privacy/anonymizer.js';
@@ -32,7 +32,7 @@ import { createEmailChannel } from './ingestion/channels/email.js';
 import { createSlackChannel } from './ingestion/channels/slack.js';
 import { createSlackBot } from './ingestion/channels/slack-bot.js';
 import { createDiscordChannel } from './ingestion/channels/discord.js';
-import { loadKnowledge, refreshStaleKnowledge } from './knowledge/index.js';
+import { loadKnowledge, refreshStaleKnowledge, reindexKnowledgeToVector } from './knowledge/index.js';
 import { startWebApp } from './webapp/server.js';
 import { pluginRegistry } from './plugins/registry.js';
 import { buildPrivacyLlmConfig } from './core/privacy.js';
@@ -51,6 +51,7 @@ async function boot() {
   // 1. Config
   const config = loadConfig();
   setLogLevel(config.logLevel);
+  hardenDataDir();
 
   // 2. DB
   const db = initDb(getDataDir());
@@ -278,6 +279,7 @@ async function boot() {
   }
 
   await loadKnowledge(config);
+  void reindexKnowledgeToVector(config);  // re-index existing docs into vector store (non-blocking)
 
   // Late-bind notification function.
   // Notifications push (proposals, alertes, heartbeat) → canal unique choisi via config.notifications.preferredChannel.

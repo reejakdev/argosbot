@@ -42,16 +42,15 @@ export async function indexDocument(doc: KnowledgeDocument, config: Config): Pro
     log.info(`Knowledge indexed: ${doc.name}`);
   }
 
-  // Vector index — only when embeddings are enabled and content is large
-  if (config.embeddings.enabled && doc.fullText) {
+  // Vector index — always index when embeddings are enabled (fullText for large docs, content for small ones)
+  if (config.embeddings.enabled) {
     try {
+      const textToIndex = doc.fullText ?? doc.content;
       const { chunkText, chunkCode, indexChunks } = await import('../vector/store.js');
-      // Use brace-aware chunker for TypeScript and JSON config files;
-      // fall back to line-based chunker for prose documents.
       const isCode = /\.(ts|js|json)$/.test(doc.key) || doc.tags?.includes('code');
       const chunks = isCode
-        ? chunkCode(doc.fullText, doc.key, doc.name, doc.tags ?? [])
-        : chunkText(doc.fullText, doc.key, doc.name, doc.tags ?? []);
+        ? chunkCode(textToIndex, doc.key, doc.name, doc.tags ?? [])
+        : chunkText(textToIndex, doc.key, doc.name, doc.tags ?? []);
       await indexChunks(chunks, config.embeddings);
     } catch (e) {
       log.warn(`Vector indexing failed for "${doc.name}": ${e}`);

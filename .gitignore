@@ -8,6 +8,10 @@ dist/
 .env
 .env.local
 .env.*.local
+secret.json
+secrets.json
+**/secret.json
+**/secrets.json
 
 # Argos data directory — local DB, sessions, config with secrets
 ~/.argos/
@@ -35,6 +39,9 @@ ARCHITECTURE.md
 # Logs
 *.log
 logs/
+
+# Voice temp files
+argos_voice_*
 
 # TypeScript incremental cache
 *.tsbuildinfo

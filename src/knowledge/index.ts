@@ -151,6 +151,46 @@ export async function refreshStaleKnowledge(config: Config): Promise<void> {
   }
 }
 
+// ─── Re-index existing memories → vector store ────────────────────────────────
+
+/**
+ * Reads all context memories from SQLite and indexes them into the vector store.
+ * Called at boot to ensure existing knowledge is searchable via semantic_search.
+ * Does NOT re-fetch from external sources.
+ */
+export async function reindexKnowledgeToVector(config: Config): Promise<void> {
+  if (!config.embeddings.enabled) return;
+
+  try {
+    const { getDb } = await import('../db/index.js');
+    const { chunkText, chunkCode, indexChunks } = await import('../vector/store.js');
+    const db = getDb();
+
+    const rows = db.prepare(
+      `SELECT source_ref, content FROM memories WHERE category = 'context' AND archived = 1`,
+    ).all() as Array<{ source_ref: string; content: string }>;
+
+    if (!rows.length) return;
+    log.info(`Re-indexing ${rows.length} knowledge doc(s) to vector store…`);
+
+    for (const row of rows) {
+      try {
+        const isCode = /\.(ts|js|json)$/.test(row.source_ref);
+        const chunks = isCode
+          ? chunkCode(row.content, row.source_ref, row.source_ref, [])
+          : chunkText(row.content, row.source_ref, row.source_ref, []);
+        await indexChunks(chunks, config.embeddings);
+      } catch (e) {
+        log.warn(`Vector re-index failed for "${row.source_ref}": ${e}`);
+      }
+    }
+
+    log.info(`Vector re-index complete (${rows.length} docs)`);
+  } catch (e) {
+    log.warn(`reindexKnowledgeToVector failed: ${e}`);
+  }
+}
+
 // ─── Backward-compat ─────────────────────────────────────────────────────────
 
 /** @deprecated use loadKnowledge */

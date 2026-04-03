@@ -27,7 +27,7 @@ function readConfig(): Record<string, unknown> {
 }
 
 function saveConfig(data: Record<string, unknown>): void {
-  writeFileSync(getCfgPath(), JSON.stringify(data, null, 2), 'utf8');
+  writeFileSync(getCfgPath(), JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
 }
 
 // ─── /sources ─────────────────────────────────────────────────────────────────

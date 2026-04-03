@@ -147,11 +147,55 @@ export class TelegramChannel implements Channel {
     this.meId = BigInt((me as Api.User).id.toString());
     log.info(`Logged in as: ${(me as Api.User).firstName} (@${(me as Api.User).username})`);
 
-    // Register message listener
+    // Register message listener BEFORE catchUp so missed messages flow through
     this.client.addEventHandler(
       this.onNewMessage.bind(this),
       new NewMessage({}),
     );
+
+    // Replay updates missed while the process was down.
+    // gramjs tracks the server sequence point (pts) in the session — catchUp()
+    // fetches and dispatches any updates that arrived since last disconnect.
+    // Rate-limited: inject at most 1 missed message per second to avoid
+    // flooding the LLM pipeline (50 offline messages → 50s gentle replay).
+    try {
+      // Intercept the burst from catchUp by temporarily wrapping the handler
+      const originalHandler = this.messageHandler;
+      if (originalHandler) {
+        const queue: (() => Promise<void>)[] = [];
+        let draining = false;
+
+        // Replace handler temporarily to queue instead of processing immediately
+        this.messageHandler = async (msg) => {
+          queue.push(() => originalHandler(msg));
+          if (!draining) {
+            draining = true;
+            // Drain at 1 msg/s — gentle enough to not hit rate limits
+            const drain = async () => {
+              while (queue.length > 0) {
+                const task = queue.shift();
+                if (task) {
+                  await task().catch(e => log.warn('catchUp message processing error', e));
+                }
+                if (queue.length > 0) await new Promise(r => setTimeout(r, 1000));
+              }
+              draining = false;
+              // Restore normal (instant) handler once catchUp drain is done
+              this.messageHandler = originalHandler;
+              if (queue.length > 0) log.info(`Catch-up drain complete (${queue.length} remaining → processed above)`);
+            };
+            drain().catch(e => log.warn('catchUp drain error', e));
+          }
+        };
+      }
+
+      await this.client.catchUp();
+      log.info('Telegram catch-up triggered — replaying missed messages at ≤1/s');
+    } catch (e) {
+      // Non-fatal: if the session is fresh or pts is too old, Telegram may return
+      // an error. We continue listening from now.
+      log.warn('Telegram catch-up failed (non-fatal):', e instanceof Error ? e.message : String(e));
+    }
 
     log.info('Telegram user client started — listening to all chats');
   }

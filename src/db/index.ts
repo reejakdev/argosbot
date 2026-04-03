@@ -20,7 +20,10 @@ export function getDb(): Database.Database {
 
 export function initDb(dataDir: string): Database.Database {
   const resolved = resolvePath(dataDir);
-  fs.mkdirSync(resolved, { recursive: true });
+  fs.mkdirSync(resolved, { recursive: true, mode: 0o700 });
+
+  // Harden directory permissions in case it already existed with looser perms
+  try { fs.chmodSync(resolved, 0o700); } catch {}
 
   const dbPath = path.join(resolved, 'argos.db');
   log.info(`Opening database at ${dbPath}`);
@@ -29,6 +32,9 @@ export function initDb(dataDir: string): Database.Database {
   _db.pragma('journal_mode = WAL');
   _db.pragma('foreign_keys = ON');
   _db.pragma('synchronous = NORMAL');
+
+  // Harden DB file permissions — should only be readable by the owner
+  try { fs.chmodSync(dbPath, 0o600); } catch {}
 
   runMigrations(_db);
   log.info('Database ready');

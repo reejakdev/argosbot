@@ -649,9 +649,10 @@ const SecretsSchema = z.record(z.string()).default({});
 const VoiceSchema = z.object({
   enabled:           z.boolean().default(false),
   // Transcription
+  whisperBackend:    z.enum(['api', 'local']).default('local'),
   whisperEndpoint:   z.string().default('https://api.openai.com/v1'),
   whisperApiKey:     z.string().optional(),
-  whisperModel:      z.string().default('whisper-1'),
+  whisperModel:      z.string().default('base'),
   // TTS
   ttsEnabled:        z.boolean().default(false),
   ttsProvider:       z.enum(['openai', 'elevenlabs']).default('openai'),

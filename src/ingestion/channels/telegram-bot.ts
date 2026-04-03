@@ -137,6 +137,9 @@ export class TelegramBot {
       return;
     }
 
+    // Set lastChatId early — needed by defaultHandler for streaming/status msgs
+    this.lastChatId = chatId;
+
     // Handle file uploads (documents, photos)
     if (msg.document || msg.photo) {
       await this.handleFileUpload(msg, userId, chatId);
@@ -1048,34 +1051,11 @@ You are meeting this user for the first time. You MUST:
 5. Tell the user you saved their profile.`;
     }
 
-    // Fetch context sources (docs, GitHub, Notion — always included)
-    let contextDocs = '';
-    try {
-      const { getDb } = await import('../../db/index.js');
-      const db = getDb();
-      const docs = db.prepare(
-        "SELECT content FROM memories WHERE category = 'context' AND archived = 1 ORDER BY importance DESC LIMIT 5"
-      ).all() as Array<{ content: string }>;
-      if (docs.length > 0) {
-        // Truncate to avoid exceeding token limits
-        const maxChars = 6000;
-        let total = 0;
-        const truncated = docs.filter(d => {
-          if (total > maxChars) return false;
-          total += d.content.length;
-          return true;
-        });
-        contextDocs = '\n\n---\n## Reference documentation:\n' +
-          truncated.map(d => d.content.slice(0, 2000)).join('\n\n---\n');
-      }
-    } catch { /* db not ready */ }
-
-    // Fetch relevant memories (past conversations, facts)
+    // Fetch relevant memories (past conversations, facts) — context docs excluded (on-demand via semantic_search)
     let memoryContext = '';
     try {
       const { search } = await import('../../memory/store.js');
       const memories = search({ query: text, limit: 5 });
-      // Filter out context docs (already included above)
       const nonContext = memories.filter(m => String(m.category) !== 'context');
       if (nonContext.length > 0) {
         memoryContext = '\n\n---\n## Relevant memories:\n' +
@@ -1083,8 +1063,8 @@ You are meeting this user for the first time. You MUST:
       }
     } catch { /* memory not initialized */ }
 
-    // Build messages with compaction context + docs
-    const messages = buildMessagesWithCompaction(systemPrompt, conv, contextDocs + memoryContext);
+    // Build messages with compaction context
+    const messages = buildMessagesWithCompaction(systemPrompt, conv, memoryContext);
 
     // Call LLM with tool loop (builtin tools + MCP tools)
     const { BUILTIN_TOOLS, executeBuiltinTool } = await import('../../llm/builtin-tools.js');
@@ -1198,9 +1178,8 @@ You are meeting this user for the first time. You MUST:
       allTools, combinedExecutor, providerRaw, onEvent,
     );
 
-    // Clean up any remaining status/stream bubbles
+    // Delete only the status/tool bubble (not the stream bubble — we'll edit it in place)
     if (statusMsgId) await this.api('deleteMessage', { chat_id: chatId, message_id: statusMsgId }).catch(() => {});
-    if (streamMsgId) await this.api('deleteMessage', { chat_id: chatId, message_id: streamMsgId }).catch(() => {});
 
     // Auto-save user.md if present in response
     const userMdMatch = response.content.match(/```user\.md\n([\s\S]*?)```/);
@@ -1230,9 +1209,18 @@ You are meeting this user for the first time. You MUST:
 
     const displayContent = finalContent + footer;
 
-    // If streaming already sent the message, just do a final edit with complete content + footer
-    // Otherwise send fresh
-    await this.sendMessage(chatId, displayContent);
+    // Final render: edit stream bubble in place (no flicker) or send fresh if no stream bubble
+    if (streamMsgId) {
+      const edited = await this.api('editMessageText', {
+        chat_id: chatId,
+        message_id: streamMsgId,
+        text: displayContent,
+        parse_mode: 'Markdown',
+      }).catch(() => null);
+      if (!edited) await this.sendMessage(chatId, displayContent);
+    } else {
+      await this.sendMessage(chatId, displayContent);
+    }
 
     // Signal to handleUpdate that the reply was already sent
     return '';

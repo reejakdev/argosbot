@@ -12,6 +12,8 @@ import path from 'path';
 import os from 'os';
 import readline from 'readline';
 import { createInterface } from 'readline';
+import { initSecretsStoreSync } from '../secrets/store.js';
+import { migrateSecretsFromRaw } from '../secrets/migrate.js';
 
 // ─── ANSI helpers ─────────────────────────────────────────────────────────────
 
@@ -339,7 +341,14 @@ function readConfig(): Record<string, unknown> {
 
 function writeConfig(config: Record<string, unknown>): void {
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 });
+
+  // ── Extract secrets → secrets.json / keychain, replace with $KEY refs ─────
+  initSecretsStoreSync(DATA_DIR);
+  const { cleaned, migrated } = migrateSecretsFromRaw(config);
+  if (migrated > 0) {
+    console.log(`\n  ${'\x1b[32m'}✓${'\x1b[0m'}  ${migrated} secret(s) stored separately (not written to config.json)`);
+  }
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cleaned, null, 2), { mode: 0o600 });
 }
 
 /** Deep-get a nested config value: getPath(cfg, 'secrets.ANTHROPIC_API_KEY') */
@@ -1927,37 +1936,50 @@ async function stepVoice(config: Record<string, unknown>): Promise<void> {
   nl();
   console.log(rule('Whisper — speech-to-text'));
   nl();
-  info('Whisper is used to transcribe incoming voice messages.');
-  info('Default: OpenAI Whisper API (whisper-1). Compatible with any OpenAI-compatible endpoint.');
-  note('You can use a self-hosted Whisper server (e.g. faster-whisper) for full local transcription.');
+  info('Whisper transcribes voice messages. Three backends:');
+  info('  1. local  — whisper CLI on your machine (free, private, slower ~5-10s)');
+  info('  2. groq   — Groq API (free tier, ~1s, best for speed) ← recommended');
+  info('  3. openai — OpenAI API (paid, ~2s)');
   nl();
 
-  const useCustomWhisper = await confirm('Use a custom Whisper endpoint (self-hosted / Groq / etc.)?', false);
-  if (useCustomWhisper) {
-    note('Example: http://localhost:8080/v1');
-    const endpoint = await ask('Whisper endpoint URL');
-    voice.whisperEndpoint = endpoint.trim() || 'https://api.openai.com/v1';
-    ok(`Whisper endpoint: ${voice.whisperEndpoint}`);
-  } else {
+  const backendChoice = await ask('Backend? [local / groq / openai]', 'local');
+  const backend = (['local', 'groq', 'openai'].includes(backendChoice.trim().toLowerCase())
+    ? backendChoice.trim().toLowerCase() : 'local') as string;
+
+  voice.whisperBackend = backend === 'local' ? 'local' : 'api';
+
+  if (backend === 'groq') {
+    voice.whisperEndpoint = 'https://api.groq.com/openai/v1';
+    voice.whisperModel    = 'whisper-large-v3-turbo';
+    const groqKey = await askSecret('Groq API key (https://console.groq.com → free)');
+    if (groqKey.trim()) {
+      voice.whisperApiKey = groqKey.trim();
+      ok('Groq Whisper configured — ~1s transcription, free tier.');
+    } else {
+      warn('No Groq key — set GROQ_API_KEY in .env or re-run setup.');
+    }
+  } else if (backend === 'openai') {
     voice.whisperEndpoint = 'https://api.openai.com/v1';
-  }
-
-  const whisperKeyHint = useCustomWhisper ? '(leave blank if no auth required)' : '(sk-...)';
-  const whisperKey = await askSecret(`Whisper API key ${whisperKeyHint}`);
-  if (whisperKey.trim()) {
-    voice.whisperApiKey = whisperKey.trim();
-    ok('Whisper API key saved.');
-  } else if (!useCustomWhisper) {
-    warn('No Whisper API key — transcription will fail unless you set WHISPER_API_KEY in .env');
+    voice.whisperModel    = 'whisper-1';
+    const openaiKey = await askSecret('OpenAI API key (sk-...)');
+    if (openaiKey.trim()) {
+      voice.whisperApiKey = openaiKey.trim();
+      ok('OpenAI Whisper configured.');
+    } else {
+      warn('No OpenAI key — set OPENAI_API_KEY in .env or re-run setup.');
+    }
   } else {
-    note('No API key — assuming endpoint requires no auth.');
+    // local
+    voice.whisperModel = 'base';
+    note('Using local whisper CLI. Install: pip install openai-whisper');
+    note('Models: tiny (fastest) | base (good balance) | small/medium/large (more accurate)');
+    const localModel = await ask('Whisper model (default: base)', 'base');
+    voice.whisperModel = localModel.trim() || 'base';
+    ok(`Local whisper configured — model: ${voice.whisperModel}. First run will download the model (~140MB for base).`);
   }
-
-  const whisperModel = await ask('Whisper model (default: whisper-1)', 'whisper-1');
-  voice.whisperModel = whisperModel.trim() || 'whisper-1';
 
   nl();
-  ok(`Whisper configured → ${voice.whisperEndpoint} (model: ${voice.whisperModel})`);
+  ok(`Voice backend: ${backend} | model: ${voice.whisperModel}`);
 
   // ── TTS ─────────────────────────────────────────────────────────────────────
   nl();
