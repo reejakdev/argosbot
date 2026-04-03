@@ -129,7 +129,7 @@ async function getTable() {
 // ─── Chunking ─────────────────────────────────────────────────────────────────
 
 const CHUNK_LINES   = 40;  // ~one network+token section per chunk for address files
-const OVERLAP_LINES = 15; // large overlap so parent keys (e.g. "mBASIS: {") stay in scope
+const OVERLAP_LINES = 15; // large overlap so parent keys (e.g. "TokenB: {") stay in scope
 const CODE_CHUNK_MAX_LINES = 80; // guard against monster depth-2 blocks
 
 export function chunkText(
@@ -173,8 +173,8 @@ export function chunkText(
  *
  * Splits at depth-2 boundaries so each (network, token) pair becomes one
  * self-contained chunk with a breadcrumb header:
- *   // ADDRESSES > mainnet > mBASIS
- *   mBASIS: { token: '0x...', depositVault: '0x...' }
+ *   // ADDRESSES > mainnet > TokenB
+ *   TokenB: { token: '0x...', depositVault: '0x...' }
  *
  * Auto-detects structured content (>8% lines with braces).
  * Falls back to chunkText() if structure is not recognised.
@@ -468,7 +468,7 @@ export async function keywordSearch(
   const table = await getTable();
 
   // Extract meaningful tokens — skip short words, strip non-alphanum, deduplicate.
-  // "Specific" = CamelCase or has digit — e.g. "mHyperBTC", "mTBILL", "0x1a2b"
+  // "Specific" = CamelCase or has digit — e.g. "TokenC", "TokenA", "0x1a2b"
   const isSpecific = (t: string) => /[A-Z]/.test(t.slice(1)) || /\d/.test(t);
   const tokens = [...new Set(
     query.split(/\s+/)

@@ -254,9 +254,9 @@ describe('owner — quick memo to self', () => {
       chatName:    'Saved Messages',
       chatType:    'dm',
       senderId:    'owner-001',
-      senderName:  'Emeric',
-      partnerName: 'Emeric',
-      content:     'Reminder: call broker about mBASIS allocation before Thursday',
+      senderName:  'Alice',
+      partnerName: 'Alice',
+      content:     'Reminder: call broker about TokenB allocation before Thursday',
       timestamp:   Date.now(),
     });
     await ingestMessage(msg, llmConfig, null, config, anonymizer, windowManager);

@@ -45,6 +45,11 @@ logs/
 # Voice temp files
 argos_voice_*
 
+# Personal debug scripts (not for public repo)
+src/scripts/test-*.ts
+src/scripts/test-chunks-*.ts
+src/scripts/index-doc.ts
+
 # TypeScript incremental cache
 *.tsbuildinfo
 

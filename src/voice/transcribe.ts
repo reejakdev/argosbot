@@ -1,7 +1,7 @@
 import { createLogger } from '../logger.js';
 import { spawn } from 'child_process';
-import { writeFileSync, unlinkSync, existsSync, readFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { writeFileSync, unlinkSync, existsSync, readFileSync, mkdirSync } from 'fs';
+import { homedir } from 'os';
 import { join } from 'path';
 
 const log = createLogger('voice');
@@ -39,8 +39,10 @@ export async function transcribeAudio(
 async function transcribeLocal(buffer: Buffer, filename: string, model: string): Promise<string> {
   if (buffer.length > 100 * 1024 * 1024) throw new Error('Audio too large (max 100MB for local)');
 
-  // Write audio to a temp file (whisper CLI needs a file path)
-  const tmpFile = join(tmpdir(), `argos_voice_${Date.now()}_${filename}`);
+  // Write audio to ~/.argos/voice/ — keeps temp files out of source tree
+  const voiceDir = join(homedir(), '.argos', 'voice');
+  mkdirSync(voiceDir, { recursive: true });
+  const tmpFile = join(voiceDir, `argos_voice_${Date.now()}_${filename}`);
   try {
     writeFileSync(tmpFile, buffer);
 
@@ -49,10 +51,13 @@ async function transcribeLocal(buffer: Buffer, filename: string, model: string):
       const check = spawn('which', ['whisper']);
       check.on('close', (code) => res(code === 0));
     });
-    const outDir  = tmpdir();
+    const outDir  = voiceDir;  // whisper writes output to ~/.argos/voice/
     // whisper names output as <stem>.txt — derive it from the input filename
     const stem    = tmpFile.replace(/\.[^.]+$/, '');   // strip last extension
-    const outFile = join(outDir, stem.split('/').pop()! + '.txt');
+    const baseName = stem.split('/').pop()! + '.txt';
+    const outFile  = join(outDir, baseName);
+    // whisper sometimes ignores --output_dir — spawn it with cwd=voiceDir so CWD writes land there too
+    const cwdOutFile = join(voiceDir, baseName);
 
     const cmd  = whisperInPath ? 'whisper' : 'python3';
     const baseArgs = [
@@ -67,7 +72,7 @@ async function transcribeLocal(buffer: Buffer, filename: string, model: string):
       : ['-m', 'whisper', tmpFile, ...baseArgs];
 
     const transcript = await new Promise<string>((resolve, reject) => {
-      const proc = spawn(cmd, args, { timeout: 120_000 });
+      const proc = spawn(cmd, args, { timeout: 120_000, cwd: voiceDir });
 
       let stdout = '';
       let stderr = '';
@@ -79,9 +84,13 @@ async function transcribeLocal(buffer: Buffer, filename: string, model: string):
           reject(new Error(`whisper exited ${code}: ${stderr.slice(0, 300)}`));
           return;
         }
-        if (existsSync(outFile)) {
-          const text = readFileSync(outFile, 'utf8').trim();
-          try { unlinkSync(outFile); } catch { /* ignore */ }
+        // whisper may write to --output_dir or CWD — check both
+        const actualOut = existsSync(outFile) ? outFile : existsSync(cwdOutFile) ? cwdOutFile : null;
+        if (actualOut) {
+          const text = readFileSync(actualOut, 'utf8').trim();
+          try { unlinkSync(actualOut); } catch { /* ignore */ }
+          // Also clean CWD if different
+          if (actualOut !== cwdOutFile) try { unlinkSync(cwdOutFile); } catch { /* ignore */ }
           resolve(text || stdout.trim());
         } else {
           // fallback: stdout may contain the transcript

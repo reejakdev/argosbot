@@ -98,6 +98,8 @@ export class TelegramChannel implements Channel {
   private meId: bigint | null = null;
   // chatId → last notification timestamp (avoid spamming same unknown chat)
   private unknownChatCooldown = new Map<string, number>();
+  // True while catch-up is draining — unknown chats are silently skipped
+  private isCatchingUp = false;
 
   constructor(
     private apiId: number,
@@ -154,43 +156,38 @@ export class TelegramChannel implements Channel {
     );
 
     // Replay updates missed while the process was down.
-    // gramjs tracks the server sequence point (pts) in the session — catchUp()
-    // fetches and dispatches any updates that arrived since last disconnect.
-    // Rate-limited: inject at most 1 missed message per second to avoid
-    // flooding the LLM pipeline (50 offline messages → 50s gentle replay).
+    // Rate-limited: at most CATCHUP_MAX messages, one every CATCHUP_INTERVAL_MS.
+    // If more messages arrived, we keep only the most recent CATCHUP_MAX.
+    const CATCHUP_MAX         = 20;
+    const CATCHUP_INTERVAL_MS = 5_000; // 5s between messages → max 20 calls over ~100s
     try {
-      // Intercept the burst from catchUp by temporarily wrapping the handler
       const originalHandler = this.messageHandler;
       if (originalHandler) {
         const queue: (() => Promise<void>)[] = [];
         let draining = false;
+        this.isCatchingUp = true;
 
-        // Replace handler temporarily to queue instead of processing immediately
         this.messageHandler = async (msg) => {
+          if (queue.length >= CATCHUP_MAX) queue.shift(); // drop oldest, keep recent
           queue.push(() => originalHandler(msg));
           if (!draining) {
             draining = true;
-            // Drain at 1 msg/s — gentle enough to not hit rate limits
             const drain = async () => {
               while (queue.length > 0) {
                 const task = queue.shift();
-                if (task) {
-                  await task().catch(e => log.warn('catchUp message processing error', e));
-                }
-                if (queue.length > 0) await new Promise(r => setTimeout(r, 1000));
+                if (task) await task().catch(e => log.warn('catchUp message error', e));
+                if (queue.length > 0) await new Promise(r => setTimeout(r, CATCHUP_INTERVAL_MS));
               }
               draining = false;
-              // Restore normal (instant) handler once catchUp drain is done
+              this.isCatchingUp = false;
               this.messageHandler = originalHandler;
-              if (queue.length > 0) log.info(`Catch-up drain complete (${queue.length} remaining → processed above)`);
             };
             drain().catch(e => log.warn('catchUp drain error', e));
           }
         };
       }
 
-      await this.client.catchUp();
-      log.info('Telegram catch-up triggered — replaying missed messages at ≤1/s');
+      log.info(`Telegram catch-up armed — up to ${CATCHUP_MAX} messages at 1 per ${CATCHUP_INTERVAL_MS / 1000}s`);
     } catch (e) {
       // Non-fatal: if the session is fresh or pts is too old, Telegram may return
       // an error. We continue listening from now.
@@ -343,6 +340,12 @@ export class TelegramChannel implements Channel {
       return;
     }
 
+    // During catch-up replay, silently skip unknown chats — no LLM calls, no proposals
+    if (this.isCatchingUp) {
+      log.debug(`[catch-up] skipping unknown chat ${chatId}`);
+      return;
+    }
+
     // Cooldown: notify at most once per hour per unknown chat
     const COOLDOWN_MS = 60 * 60 * 1000;
     const last = this.unknownChatCooldown.get(chatId) ?? 0;
@@ -404,10 +407,14 @@ export class TelegramChannel implements Channel {
 
     audit('partner_discovered', proposalId, 'discovery', { chatId, displayName, isGroup });
 
-    await requestApproval(proposal);
+    try {
+      await requestApproval(proposal);
+    } catch (e) {
+      log.warn(`Unknown chat discovery: could not send approval notification (${e instanceof Error ? e.message : String(e)}) — proposal saved in web app`);
+    }
 
     // Informational notification only — no actionable command
-    await this.sendToApprovalChat([
+    try { await this.sendToApprovalChat([
       `📥 *Nouveau chat détecté : ${displayName}*`,
       ``,
       `Type : ${isGroup ? 'groupe' : 'DM'} · ID : \`${chatId}\``,
@@ -415,7 +422,9 @@ export class TelegramChannel implements Channel {
       ``,
       `Une proposition a été créée dans la web app.`,
       `Approuve pour suivre ce chat, ou /ignore-chat ${chatId} pour ignorer.`,
-    ].join('\n'));
+    ].join('\n')); } catch (e) {
+      log.warn(`Unknown chat discovery: Telegram notification failed (${e instanceof Error ? e.message : String(e)})`);
+    }
 
     log.info(`Unknown chat discovered: ${displayName} (${chatId}) — proposal ${proposalId} created`);
   }

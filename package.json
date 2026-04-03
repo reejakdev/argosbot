@@ -1,7 +1,16 @@
 {
   "name": "argos",
   "version": "0.1.0",
-  "description": "Argos — fintech AI assistant, local-first, privacy-preserving, human-approved",
+  "description": "Argos — local-first AI assistant, privacy-preserving, human-approved",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/argos-ai/argos"
+  },
+  "homepage": "https://github.com/argos-ai/argos#readme",
+  "bugs": {
+    "url": "https://github.com/argos-ai/argos/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",

@@ -62,9 +62,9 @@ describe('storeQuick', () => {
 
 describe('search', () => {
   it('finds a stored memory by keyword', () => {
-    storeQuick('mTBILL redemption vault address needed', 'task', ['copper']);
-    const results = search({ query: 'mTBILL redemption vault' });
-    expect(results.some(r => r.content.includes('mTBILL'))).toBe(true);
+    storeQuick('TokenA redemption vault address needed', 'task', ['copper']);
+    const results = search({ query: 'TokenA redemption vault' });
+    expect(results.some(r => r.content.includes('TokenA'))).toBe(true);
   });
 
   it('returns empty array for unmatched query', () => {

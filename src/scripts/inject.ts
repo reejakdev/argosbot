@@ -7,7 +7,7 @@
  * Usage:
  *   npx tsx src/scripts/inject.ts
  *   npx tsx src/scripts/inject.ts --partner "Alice" --chat "1234567" --channel telegram
- *   npx tsx src/scripts/inject.ts --msg "Can you send me the mHyperBTC address?"
+ *   npx tsx src/scripts/inject.ts --msg "Can you send me the contract address?"
  *   npx tsx src/scripts/inject.ts --flush   # force-close current window and run planner
  *
  * The window closes automatically after --window-ms (default: 5000ms) of inactivity,

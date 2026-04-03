@@ -12,7 +12,7 @@ import path from 'path';
 import os from 'os';
 import readline from 'readline';
 import { createInterface } from 'readline';
-import { initSecretsStoreSync } from '../secrets/store.js';
+import { initSecretsStoreSync, getAllSecretsSync } from '../secrets/store.js';
 import { migrateSecretsFromRaw } from '../secrets/migrate.js';
 
 // ─── ANSI helpers ─────────────────────────────────────────────────────────────
@@ -243,18 +243,43 @@ async function multiSelect(
     const N = options.length;
     const checked = options.map(o => !!o.checked);
 
+    // Viewport: show at most PAGE_SIZE rows so we never exceed terminal height
+    const termRows = process.stdout.rows ?? 24;
+    const PAGE_SIZE = Math.max(5, Math.min(N, termRows - 6)); // leave 6 rows for header/footer/padding
+    let viewStart = 0; // first visible item index
+
+    const scrollViewport = () => {
+      // Keep cursor within viewport, scrolling as needed
+      if (idx < viewStart) viewStart = idx;
+      if (idx >= viewStart + PAGE_SIZE) viewStart = idx - PAGE_SIZE + 1;
+    };
+
     const render = (first: boolean) => {
-      if (!first) process.stdout.write(`\x1b[${N}A`);
-      for (let i = 0; i < N; i++) {
+      const rows = Math.min(PAGE_SIZE, N);
+      if (!first) {
+        // Move cursor up by previously rendered rows + 1 (the scroll indicator line)
+        process.stdout.write(`\x1b[${rows + 1}A`);
+      }
+
+      for (let vi = 0; vi < rows; vi++) {
+        const i = viewStart + vi;
         const active = i === idx;
         const cursor = active ? `${c.cyan}❯${c.reset}` : ' ';
-        const box    = checked[i] ? `${c.green}◼${c.reset}` : `${c.gray}◻${c.reset}`;
+        const chk    = checked[i] ? `${c.green}◼${c.reset}` : `${c.gray}◻${c.reset}`;
         const label  = active
           ? `${c.bold}${c.white}${options[i].label}${c.reset}`
           : `${c.gray}${options[i].label}${c.reset}`;
         const hint   = options[i].hint ? `  ${c.dim}${options[i].hint}${c.reset}` : '';
-        process.stdout.write(`\r\x1b[2K  ${cursor} ${box}  ${label}${hint}\n`);
+        process.stdout.write(`\r\x1b[2K  ${cursor} ${chk}  ${label}${hint}\n`);
       }
+
+      // Scroll indicator line
+      const countSelected = checked.filter(Boolean).length;
+      const scrollInfo = N > PAGE_SIZE
+        ? `${c.gray}  ${idx + 1}/${N}  ↑↓ scroll${c.reset}`
+        : `${c.gray}  ${N} items${c.reset}`;
+      const selInfo = countSelected > 0 ? `  ${c.green}${countSelected} selected${c.reset}` : '';
+      process.stdout.write(`\r\x1b[2K${scrollInfo}${selInfo}\n`);
     };
 
     process.stdout.write(`\n  ${c.cyan}?${c.reset}  ${c.bold}${question}${c.reset}  ${c.gray}(↑↓ move, Space toggle, Enter confirm, Esc back)${c.reset}\n\n`);
@@ -264,10 +289,13 @@ async function multiSelect(
     process.stdin.setRawMode?.(true);
     process.stdin.resume();
 
+    const renderedRows = () => Math.min(PAGE_SIZE, N) + 1; // rows + indicator
+
     const cleanup = () => {
-      process.stdout.write(`\x1b[${N}A`);
-      for (let i = 0; i < N; i++) process.stdout.write(`\x1b[K\n`);
-      process.stdout.write(`\x1b[${N}A`);
+      const rows = renderedRows();
+      process.stdout.write(`\x1b[${rows}A`);
+      for (let i = 0; i < rows; i++) process.stdout.write(`\x1b[2K\n`);
+      process.stdout.write(`\x1b[${rows}A`);
     };
 
     let escTimer: ReturnType<typeof setTimeout> | null = null;
@@ -277,10 +305,12 @@ async function multiSelect(
       if (key === '\x1b[A') {
         if (escTimer) { clearTimeout(escTimer); escTimer = null; }
         idx = (idx - 1 + N) % N;
+        scrollViewport();
         render(false);
       } else if (key === '\x1b[B') {
         if (escTimer) { clearTimeout(escTimer); escTimer = null; }
         idx = (idx + 1) % N;
+        scrollViewport();
         render(false);
       } else if (key === '\x1b[C' || key === '\x1b[D') {
         if (escTimer) { clearTimeout(escTimer); escTimer = null; }
@@ -764,9 +794,35 @@ async function stepApiKeys(total: number, config: Record<string, unknown>): Prom
 
     // Auto-detect user ID by listening for /start on the bot
     nl();
-    info('Now send /start to your bot on Telegram.');
-    const spin = spinner('Waiting for /start from your Telegram…');
+    console.log(box([
+      `${c.bold}Open Telegram on your phone or desktop${c.reset}`,
+      `Search for your bot by username and send it:  ${c.cyan}/start${c.reset}`,
+      '',
+      `${c.gray}The poll runs directly against api.telegram.org —${c.reset}`,
+      `${c.gray}Argos does NOT need to be running for this to work.${c.reset}`,
+      '',
+      `${c.dim}Press Enter at any time to skip and enter your ID manually.${c.reset}`,
+    ]));
+    nl();
 
+    // Set raw mode so we can detect a keypress without waiting for Enter
+    let skipPressed = false;
+    const stdinForSkip = process.stdin;
+    const wasRaw = stdinForSkip.isRaw ?? false;
+    try {
+      stdinForSkip.setRawMode(true);
+    } catch { /* non-TTY — skip keypress detection */ }
+    stdinForSkip.resume();
+    const onKey = (chunk: Buffer) => {
+      // Enter (0x0d / 0x0a) or 's' or 'q' → skip
+      const b = chunk[0];
+      if (b === 0x0d || b === 0x0a || b === 0x73 || b === 0x71 || b === 0x03) {
+        skipPressed = true;
+      }
+    };
+    stdinForSkip.on('data', onKey);
+
+    const spin = spinner('Waiting for /start  (press Enter to skip)…');
     let detectedChatId: string | null = null;
     const timeout = 120_000; // 2 min
     const start = Date.now();
@@ -778,9 +834,9 @@ async function stepApiKeys(total: number, config: Record<string, unknown>): Prom
       await clearRes.json();
     } catch { /* ignore */ }
 
-    while (!detectedChatId && Date.now() - start < timeout) {
+    while (!detectedChatId && !skipPressed && Date.now() - start < timeout) {
       try {
-        const res = await fetch(pollUrl, { signal: AbortSignal.timeout(10_000) });
+        const res = await fetch(pollUrl, { signal: AbortSignal.timeout(6_000) });
         const data = await res.json() as {
           ok: boolean;
           result: Array<{
@@ -811,12 +867,20 @@ async function stepApiKeys(total: number, config: Record<string, unknown>): Prom
       } catch { /* retry */ }
     }
 
+    // Restore stdin state
+    stdinForSkip.off('data', onKey);
+    try {
+      stdinForSkip.setRawMode(wasRaw);
+    } catch { /* ignore */ }
+
     if (detectedChatId) {
       spin.stop(true, `Detected your Telegram ID: ${detectedChatId}`);
       setPath(config, 'telegram.approvalChatId', detectedChatId);
     } else {
-      spin.stop(false, 'Timeout — no /start received');
-      const manualId = await ask('Enter your Telegram user ID manually');
+      spin.stop(false, skipPressed ? 'Skipped — enter ID manually' : 'Timeout — no /start received');
+      nl();
+      info(`To find your Telegram user ID: message @userinfobot on Telegram — it replies with your numeric ID.`);
+      const manualId = await ask('Your Telegram user ID');
       if (manualId) setPath(config, 'telegram.approvalChatId', manualId);
     }
     ok('Telegram Bot configured');
@@ -1218,10 +1282,19 @@ function stepDataDir(total: number): void {
 // ─── Step 4: Telegram auth ────────────────────────────────────────────────────
 
 async function stepTelegramAuth(total: number, config: Record<string, unknown>): Promise<void> {
-  const secrets = (config.secrets ?? {}) as Record<string, string>;
+  // Resolve actual values from secrets store (handles both old plain-text and new $REF format)
+  initSecretsStoreSync(DATA_DIR);
+  const store = getAllSecretsSync();
+
+  const secretsBlock = (config.secrets ?? {}) as Record<string, string>;
+  const resolve = (val: string | undefined): string | undefined =>
+    val?.startsWith('$') ? store[val.slice(1)] : val;
+
+  const apiId   = resolve(secretsBlock.TELEGRAM_API_ID)   ?? store['TELEGRAM_API_ID'];
+  const apiHash = resolve(secretsBlock.TELEGRAM_API_HASH) ?? store['TELEGRAM_API_HASH'];
 
   // Skip entirely if Telegram MTProto was not configured
-  if (!secrets.TELEGRAM_API_ID || !secrets.TELEGRAM_API_HASH) {
+  if (!apiId || !apiHash) {
     skip('Telegram authentication', 'MTProto not configured — skipping');
     return;
   }
@@ -1229,8 +1302,8 @@ async function stepTelegramAuth(total: number, config: Record<string, unknown>):
   stepHeader(4, total, 'Telegram authentication');
 
   // Inject into process.env for the Telegram client
-  process.env.TELEGRAM_API_ID   = secrets.TELEGRAM_API_ID;
-  process.env.TELEGRAM_API_HASH = secrets.TELEGRAM_API_HASH;
+  process.env.TELEGRAM_API_ID   = apiId;
+  process.env.TELEGRAM_API_HASH = apiHash;
 
   const sessionFile = path.join(DATA_DIR, 'telegram_session');
 
@@ -2567,7 +2640,8 @@ function stepSummary(total: number): void {
     `  ${c.bold}${c.green}Argos is configured.${c.reset}`,
     '',
     `  ${c.cyan}Start:${c.reset}`,
-    `     ${c.bold}npm run dev${c.reset}`,
+    `     ${c.bold}npm start${c.reset}  ${c.gray}(production)${c.reset}`,
+    `     ${c.dim}npm run dev  — dev mode with hot reload${c.reset}`,
     '',
     `  ${c.cyan}Register your YubiKey:${c.reset}`,
     `     Open  ${c.bold}http://localhost:${port}/setup${c.reset}`,
@@ -2635,10 +2709,59 @@ async function main(): Promise<void> {
     'Write config',
   ];
 
+  // ── CLI flag: npm run setup -- --step 4  (1-based) ──────────────────────────
+  const stepArg = process.argv.find(a => a.startsWith('--step=') || a === '--step');
+  const stepArgVal = stepArg?.includes('=')
+    ? stepArg.split('=')[1]
+    : process.argv[process.argv.indexOf('--step') + 1];
+  const cliStep = stepArgVal ? parseInt(stepArgVal, 10) - 1 : -1;
+
+  if (cliStep >= 0) {
+    note(`Steps:  ${STEP_NAMES.map((n, i) => `${i + 1}. ${n}`).join('  |  ')}`);
+    nl();
+    if (cliStep >= STEP_NAMES.length) {
+      fail(`Step ${cliStep + 1} does not exist (max: ${STEP_NAMES.length})`);
+      process.exit(1);
+    }
+    const config = readConfig();
+    const steps: WizardStep[] = [
+      { name: STEP_NAMES[0], run: (total, cfg) => stepApiKeys(total, cfg) },
+      { name: STEP_NAMES[1], run: (total, cfg) => stepWebApp(total, cfg) },
+      { name: STEP_NAMES[2], run: (total) => { stepDataDir(total); return Promise.resolve(); } },
+      { name: STEP_NAMES[3], run: (total, cfg) => stepTelegramAuth(total, cfg) },
+      { name: STEP_NAMES[4], run: async (total, cfg) => {
+        const aiConfig = await stepAiConfiguration(total) as Record<string, unknown>;
+        for (const [k, v] of Object.entries(aiConfig)) {
+          if (!['llm', 'webapp', 'secrets', 'channel'].includes(k)) cfg[k] = v;
+        }
+      }},
+      { name: STEP_NAMES[5], run: async (total, cfg) => {
+        await stepContextSources(cfg);
+        await stepMcpServers(cfg);
+        await stepSkills(cfg);
+        await stepWallet(cfg);
+        await stepAgents(cfg);
+        await stepNotifications(cfg);
+        await stepVoice(cfg);
+        await stepCloudflare(cfg);
+      }},
+      { name: STEP_NAMES[6], run: async (total, cfg) => {
+        await stepWriteConfig(cfg, total);
+        stepSummary(total);
+      }},
+    ];
+    ok(`Jumping to step ${cliStep + 1}: ${STEP_NAMES[cliStep]}`);
+    nl();
+    await runWizard(steps.slice(cliStep), config);
+    closeRl();
+    return;
+  }
+
   info('This wizard will:');
   STEP_NAMES.forEach((name, i) => note(`${i + 1}.  ${name}`));
   note('');
   note(`${c.gray}Press Esc at any prompt to go back to the previous step.${c.reset}`);
+  note(`${c.gray}Tip: npm run setup -- --step 4  jumps directly to a step.${c.reset}`);
   nl();
 
   // Load existing config or start fresh

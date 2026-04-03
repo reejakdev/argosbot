@@ -154,7 +154,7 @@ async function boot() {
       token:        personalToken,
       allowedUsers: tgPersonal.allowedUsers.length
         ? tgPersonal.allowedUsers
-        : approvalChatId !== 'me' ? [approvalChatId] : [],
+        : approvalChatId && approvalChatId !== 'me' ? [approvalChatId] : [],
       llmConfig,
       config,
       mtprotoChannel: telegramChannel ?? undefined,
@@ -269,9 +269,10 @@ async function boot() {
   writeSelfDoc(config);
 
   // Auto-inject built-in self-knowledge sources (no user config needed)
+  // NOTE: config.json is intentionally NOT indexed — it may contain $REF tokens
+  // and structural info already captured in argos-self.md. Never send raw config to LLM.
   const builtinSelf = { type: 'local' as const, name: 'Argos self', paths: ['~/.argos/argos-self.md'], refreshHours: 1 };
-  const builtinCfg  = { type: 'local' as const, name: 'Argos config', paths: ['~/.argos/config.json'], refreshHours: 1 };
-  const autoSources = [builtinSelf, builtinCfg].filter(
+  const autoSources = [builtinSelf].filter(
     a => !config.knowledge.sources.some(s => s.type === 'local' && (s as { name: string }).name === a.name),
   );
   if (autoSources.length) {

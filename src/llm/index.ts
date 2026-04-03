@@ -306,11 +306,12 @@ async function callAnthropicBearer(
 
   // First system block MUST be exact. Extra goes in second block (no cache_control).
   // Max 4 cache_control blocks total — use only on first system + last message.
+  // First system block MUST be this exact string — OAuth token is validated against Claude Code's format
   const systemBlocks: Array<{ type: string; text: string; cache_control?: { type: string } }> = [
-    { type: 'text', text: 'You are Argos, a personal AI assistant.', cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: 'You are Claude Code, Anthropic\'s official CLI for Claude.', cache_control: { type: 'ephemeral' } },
   ];
   if (systemMsg?.content) {
-    // system is always a string in this path
+    // Argos system prompt goes in the SECOND block (no cache_control on this one)
     systemBlocks.push({ type: 'text', text: systemMsg.content as string });
   }
 
@@ -427,7 +428,7 @@ export async function callAnthropicBearerRaw(
   }
 
   const systemBlocks: Array<Record<string, unknown>> = [
-    { type: 'text', text: 'You are Argos, a personal AI assistant.', cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: 'You are Claude Code, Anthropic\'s official CLI for Claude.', cache_control: { type: 'ephemeral' } },
   ];
 
   // Merge system from body if present
@@ -789,7 +790,7 @@ async function callProvider(
   }
 }
 
-/** Whether the error is retryable (server error, rate limit, timeout, network) */
+/** Whether the error is retryable (server error, timeout, network, rate limit) */
 function isRetryableError(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : String(e);
   return /\b(5\d\d|429|rate.limit|timeout|overloaded|ECONNREFUSED)/i.test(msg);
@@ -905,7 +906,7 @@ async function* _streamAnthropicBearer(
   const nonSystem = messages.filter(m => m.role !== 'system');
 
   const systemBlocks: Array<{ type: string; text: string; cache_control?: { type: string } }> = [
-    { type: 'text', text: 'You are Argos, a personal AI assistant.', cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: 'You are Claude Code, Anthropic\'s official CLI for Claude.', cache_control: { type: 'ephemeral' } },
   ];
   if (systemMsg?.content) {
     systemBlocks.push({ type: 'text', text: systemMsg.content as string });

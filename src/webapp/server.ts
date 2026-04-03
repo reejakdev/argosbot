@@ -306,7 +306,7 @@ function buildApi(
           db.prepare(
             "UPDATE approvals SET status = 'approved', responded_at = ? WHERE proposal_id = ? AND status = 'pending'"
           ).run(now, proposalId);
-          executionToken = generateExecutionToken(proposalId);
+          executionToken = generateExecutionToken(String(proposalId));
         }
         return r;
       })();

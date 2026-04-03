@@ -16,17 +16,17 @@ import type { WhitelistVerification } from '../core/whitelist-verifier.js';
 
 const makeVerif = (overrides: Partial<WhitelistVerification> = {}): WhitelistVerification => ({
   decision:  'APPROVE',
-  protocol:  'Midas Protocol',
+  protocol:  'Example Protocol',
   chain:     'Ethereum mainnet',
-  address:   '0xa8a5c4FF4c86a459EBbDC39c5BE77833B3A15d88',
-  reason:    'mBASIS depositVault',
+  address:   '0x5555555555555555555555555555555555555555',
+  reason:    'TokenB depositVault',
   summary:   'Address found in official Smart Contracts Registry.',
-  why:       'Exact match in docs.midas.app/resources/smart-contracts-addresses',
+  why:       'Exact match in docs.example.com/resources/smart-contracts',
   score:     0.90,
   sources:   {
-    docs:       'https://docs.midas.app/resources/smart-contracts-addresses',
-    website:    'https://midas.app',
-    matchPages: ['https://docs.midas.app/resources/smart-contracts-addresses'],
+    docs:       'https://docs.example.com/resources/smart-contracts',
+    website:    'https://example.com',
+    matchPages: ['https://docs.example.com/resources/smart-contracts'],
   },
   rawOutput: '',
   ...overrides,
@@ -59,14 +59,14 @@ describe('formatVerificationNotif', () => {
 
   it('includes docs URL when present', () => {
     const notif = formatVerificationNotif(makeVerif());
-    expect(notif).toContain('https://docs.midas.app');
+    expect(notif).toContain('https://docs.example.com');
   });
 
   it('includes match pages when found', () => {
     const notif = formatVerificationNotif(makeVerif({
       sources: {
-        docs:       'https://docs.midas.app/resources/smart-contracts-addresses',
-        matchPages: ['https://docs.midas.app/resources/smart-contracts-addresses'],
+        docs:       'https://docs.example.com/resources/smart-contracts-addresses',
+        matchPages: ['https://docs.example.com/resources/smart-contracts-addresses'],
       },
     }));
     expect(notif).toContain('Match:');

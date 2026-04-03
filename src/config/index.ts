@@ -36,7 +36,17 @@ function mergeEnv(config: Record<string, unknown>): Record<string, unknown> {
   const channels  = (config.channels as Record<string, unknown>) ?? {};
   const tgChannel = (channels.telegram as Record<string, unknown>) ?? {};
   const tgPersonal = (tgChannel.personal as Record<string, unknown>) ?? {};
-  if (process.env.TELEGRAM_BOT_TOKEN)      tgPersonal.botToken      = process.env.TELEGRAM_BOT_TOKEN;
+
+  // Migrate deprecated top-level telegram.* fields → channels.telegram.personal.*
+  const legacyTg = config.telegram as Record<string, unknown> | undefined;
+  if (legacyTg) {
+    if (legacyTg.approvalChatId && !tgPersonal.approvalChatId)
+      tgPersonal.approvalChatId = legacyTg.approvalChatId;
+    if (legacyTg.botToken && !tgPersonal.botToken)
+      tgPersonal.botToken = legacyTg.botToken;
+  }
+
+  if (process.env.TELEGRAM_BOT_TOKEN)        tgPersonal.botToken       = process.env.TELEGRAM_BOT_TOKEN;
   if (process.env.TELEGRAM_APPROVAL_CHAT_ID) tgPersonal.approvalChatId = process.env.TELEGRAM_APPROVAL_CHAT_ID;
   tgChannel.personal  = tgPersonal;
   channels.telegram   = tgChannel;

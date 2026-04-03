@@ -78,7 +78,7 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
       properties: {
         query:  { type: 'string', description: 'What you are looking for (natural language)' },
         top_k:  { type: 'number', description: 'Max results to return (default 5)' },
-        source: { type: 'string', description: 'Optional: restrict to a source ref prefix. "github:midas-apps/contracts" matches all files in that repo. Exact file: "github:midas-apps/contracts/config/constants/addresses.ts"' },
+        source: { type: 'string', description: 'Optional: restrict to a source ref prefix. "github:myorg/repo" matches all files in that repo. Exact file: "github:myorg/repo/config/file.ts"' },
       },
       required: ['query'],
     },

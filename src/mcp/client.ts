@@ -46,12 +46,23 @@ async function connectServer(server: McpServer): Promise<void> {
     return;
   }
 
+  // Skip servers with missing/empty required env vars (resolveSecretRefs in loadConfig already expanded $KEYs)
+  const serverEnv = server.env ?? {};
+  for (const [k, v] of Object.entries(serverEnv)) {
+    if (!v || (typeof v === 'string' && v.startsWith('$'))) {
+      log.warn(`MCP server "${server.name}" skipped — env var ${k} not configured (run: npm run setup -- --step mcp)`);
+      return;
+    }
+  }
+
+  const mergedEnv = { ...process.env, ...serverEnv } as Record<string, string>;
+
   log.info(`Connecting to MCP server "${server.name}": ${server.command} ${server.args.join(' ')}`);
 
   const transport = new StdioClientTransport({
     command: server.command,
     args: server.args,
-    env: { ...process.env, ...server.env } as Record<string, string>,
+    env: mergedEnv,
   });
 
   const client = new Client({

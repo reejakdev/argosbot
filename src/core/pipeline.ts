@@ -403,8 +403,10 @@ export async function processWindow(
 
   if (autoActions.length > 0) {
     const { executeProposal } = await import('../workers/index.js');
+    const { generateExecutionToken } = await import('../gateway/approval.js');
+    const autoToken = generateExecutionToken(proposal.id);
     log.info(`Auto-executing ${autoActions.length} action(s) (owner workspace)`);
-    await executeProposal({ ...proposal, actions: autoActions }, autoActions, config, _sendToApprovalChat)
+    await executeProposal({ ...proposal, actions: autoActions }, autoActions, config, _sendToApprovalChat, autoToken)
       .catch(e => log.error('Auto-execution failed', e));
     audit('auto_executed', proposal.id, 'proposal', {
       actions: autoActions.map(a => a.description),

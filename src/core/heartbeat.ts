@@ -38,9 +38,11 @@ function buildStateSnapshot(): string {
   `).all() as Array<{ title: string; assigned_team: string | null; detected_at: number }>;
 
   const pendingApprovals = db.prepare(`
-    SELECT id, context_summary, expires_at FROM approvals
-    WHERE status = 'pending' AND expires_at > ?
-    ORDER BY created_at DESC LIMIT 5
+    SELECT a.id, p.context_summary, a.expires_at
+    FROM approvals a
+    JOIN proposals p ON p.id = a.proposal_id
+    WHERE a.status = 'pending' AND a.expires_at > ?
+    ORDER BY a.created_at DESC LIMIT 5
   `).all(now) as Array<{ id: string; context_summary: string; expires_at: number }>;
 
   const recentMemories = db.prepare(`

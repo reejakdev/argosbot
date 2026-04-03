@@ -50,7 +50,10 @@ export function startAll(): void {
   log.info(`Starting ${jobs.length} cron job(s)`);
 
   for (const row of jobs) {
-    startJob(rowToJob(row));
+    const job = rowToJob(row);
+    // Skip jobs already started by upsertCronJob — avoids double scheduling
+    if (activeTasks.has(job.id)) continue;
+    startJob(job);
   }
 }
 

@@ -64,36 +64,36 @@ describe('chunkText', () => {
 const MOCK_ADDRESSES_TS = `
 export const ADDRESSES = {
   mainnet: {
-    mTBILL: {
-      token: '0xDD629E5241CbC5919847783e6C96B2De4754e438',
-      depositVault: '0x99361435420048Bc1B2aC3B68A2Dd04Fecb00C6f',
-      redemptionVault: '0x0c7501BF8e1e4dF7B48D86E4D28A3FbcB2B43AeC',
+    TokenA: {
+      token: '0x1111111111111111111111111111111111111111',
+      depositVault: '0x2222222222222222222222222222222222222222',
+      redemptionVault: '0x3333333333333333333333333333333333333333',
     },
-    mBASIS: {
-      token: '0x2a8c22E3b10036f3AEF5875d04f8441d4188b656',
-      depositVault: '0xa8a5c4FF4c86a459EBbDC39c5BE77833B3A15d88',
-      redemptionVault: '0x19AB19e61A930d08Be6E23Fae32f7e0D60b00C6b',
+    TokenB: {
+      token: '0x4444444444444444444444444444444444444444',
+      depositVault: '0x5555555555555555555555555555555555555555',
+      redemptionVault: '0x6666666666666666666666666666666666666666',
     },
-    mHyperBTC: {
-      token: '0x59D397F742DA0B0E59eDaf98C16E05D91bE6d9bA',
-      depositVault: '0xD6e082f68b9d2B92B1C24dB3BD4c8e9c4Df4A7eE',
-      redemptionVault: '0x16d4f955B0aA1b1570Fe3e9bB2f8c19C407cdb67',
+    TokenC: {
+      token: '0x7777777777777777777777777777777777777777',
+      depositVault: '0x8888888888888888888888888888888888888888',
+      redemptionVault: '0x9999999999999999999999999999999999999999',
     },
   },
   polygon: {
-    mTBILL: {
-      token: '0xDD629E5241CbC5919847783e6C96B2De4754e438',
-      depositVault: '0xE0E38233F2f0dA3F9faDf5bA8B5B0E38d35F3A1c',
+    TokenA: {
+      token: '0x1111111111111111111111111111111111111111',
+      depositVault: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
     },
-    mBASIS: {
-      token: '0x2a8c22E3b10036f3AEF5875d04f8441d4188b656',
-      depositVault: '0xf3D210AaFfbcD7B09b2ec4B2C8E8B0bA5f5D1B4a',
+    TokenB: {
+      token: '0x4444444444444444444444444444444444444444',
+      depositVault: '0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
     },
   },
   base: {
-    mHyperBTC: {
-      token: '0x59D397F742DA0B0E59eDaf98C16E05D91bE6d9bA',
-      depositVaultSwapper: '0x16d4f955B0aA1b1570Fe3e9bB2f8c19C407cdb67',
+    TokenC: {
+      token: '0x7777777777777777777777777777777777777777',
+      depositVaultSwapper: '0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
     },
   },
 };
@@ -105,12 +105,12 @@ describe('chunkCode', () => {
     expect(chunks.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('mBASIS and its depositVault are in the SAME chunk — the original bug', () => {
+  it('TokenB and its depositVault are in the SAME chunk — the original bug', () => {
     const chunks = chunkCode(MOCK_ADDRESSES_TS, 'github:test/repo', 'Test Repo');
-    // Every chunk containing mBASIS must also contain the mainnet depositVault address
-    const mBasisChunks = chunks.filter(c => c.content.includes('mBASIS'));
-    const anyHasVault  = mBasisChunks.some(c =>
-      c.content.includes('0xa8a5c4FF4c86a459EBbDC39c5BE77833B3A15d88'),
+    // Every chunk containing TokenB must also contain the mainnet depositVault address
+    const tokenBChunks = chunks.filter(c => c.content.includes('TokenB'));
+    const anyHasVault  = tokenBChunks.some(c =>
+      c.content.includes('0x5555555555555555555555555555555555555555'),
     );
     expect(anyHasVault).toBe(true);
   });
@@ -118,9 +118,9 @@ describe('chunkCode', () => {
   it('all addresses are retrievable across chunks', () => {
     const chunks = chunkCode(MOCK_ADDRESSES_TS, 'github:test/repo', 'Test Repo');
     const allContent = chunks.map(c => c.content).join('\n');
-    expect(allContent).toContain('0xa8a5c4FF4c86a459EBbDC39c5BE77833B3A15d88'); // mBASIS mainnet deposit
-    expect(allContent).toContain('0x16d4f955B0aA1b1570Fe3e9bB2f8c19C407cdb67'); // mHyperBTC base
-    expect(allContent).toContain('0xDD629E5241CbC5919847783e6C96B2De4754e438'); // mTBILL token
+    expect(allContent).toContain('0x5555555555555555555555555555555555555555'); // TokenB mainnet deposit
+    expect(allContent).toContain('0x9999999999999999999999999999999999999999'); // TokenC base
+    expect(allContent).toContain('0x1111111111111111111111111111111111111111'); // TokenA token
   });
 
   it('prepends a breadcrumb header with // network > ...', () => {
@@ -133,7 +133,7 @@ describe('chunkCode', () => {
     const chunks = chunkCode(MOCK_ADDRESSES_TS, 'github:test/repo', 'Test Repo');
     const allContent = chunks.map(c => c.content).join('\n');
     expect(allContent).toContain('polygon');
-    expect(allContent).toContain('0xE0E38233F2f0dA3F9faDf5bA8B5B0E38d35F3A1c');
+    expect(allContent).toContain('0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
   });
 
   it('falls back to chunkText for prose (not structured)', () => {

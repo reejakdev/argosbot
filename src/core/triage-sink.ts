@@ -170,7 +170,7 @@ async function generateDraftReply(
       }
     }
   } catch (e) { log.warn(`Knowledge semantic search failed in generateDraftReply: ${e}`); }
-  log.debug(`generateDraftReply: calling LLM for draft (knowledgeContext=${knowledgeContext.length} chars, hasMBASIS=${knowledgeContext.includes('mBASIS')}, body="${result.body.slice(0,80)}")`);
+  log.debug(`generateDraftReply: calling LLM for draft (knowledgeContext=${knowledgeContext.length} chars, body="${result.body.slice(0,80)}")`);
 
   const memoryContext = memories.length
     ? `\n\nRelevant context from memory:\n${memories.map(m => `- ${m.content}`).join('\n')}`

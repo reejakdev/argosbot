@@ -39,6 +39,8 @@ export class TelegramBot {
   private conversations: Map<string, CompactableHistory> = new Map();
   private lastChatId: string | null = null;
   private pendingConfirmation: Map<string, string> = new Map();
+  // Per-user sequential queue — prevents parallel LLM calls for the same user
+  private processingQueue: Map<string, Promise<void>> = new Map();
   private approvalChatIdSaved = false;
   private mtprotoChannel: TelegramChannel | undefined;
 
@@ -59,10 +61,21 @@ export class TelegramBot {
     this.running = true;
     log.info('Telegram Bot started — polling for messages');
 
-    // Clear old updates
+    // Drain and DISCARD all pending updates accumulated while offline.
+    // Without this, old messages from other users would trigger LLM calls at boot.
     try {
-      await this.api('getUpdates', { offset: -1 });
-    } catch { /* ignore */ }
+      let drained = false;
+      while (!drained) {
+        const res = await this.api('getUpdates', { offset: this.offset, limit: 100, timeout: 0 }) as { result: Array<{ update_id: number }> };
+        if (!res.result || res.result.length === 0) {
+          drained = true;
+        } else {
+          const last = res.result[res.result.length - 1];
+          this.offset = last.update_id + 1;
+        }
+      }
+      log.info(`Telegram Bot: discarded stale updates, starting fresh from offset ${this.offset}`);
+    } catch { /* non-fatal */ }
 
     // Register commands so Telegram shows them when user types /
     this.api('setMyCommands', {
@@ -128,11 +141,27 @@ export class TelegramBot {
     const msg = update.message;
     if (!msg?.from) return;
 
+    // Serialize per-user to avoid parallel LLM calls (prevents rate limit bursts)
+    const userId = String(msg.from.id);
+    const prev = this.processingQueue.get(userId) ?? Promise.resolve();
+    const next = prev.then(() => this._handleUpdateInner(update)).catch((e) => {
+      log.error(`Unhandled queue error for user ${userId}: ${e instanceof Error ? e.message : String(e)}`);
+    });
+    this.processingQueue.set(userId, next);
+    await next;
+    if (this.processingQueue.get(userId) === next) this.processingQueue.delete(userId);
+  }
+
+  private async _handleUpdateInner(update: TgUpdate): Promise<void> {
+    const msg = update.message;
+    if (!msg?.from) return;
+
     const userId = String(msg.from.id);
     const chatId = String(msg.chat.id);
 
     // Security: auth check first — before any processing including file uploads
-    if (this.allowedUsers.size > 0 && !this.allowedUsers.has(userId)) {
+    // If allowedUsers is empty, deny everyone (fail-closed — avoids open bot)
+    if (this.allowedUsers.size === 0 || !this.allowedUsers.has(userId)) {
       log.warn(`Ignoring message from unauthorized user ${userId}`);
       return;
     }
@@ -299,12 +328,16 @@ export class TelegramBot {
       const errMsg = e instanceof Error ? e.message : JSON.stringify(e);
       log.error(`Error handling message: ${errMsg}`);
       if (e instanceof Error && e.stack) log.error(e.stack);
-      await this.sendMessage(chatId, `⚠️ Error: ${errMsg.slice(0, 200)}`);
+      const isRateLimit = errMsg.includes('429') || errMsg.includes('rate_limit');
+      const userMsg = isRateLimit
+        ? '⏳ Rate limit reached — please wait a few seconds and try again.'
+        : `⚠️ Error: ${errMsg.slice(0, 200)}`;
+      await this.sendMessage(chatId, userMsg);
     }
   }
 
   private async handleFileUpload(msg: NonNullable<TgUpdate['message']>, userId: string, chatId: string): Promise<void> {
-    if (this.allowedUsers.size > 0 && !this.allowedUsers.has(userId)) return;
+    if (this.allowedUsers.size === 0 || !this.allowedUsers.has(userId)) return;
 
     const fileId = msg.document?.file_id ?? msg.photo?.[msg.photo.length - 1]?.file_id;
     const fileName = msg.document?.file_name ?? 'photo.jpg';
@@ -500,7 +533,7 @@ export class TelegramBot {
     const userId = String(cb.from.id);
 
     // Auth check
-    if (this.allowedUsers.size > 0 && !this.allowedUsers.has(userId)) return;
+    if (this.allowedUsers.size === 0 || !this.allowedUsers.has(userId)) return;
 
     // Always answer the callback to remove the loading spinner
     this.api('answerCallbackQuery', { callback_query_id: cb.id }).catch((e: unknown) => {
@@ -895,7 +928,12 @@ export class TelegramBot {
           '/refresh_sources — re-indexer\n\n' +
           '*Système*\n' +
           '/status · /proposals · /tasks · /done <id>|all · /cancel · /compact · /clear\n\n' +
-          '🔒 Approvals: web app only',
+          '🔒 Approvals: web app only\n\n' +
+          '*Setup & maintenance*\n' +
+          '`npm run setup -- --step 1` — LLM / API keys\n' +
+          '`npm run setup -- --step 4` — Telegram credentials\n' +
+          '`npm run setup -- --step 6` — Voice, Cloudflare, MCP\n' +
+          '`npm run doctor` — health check',
         );
         break;
 
