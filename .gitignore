@@ -12,6 +12,8 @@ secret.json
 secrets.json
 **/secret.json
 **/secrets.json
+config.json
+**/config.json
 
 # Argos data directory — local DB, sessions, config with secrets
 ~/.argos/
