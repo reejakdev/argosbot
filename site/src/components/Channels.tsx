@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { useInView } from 'framer-motion'
 import { useRef } from 'react'
-import { MessageCircle, Phone, Mail, Hash, MessagesSquare } from 'lucide-react'
+import { MessageCircle, Phone, Mail, Hash, MessagesSquare, Radio } from 'lucide-react'
 import { Badge } from './ui/Badge'
 
 const channels = [
@@ -50,6 +50,15 @@ const channels = [
     features: ['Channel monitoring', 'App mentions', 'DM inbox', 'Workspace events'],
     status: 'production',
   },
+  {
+    icon: Radio,
+    color: '#1a1a1a',
+    name: 'Signal',
+    proto: 'signal-cli JSON-RPC',
+    desc: 'Signal channel via signal-cli sidecar — connects over Unix socket, respects your allowlist. End-to-end encrypted messages ingested with zero metadata leakage.',
+    features: ['signal-cli sidecar', 'JSON-RPC socket', 'Phone allowlist', 'E2E encrypted'],
+    status: 'production',
+  },
 ]
 
 export default function Channels() {
@@ -74,7 +83,7 @@ export default function Channels() {
         >
           <div className="section-label mb-3">Channels</div>
           <h2 className="text-3xl lg:text-4xl font-bold mb-4" style={{ color: '#1a1a1a' }}>
-            5 channels.{' '}
+            6 channels.{' '}
             <span className="gradient-text">One unified inbox.</span>
           </h2>
           <p className="text-text2 max-w-2xl leading-relaxed">

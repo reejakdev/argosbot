@@ -3,7 +3,7 @@ import { useInView } from 'framer-motion'
 import { useRef } from 'react'
 import {
   Zap, Database, Brain, CheckSquare, Puzzle,
-  Globe, Lock, Eye, Mic, GitBranch, Terminal, Layers,
+  Globe, Lock, Eye, Mic, GitBranch, Terminal, Layers, Radio,
 } from 'lucide-react'
 
 const features = [
@@ -78,6 +78,12 @@ const features = [
     color: '#5b6cf8',
     title: 'WebAuthn Dashboard',
     desc: 'Local web app secured by FIDO2/YubiKey passkeys with TOTP backup. Review proposals, manage tasks, browse memories — all behind hardware authentication.',
+  },
+  {
+    icon: Radio,
+    color: '#16a34a',
+    title: 'Streaming Responses',
+    desc: 'Token-by-token SSE streaming from any provider. Messages edit in-place on Telegram (800ms throttle) and Slack (1s throttle). Automatic fallback if SSE not supported.',
   },
 ]
 

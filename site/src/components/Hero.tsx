@@ -292,7 +292,7 @@ export default function Hero() {
             style={{ borderTop: '1px solid #e2e2e2' }}
           >
             {[
-              { val: '5',    label: 'Channels' },
+              { val: '6',    label: 'Channels' },
               { val: '15+',  label: 'LLM Providers' },
               { val: '0',    label: 'Actions without approval', highlight: true },
               { val: 'MIT',  label: 'License' },

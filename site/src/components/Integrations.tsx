@@ -12,6 +12,7 @@ const categories = [
       { name: 'Email (SMTP)',    status: 'live' },
       { name: 'Discord',         status: 'live' },
       { name: 'Slack',           status: 'live' },
+      { name: 'Signal',          status: 'live' },
       { name: 'Gmail (MCP)',     status: 'live' },
       { name: 'Outlook (MCP)',   status: 'live' },
     ],
@@ -37,20 +38,21 @@ const categories = [
     items: [
       { name: 'Vector Search (LanceDB)', status: 'live' },
       { name: 'Full-text Search (FTS5)', status: 'live' },
+      { name: 'Knowledge Graph',         status: 'live' },
       { name: 'Perplexity (web)',        status: 'live' },
+      { name: 'Brave Search',            status: 'live' },
       { name: 'Memory store',            status: 'live' },
-      { name: 'Brave Search',            status: 'v2' },
     ],
   },
   {
     label: 'Dev & Infrastructure',
     items: [
-      { name: 'Supabase',        status: 'live' },
       { name: 'Browser (Puppeteer)', status: 'live' },
       { name: 'Fetch / API call', status: 'live' },
       { name: 'Shell exec (whitelisted)', status: 'live' },
+      { name: 'Voice / Whisper',  status: 'live' },
+      { name: 'Supabase',        status: 'v2' },
       { name: 'Docker',          status: 'v2' },
-      { name: 'Vercel',          status: 'v2' },
     ],
   },
   {
