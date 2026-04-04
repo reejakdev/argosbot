@@ -14,6 +14,7 @@ import type { } from '../../llm/index.js'; // types only — llmCall imported dy
 import type { Config } from '../../config/schema.js';
 import type { CompactableHistory } from '../../llm/compaction.js';
 import type { TelegramChannel } from './telegram.js';
+import { cmdProposals, cmdTasks, cmdDone, cmdDoneShortcut, cmdCancel } from './telegram-bot-commands.js';
 
 const log = createLogger('telegram-bot');
 
@@ -41,6 +42,12 @@ export class TelegramBot {
   private pendingConfirmation: Map<string, string> = new Map();
   // Per-user sequential queue — prevents parallel LLM calls for the same user
   private processingQueue: Map<string, Promise<void>> = new Map();
+  // Per-user abort controllers — allows /stop to cancel an ongoing tool loop
+  private abortControllers: Map<string, AbortController> = new Map();
+  // Per-user active loop flag — enables non-blocking interrupt injection
+  private activeLoops: Set<string> = new Set();
+  // Messages received mid-tool-loop — injected at next tool boundary
+  private interruptMessages: Map<string, string[]> = new Map();
   private approvalChatIdSaved = false;
   private mtprotoChannel: TelegramChannel | undefined;
 
@@ -96,6 +103,8 @@ export class TelegramBot {
         { command: 'add_my_handle',   description: 'Ajouter un pseudo personnel' },
         { command: 'whitelist',       description: 'Keywords whitelist TX' },
         { command: 'add_whitelist',   description: 'Ajouter keyword whitelist TX' },
+        { command: 'stop',            description: 'Stopper la tâche en cours' },
+        { command: 'rerun',           description: 'Relancer le dernier script (optionnel: script corrigé)' },
         { command: 'cancel',          description: 'Annuler les propositions' },
         { command: 'compact',         description: 'Compresser l\'historique' },
         { command: 'clear',           description: 'Réinitialiser la conversation' },
@@ -123,9 +132,9 @@ export class TelegramBot {
         for (const update of data.result) {
           this.offset = update.update_id + 1;
           if (update.callback_query) {
-            await this.handleCallbackQuery(update.callback_query);
+            void this.handleCallbackQuery(update.callback_query).catch(e => log.error(`Callback error: ${e}`));
           } else {
-            await this.handleUpdate(update);
+            this.handleUpdate(update); // non-blocking — processingQueue handles per-user ordering
           }
         }
       } catch (e) {
@@ -137,19 +146,36 @@ export class TelegramBot {
     }
   }
 
-  private async handleUpdate(update: TgUpdate): Promise<void> {
+  private handleUpdate(update: TgUpdate): void {
     const msg = update.message;
     if (!msg?.from) return;
 
-    // Serialize per-user to avoid parallel LLM calls (prevents rate limit bursts)
     const userId = String(msg.from.id);
+    const chatId = String(msg.chat.id);
+    const text   = (msg.text ?? '').trim();
+
+    // If a tool loop is active and this is plain text (not a command), inject as interrupt.
+    // Commands (/stop, etc.) still go through the queue so abort/reply logic works.
+    if (this.activeLoops.has(userId) && text && !text.startsWith('/')) {
+      const queue = this.interruptMessages.get(userId) ?? [];
+      queue.push(text);
+      this.interruptMessages.set(userId, queue);
+      void this.sendMessage(chatId, '💬 Reçu — j\'en tiendrai compte à la prochaine étape.');
+      return;
+    }
+
+    // Serialize per-user to avoid parallel LLM calls (processingQueue handles ordering)
     const prev = this.processingQueue.get(userId) ?? Promise.resolve();
-    const next = prev.then(() => this._handleUpdateInner(update)).catch((e) => {
-      log.error(`Unhandled queue error for user ${userId}: ${e instanceof Error ? e.message : String(e)}`);
-    });
+    const next = prev
+      .then(() => this._handleUpdateInner(update))
+      .catch((e) => {
+        log.error(`Unhandled queue error for user ${userId}: ${e instanceof Error ? e.message : String(e)}`);
+      })
+      .finally(() => {
+        if (this.processingQueue.get(userId) === next) this.processingQueue.delete(userId);
+      });
     this.processingQueue.set(userId, next);
-    await next;
-    if (this.processingQueue.get(userId) === next) this.processingQueue.delete(userId);
+    // Returns immediately — polling loop stays non-blocking
   }
 
   private async _handleUpdateInner(update: TgUpdate): Promise<void> {
@@ -326,6 +352,11 @@ export class TelegramBot {
     } catch (e) {
       clearInterval(typingInterval);
       const errMsg = e instanceof Error ? e.message : JSON.stringify(e);
+      if (errMsg === 'CANCELLED') {
+        log.info(`Tool loop cancelled by user ${userId}`);
+        await this.sendMessage(chatId, '⏹️ Arrêté.');
+        return;
+      }
       log.error(`Error handling message: ${errMsg}`);
       if (e instanceof Error && e.stack) log.error(e.stack);
       const isRateLimit = errMsg.includes('429') || errMsg.includes('rate_limit');
@@ -602,22 +633,7 @@ export class TelegramBot {
     // /done_XXXXXX shortcut (Telegram inline command with underscore-separated ID)
     const doneShortcut = text.match(/^\/done_([A-Z0-9]+)(@\S+)?$/i);
     if (doneShortcut) {
-      const shortId = doneShortcut[1];
-      try {
-        const { getDb } = await import('../../db/index.js');
-        const db = getDb();
-        const row = db.prepare(
-          "SELECT id, title FROM tasks WHERE id LIKE ? AND status IN ('open','in_progress','done_inferred') LIMIT 1"
-        ).get(`%${shortId}`) as { id: string; title: string } | null;
-        if (!row) {
-          await this.sendMessage(chatId, `⚠️ Task \`${shortId}\` not found or already closed.`);
-        } else {
-          db.prepare("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?").run(Date.now(), row.id);
-          await this.sendMessage(chatId, `✅ *${row.title.slice(0, 80)}* marked as done.`);
-        }
-      } catch (e) {
-        await this.sendMessage(chatId, `⚠️ Error: ${e instanceof Error ? e.message : String(e)}`);
-      }
+      await cmdDoneShortcut(doneShortcut[1], t => this.sendMessage(chatId, t));
       return;
     }
 
@@ -687,98 +703,67 @@ export class TelegramBot {
         await this.sendMessage(chatId, '🔒 Approvals are only available on the web app (2FA required).\nOpen the dashboard to approve or reject proposals.');
         break;
 
-      case '/cancel': {
-        try {
-          const { getDb } = await import('../../db/index.js');
-          const db = getDb();
-          if (arg) {
-            // Cancel specific proposal
-            db.prepare("UPDATE proposals SET status = 'rejected', rejection_reason = 'Cancelled by user' WHERE id = ? AND status IN ('proposed', 'awaiting_approval')").run(arg);
-            await this.sendMessage(chatId, `🚫 Proposal ${arg.slice(-8)} cancelled.`);
-          } else {
-            // Cancel all pending
-            const result = db.prepare("UPDATE proposals SET status = 'rejected', rejection_reason = 'Cancelled by user' WHERE status IN ('proposed', 'awaiting_approval')").run();
-            await this.sendMessage(chatId, `🚫 ${result.changes} pending proposal(s) cancelled.`);
-          }
-        } catch (e) {
-          await this.sendMessage(chatId, `⚠️ Error: ${e instanceof Error ? e.message : String(e)}`);
+      case '/stop': {
+        const ctrl = this.abortControllers.get(userId);
+        if (ctrl) {
+          ctrl.abort();
+          await this.sendMessage(chatId, '⏹️ Annulation en cours…');
+        } else {
+          await this.sendMessage(chatId, 'Aucune tâche en cours.');
         }
         break;
       }
 
-      case '/proposals': {
+      case '/rerun': {
+        // Re-run the last approved script. Optionally pass a corrected script after the command (multi-line ok).
+        const lastScriptPath = path.join(
+          process.env.DATA_DIR ?? path.join(os.homedir(), '.argos'),
+          'last_script.json',
+        );
         try {
-          const { getDb } = await import('../../db/index.js');
-          const db = getDb();
-          const pending = db.prepare(
-            "SELECT id, context_summary, plan, created_at FROM proposals WHERE status IN ('proposed', 'awaiting_approval') ORDER BY created_at DESC LIMIT 10"
-          ).all() as Array<{ id: string; context_summary: string; plan: string; created_at: number }>;
+          const saved = JSON.parse(fs.readFileSync(lastScriptPath, 'utf8')) as { script: string; lang: string; timeout: number };
+          // Everything after /rerun (supports multi-line paste) is the new script
+          const newScript = text.slice(cmd.length).trim() || saved.script;
+          const lang      = saved.lang ?? 'node';
+          const timeout   = saved.timeout ?? 300;
 
-          if (pending.length === 0) {
-            await this.sendMessage(chatId, '✅ No pending proposals.');
-          } else {
-            const list = pending.map(p =>
-              `📋 \`${p.id}\`\n${p.plan}\n🔒 Approve in web app`
-            ).join('\n\n');
-            await this.sendMessage(chatId, `📋 Pending proposals (${pending.length}):\n\n${list}\n\n🔒 Open the web app to approve/reject.`);
+          await this.sendMessage(chatId, `▶️ Relancement du script (${lang}, ${timeout}s)…`);
+          const { runScriptDirect } = await import('../../workers/proposal-executor.js');
+          const result = await runScriptDirect(newScript, lang, timeout, (t) => this.sendMessage(chatId, t));
+
+          // Update saved script if user provided a new one
+          if (text.slice(cmd.length).trim()) {
+            fs.writeFileSync(lastScriptPath, JSON.stringify({ script: newScript, lang, timeout, ts: Date.now() }), 'utf8');
           }
+
+          const status      = result.success ? '✅ Script terminé' : '❌ Script échoué';
+          const finalOutput = result.output.trim().slice(-2000);
+          await this.sendMessage(chatId, finalOutput ? `${status}\n\`\`\`\n${finalOutput}\n\`\`\`` : status);
         } catch (e) {
-          await this.sendMessage(chatId, `⚠️ Error: ${e instanceof Error ? e.message : String(e)}`);
+          if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+            await this.sendMessage(chatId, '❌ Aucun script récent. Lance d\'abord un script via une proposition.');
+          } else {
+            await this.sendMessage(chatId, `❌ Erreur: ${e instanceof Error ? e.message : String(e)}`);
+          }
         }
         break;
       }
 
-      case '/tasks': {
-        try {
-          const { getDb } = await import('../../db/index.js');
-          const db = getDb();
-          const rows = db.prepare(
-            "SELECT id, title, status, partner_name, message_url, detected_at FROM tasks WHERE status IN ('open','in_progress','done_inferred') ORDER BY detected_at DESC LIMIT 15"
-          ).all() as Array<{ id: string; title: string; status: string; partner_name: string | null; message_url: string | null; detected_at: number }>;
-          if (!rows.length) {
-            await this.sendMessage(chatId, '✅ No open tasks.');
-          } else {
-            const list = rows.map(r => {
-              const partner = r.partner_name ? ` _${r.partner_name}_` : '';
-              const link = r.message_url ? `\n  [↗ source](${r.message_url})` : '';
-              return `• \`${r.id.slice(-6)}\` ${r.title.slice(0, 80)}${partner}${link}\n  /done_${r.id.slice(-6)}`;
-            }).join('\n\n');
-            await this.sendMessage(chatId, `📋 *Open tasks (${rows.length}):*\n\n${list}`);
-          }
-        } catch (e) {
-          await this.sendMessage(chatId, `⚠️ Error: ${e instanceof Error ? e.message : String(e)}`);
-        }
+      case '/cancel':
+        await cmdCancel(arg, t => this.sendMessage(chatId, t));
         break;
-      }
 
-      case '/done': {
-        try {
-          const { getDb } = await import('../../db/index.js');
-          const db = getDb();
-          const now = Date.now();
-          if (arg === 'all') {
-            const result = db.prepare(
-              "UPDATE tasks SET status = 'completed', completed_at = ? WHERE status IN ('open','in_progress')"
-            ).run(now) as { changes: number };
-            await this.sendMessage(chatId, `✅ Marked *${result.changes}* tasks as completed.`);
-          } else if (arg) {
-            const row = db.prepare(
-              "SELECT id, title FROM tasks WHERE id LIKE ? AND status IN ('open','in_progress') LIMIT 1"
-            ).get(`%${arg}`) as { id: string; title: string } | null;
-            if (!row) {
-              await this.sendMessage(chatId, `⚠️ Task \`${arg}\` not found.`);
-            } else {
-              db.prepare("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?").run(now, row.id);
-              await this.sendMessage(chatId, `✅ *${row.title.slice(0, 80)}* marked as done.`);
-            }
-          } else {
-            await this.sendMessage(chatId, '⚠️ Usage: `/done <id>` or `/done all`');
-          }
-        } catch (e) {
-          await this.sendMessage(chatId, `⚠️ Error: ${e instanceof Error ? e.message : String(e)}`);
-        }
+      case '/proposals':
+        await cmdProposals(t => this.sendMessage(chatId, t));
         break;
-      }
+
+      case '/tasks':
+        await cmdTasks(t => this.sendMessage(chatId, t));
+        break;
+
+      case '/done':
+        await cmdDone(arg, t => this.sendMessage(chatId, t));
+        break;
 
       case '/add_chat':
       case '/add-chat': {
@@ -951,6 +936,7 @@ export class TelegramBot {
           '/remove_source <index>\n' +
           '/refresh_sources — re-indexer\n\n' +
           '*Système*\n' +
+          '/stop — stopper la tâche en cours\n' +
           '/status · /proposals · /tasks · /done <id>|all · /cancel · /compact · /clear\n\n' +
           '🔒 Approvals: web app only\n\n' +
           '*Setup & maintenance*\n' +
@@ -993,8 +979,20 @@ export class TelegramBot {
       const row = db.prepare('SELECT messages, compacted_summary FROM conversations WHERE user_id = ?').get(userId) as
         { messages: string; compacted_summary: string | null } | undefined;
       if (row) {
+        const rawMsgs: CompactableHistory['messages'] = JSON.parse(row.messages);
+        // Sanitize: remove consecutive messages with the same role (causes API 400)
+        const deduped: CompactableHistory['messages'] = [];
+        for (const msg of rawMsgs) {
+          if (deduped.length > 0 && deduped[deduped.length - 1].role === msg.role) {
+            // Merge content to preserve info
+            const prev = deduped[deduped.length - 1];
+            prev.content = String(prev.content) + '\n' + String(msg.content);
+          } else {
+            deduped.push({ ...msg });
+          }
+        }
         const conv: CompactableHistory = {
-          messages: JSON.parse(row.messages),
+          messages: deduped,
           compactedSummary: row.compacted_summary ?? undefined,
         };
         this.conversations.set(userId, conv);
@@ -1207,6 +1205,25 @@ You are meeting this user for the first time. You MUST:
       }
     };
 
+    // Register abort controller — allows /stop to cancel this loop
+    const abortController = new AbortController();
+    this.abortControllers.set(userId, abortController);
+    this.activeLoops.add(userId);
+
+    // Inject abort check into onEvent — throws on /stop
+    const originalOnEvent = onEvent;
+    const onEventWithAbort = async (event: import('../../llm/tool-loop.js').ToolLoopEvent) => {
+      if (abortController.signal.aborted) throw new Error('CANCELLED');
+      return originalOnEvent(event);
+    };
+
+    // Drain one interrupt per tool boundary — injected into the LLM context
+    const getInterrupt = (): string | undefined => {
+      const queue = this.interruptMessages.get(userId);
+      if (queue && queue.length > 0) return queue.shift();
+      return undefined;
+    };
+
     let response: { content: string; inputTokens?: number; outputTokens?: number };
 
     const { callAnthropicBearerRaw: _bearerRaw } = await import('../../llm/index.js');
@@ -1235,10 +1252,16 @@ You are meeting this user for the first time. You MUST:
           };
         };
 
-    response = await runToolLoop(
-      this.llmConfig, systemPrompt, messages,
-      allTools, combinedExecutor, providerRaw, onEvent,
-    );
+    try {
+      response = await runToolLoop(
+        this.llmConfig, systemPrompt, messages,
+        allTools, combinedExecutor, providerRaw, onEventWithAbort, getInterrupt,
+      );
+    } finally {
+      this.abortControllers.delete(userId);
+      this.activeLoops.delete(userId);
+      this.interruptMessages.delete(userId);
+    }
 
     // Delete only the status/tool bubble (not the stream bubble — we'll edit it in place)
     if (statusMsgId) await this.api('deleteMessage', { chat_id: chatId, message_id: statusMsgId }).catch(() => {});
@@ -1286,9 +1309,9 @@ You are meeting this user for the first time. You MUST:
         text: displayContent,
       }).catch(() => null);
       // Only send fresh if both edits failed (e.g. message deleted by user)
-      if (!edited) await this.sendMessage(chatId, displayContent);
+      if (!edited) await this.sendMessage(chatId, displayContent, false);
     } else {
-      await this.sendMessage(chatId, displayContent);
+      await this.sendMessage(chatId, displayContent, false);
     }
 
     // Signal to handleUpdate that the reply was already sent
@@ -1339,7 +1362,7 @@ Only memorize: user preferences, important facts, decisions made, task outcomes.
     });
   }
 
-  async sendMessage(chatId: string, text: string): Promise<void> {
+  async sendMessage(chatId: string, text: string, saveConv = true): Promise<void> {
     // Telegram max message length is 4096
     const chunks = this.splitMessage(text, 4096);
     for (const chunk of chunks) {
@@ -1357,7 +1380,7 @@ Only memorize: user preferences, important facts, decisions made, task outcomes.
     const approvalChatId = this.allowedUsers.size === 1
       ? [...this.allowedUsers][0]
       : chatId;
-    if (chatId === approvalChatId) {
+    if (saveConv && chatId === approvalChatId) {
       const conv = await this.loadConversation(chatId);
       conv.messages.push({ role: 'assistant', content: text });
       await this.saveConversation(chatId, conv);

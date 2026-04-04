@@ -66,6 +66,33 @@ export class NotionWorker {
     if (g?.dryRun) return { ...g, output: `[DRAFT] Would create: ${input.title}` };
     if (g)         return g;
 
+    const title = String(input.title ?? '');
+
+    // ── Subpage inside a page (not a database entry) ──────────────────────────
+    if (input.parent_page_id) {
+      try {
+        const children: unknown[] = [];
+        if (input.content) {
+          children.push({ object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: String(input.content).slice(0, 2000) } }] } });
+        }
+        if (input.blocks && Array.isArray(input.blocks)) children.push(...input.blocks);
+
+        const page = await this.client!.pages.create({
+          parent:     { page_id: String(input.parent_page_id) },
+          icon:       input.icon ? { emoji: String(input.icon) } as never : undefined,
+          properties: { title: [{ type: 'text', text: { content: title } }] } as never,
+          children:   children as never,
+        });
+        const pageId = (page as { id: string }).id;
+        log.info(`Notion subpage created: ${pageId} inside ${input.parent_page_id}`);
+        return { success: true, dryRun: false, output: `📄 Created subpage: ${title}`, data: { pageId } };
+      } catch (e) {
+        log.error('Notion createEntry (subpage) failed', e);
+        return { success: false, dryRun: false, output: String(e) };
+      }
+    }
+
+    // ── Database entry ─────────────────────────────────────────────────────────
     const dbType   = (input.database_type as string) ?? 'note';
     const template = TEMPLATES[dbType] ?? TEMPLATES.note;
     const targetDb = this.resolveDatabase(dbType, input.database_id as string | undefined);
@@ -74,7 +101,7 @@ export class NotionWorker {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const properties: Record<string, any> = {
-        Name: { title: [{ text: { content: String(input.title ?? '') } }] },
+        Name: { title: [{ text: { content: title } }] },
       };
       if (dbType !== 'todo')                             properties['Type']     = { select: { name: dbType } };
       if (dbType === 'todo' || dbType === 'task')        properties['Done']     = { checkbox: false };
@@ -83,30 +110,26 @@ export class NotionWorker {
       if (input.priority)                                properties['Priority'] = { select: { name: input.priority } };
       if (input.due_date)                                properties['Due']      = { date: { start: input.due_date } };
       if (input.assignee)                                properties['Assignee'] = { rich_text: [{ text: { content: String(input.assignee) } }] };
-      // Allow arbitrary extra properties via input.properties
       if (input.properties && typeof input.properties === 'object') {
         Object.assign(properties, input.properties);
       }
 
-      // Build children blocks
       const children: unknown[] = [];
       if (input.content) {
         children.push({ object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: String(input.content).slice(0, 2000) } }] } });
       }
-      if (input.blocks && Array.isArray(input.blocks)) {
-        children.push(...input.blocks);
-      }
+      if (input.blocks && Array.isArray(input.blocks)) children.push(...input.blocks);
 
       const page = await this.client!.pages.create({
         parent: { database_id: targetDb },
-        icon:   { emoji: template.icon } as never,
+        icon:   input.icon ? { emoji: String(input.icon) } as never : { emoji: template.icon } as never,
         properties,
         children: children as never,
       });
 
       const pageId = (page as { id: string }).id;
       log.info(`Notion page created: ${pageId} (${dbType})`);
-      return { success: true, dryRun: false, output: `${template.icon} Created ${dbType}: ${input.title}`, data: { pageId } };
+      return { success: true, dryRun: false, output: `${template.icon} Created ${dbType}: ${title}`, data: { pageId } };
     } catch (e) {
       log.error('Notion createEntry failed', e);
       return { success: false, dryRun: false, output: String(e) };
@@ -155,10 +178,35 @@ export class NotionWorker {
   async getPageContent(pageId: string): Promise<WorkerResult> {
     if (!this.client) return { success: false, dryRun: false, output: 'Notion not configured' };
     try {
-      const blocks = await this.client.blocks.children.list({ block_id: pageId, page_size: 100 });
-      const text   = blocksToText(blocks.results as never);
-      return { success: true, dryRun: false, output: text || '(empty page)', data: blocks.results };
+      // Handle pagination — some pages have 100+ blocks
+      let allResults: unknown[] = [];
+      let cursor: string | undefined;
+      do {
+        const res = await this.client.blocks.children.list({
+          block_id: pageId,
+          page_size: 100,
+          ...(cursor ? { start_cursor: cursor } : {}),
+        });
+        allResults = allResults.concat(res.results);
+        cursor = res.has_more ? res.next_cursor ?? undefined : undefined;
+      } while (cursor);
+
+      const text = blocksToText(allResults as never);
+      return { success: true, dryRun: false, output: text || '(empty page)', data: allResults };
     } catch (e) {
+      return { success: false, dryRun: false, output: String(e) };
+    }
+  }
+
+  // ── Archive (delete) a page ────────────────────────────────────────────────
+
+  async deletePage(pageId: string): Promise<WorkerResult> {
+    const g = this.guard(); if (g) return g;
+    try {
+      await this.client!.pages.update({ page_id: pageId, archived: true });
+      return { success: true, dryRun: false, output: `🗑️ Page archived: ${pageId}` };
+    } catch (e) {
+      log.error('Notion deletePage failed', e);
       return { success: false, dryRun: false, output: String(e) };
     }
   }
@@ -171,11 +219,23 @@ export class NotionWorker {
   }): Promise<WorkerResult> {
     const g = this.guard(); if (g) return g;
     try {
-      await this.client!.blocks.children.append({
-        block_id: input.page_id,
-        children: input.blocks as never,
-      });
-      return { success: true, dryRun: false, output: `✅ Appended ${input.blocks.length} block(s) to ${input.page_id}` };
+      // Strip server-only fields and skip un-copyable blocks (Notion-hosted files)
+      const cleaned = (input.blocks as Array<Record<string, unknown>>)
+        .map(b => sanitizeBlock(b))
+        .filter(Boolean) as never[];
+
+      if (cleaned.length === 0) return { success: true, dryRun: false, output: '(no copyable blocks)' };
+
+      // Append in batches of 100 (Notion API limit)
+      let total = 0;
+      for (let i = 0; i < cleaned.length; i += 100) {
+        await this.client!.blocks.children.append({
+          block_id: input.page_id,
+          children: cleaned.slice(i, i + 100),
+        });
+        total += Math.min(100, cleaned.length - i);
+      }
+      return { success: true, dryRun: false, output: `✅ Appended ${total} block(s) to ${input.page_id}` };
     } catch (e) {
       log.error('Notion appendBlocks failed', e);
       return { success: false, dryRun: false, output: String(e) };
@@ -242,9 +302,9 @@ export class NotionWorker {
 
       const results = await this.client.databases.query(params);
       const items   = results.results.map(p => {
-        const page  = p as unknown as { id: string; properties: Record<string, unknown> };
+        const page  = p as unknown as { id: string; properties: Record<string, unknown>; url: string };
         const title = extractTitle(page.properties);
-        return `[${page.id.slice(-8)}] ${title}`;
+        return `id=${page.id} | ${title} — ${page.url}`;
       });
 
       return {
@@ -260,23 +320,24 @@ export class NotionWorker {
 
   // ── Full-text workspace search ─────────────────────────────────────────────
 
-  async searchWorkspace(input: { query: string; filter_type?: 'page' | 'database'; limit?: number }): Promise<WorkerResult> {
+  async searchWorkspace(input: { query?: string; filter_type?: 'page' | 'database'; limit?: number }): Promise<WorkerResult> {
     if (!this.client) return { success: false, dryRun: false, output: 'Notion not configured' };
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const params: any = { query: input.query, page_size: input.limit ?? 10 };
+      const params: any = { page_size: input.limit ?? 50 };
+      if (input.query) params.query = input.query;
       if (input.filter_type) params.filter = { value: input.filter_type, property: 'object' };
 
       const results = await this.client.search(params);
       const items   = results.results.map(r => {
         const obj   = r as unknown as { id: string; object: string; properties?: Record<string, unknown>; title?: Array<{ plain_text: string }>; url: string };
         const title = obj.properties ? extractTitle(obj.properties) : (obj.title?.[0]?.plain_text ?? '(untitled)');
-        return `[${obj.object}] ${title} — ${obj.url}`;
+        return `[${obj.object}] id=${obj.id} | ${title} — ${obj.url}`;
       });
 
       return {
         success: true, dryRun: false,
-        output:  items.length > 0 ? items.join('\n') : '(no results)',
+        output:  items.length > 0 ? items.join('\n') : '(no results — check that pages are shared with the integration)',
         data:    results.results,
       };
     } catch (e) {
@@ -396,6 +457,36 @@ export class NotionWorker {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Strip server-only fields from a block so it can be passed to blocks.children.append. */
+function sanitizeBlock(b: Record<string, unknown>): Record<string, unknown> | null {
+  const type = b.type as string;
+  if (!type) return null;
+  // Skip Notion-hosted images/files — can't copy via API
+  const content = b[type] as Record<string, unknown> | undefined;
+  if (type === 'image' && content?.type === 'file') return null;
+  if (type === 'file'  && content?.type === 'file') return null;
+  if (type === 'pdf'   && content?.type === 'file') return null;
+  // Skip unsupported block types
+  if (['unsupported', 'synced_block', 'template', 'table_of_contents'].includes(type)) return null;
+
+  return { object: 'block', type, [type]: stripReadOnlyFields(content ?? {}) };
+}
+
+function stripReadOnlyFields(obj: unknown): unknown {
+  if (Array.isArray(obj)) return obj.map(stripReadOnlyFields);
+  if (obj && typeof obj === 'object') {
+    const READONLY = new Set(['id','created_time','last_edited_time','created_by','last_edited_by','has_children','object','archived']);
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      if (v === null) continue;       // drop nulls — API rejects them
+      if (READONLY.has(k)) continue;  // drop server-managed fields
+      out[k] = stripReadOnlyFields(v);
+    }
+    return out;
+  }
+  return obj;
+}
+
 function extractTitle(properties: Record<string, unknown>): string {
   for (const val of Object.values(properties)) {
     const v = val as { title?: Array<{ plain_text: string }> };
@@ -404,10 +495,20 @@ function extractTitle(properties: Record<string, unknown>): string {
   return '(untitled)';
 }
 
-function blocksToText(blocks: Array<{ type: string; [key: string]: unknown }>): string {
+function blocksToText(blocks: Array<{ type: string; id?: string; [key: string]: unknown }>): string {
   return blocks.map(b => {
+    // Child pages and databases — show with ID so the agent can navigate into them
+    if (b.type === 'child_page') {
+      const title = (b.child_page as { title?: string })?.title ?? '(untitled)';
+      return `📄 [child_page] id=${b.id} | ${title}`;
+    }
+    if (b.type === 'child_database') {
+      const title = (b.child_database as { title?: string })?.title ?? '(untitled)';
+      return `📁 [child_database] id=${b.id} | ${title}`;
+    }
     const content = (b[b.type] as { rich_text?: Array<{ plain_text: string }> })?.rich_text?.map(r => r.plain_text).join('') ?? '';
-    const prefix  = b.type === 'heading_1' ? '# ' : b.type === 'heading_2' ? '## ' : b.type === 'heading_3' ? '### ' : b.type === 'to_do' ? '- [ ] ' : b.type === 'bulleted_list_item' ? '- ' : '';
+    const checked = b.type === 'to_do' ? ((b.to_do as { checked?: boolean })?.checked ? '[x]' : '[ ]') : '';
+    const prefix  = b.type === 'heading_1' ? '# ' : b.type === 'heading_2' ? '## ' : b.type === 'heading_3' ? '### ' : b.type === 'to_do' ? `- ${checked} ` : b.type === 'bulleted_list_item' ? '- ' : b.type === 'numbered_list_item' ? '1. ' : '';
     return content ? `${prefix}${content}` : '';
   }).filter(Boolean).join('\n');
 }

@@ -37,6 +37,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.resolve(__dirname, '../../dist/client');
 import { getDb } from '../db/index.js';
 import { getChannelStatuses } from '../ingestion/channels/registry.js';
+import { getAllSecretsSync, setSecretSync, deleteSecretSync } from '../secrets/store.js';
+import { patchConfig } from '../config/index.js';
+import { redactSecretsForDisk } from '../secrets/migrate.js';
 import {
   hasRegisteredKeys,
   requireAuth,
@@ -507,6 +510,423 @@ function buildApi(
     } catch (e) {
       res.status(500).json({ error: String(e) });
     }
+  });
+
+  // ── Setup status ─────────────────────────────────────────────────────────
+  // Returns per-step configuration status so the Configure tab can show
+  // what's done, what's missing, and what each step unlocks.
+
+  router.get('/setup/status', async (_req, res) => {
+    const cfg = getConfig() as unknown as import('../config/schema.js').Config;
+    const secrets = getAllSecretsSync();
+    const db = getDb();
+
+    // ── helpers ─────────────────────────────────────────────────────────────
+    function secret(key: string): boolean {
+      return !!(secrets[key]?.trim());
+    }
+    function cfgSecret(val: unknown): boolean {
+      if (typeof val !== 'string') return false;
+      if (val.startsWith('$')) return secret(val.slice(1));
+      return val.length > 0;
+    }
+
+    // ── required steps ───────────────────────────────────────────────────────
+
+    // 1. LLM
+    const llm = (cfg.llm ?? {}) as Record<string, unknown>;
+    const providerId = llm.activeProvider ? String(llm.activeProvider) : null;
+    const model      = llm.activeModel    ? String(llm.activeModel)    : null;
+    const noKeyProviders = new Set(['ollama', 'lmstudio', 'custom', 'anthropic-oauth']);
+    let llmConfigured = false;
+    let llmDetail: string | undefined;
+    if (providerId && model) {
+      const provCfg = ((llm.providers ?? {}) as Record<string, Record<string, unknown>>)[providerId] ?? {};
+      const hasKey  = noKeyProviders.has(providerId) || cfgSecret(provCfg.apiKey);
+      llmConfigured = hasKey;
+      llmDetail     = llmConfigured ? `${providerId} / ${model}` : `${providerId} — API key missing`;
+    }
+
+    // 2. Web app + YubiKey
+    const webapp     = (cfg.webapp ?? {}) as Record<string, unknown>;
+    const hasWebapp  = !!(webapp.webauthnRpId && webapp.webauthnOrigin);
+    let yubiKeyCount = 0;
+    let totpActive   = false;
+    try {
+      yubiKeyCount = (db.prepare('SELECT count(*) as n FROM webauthn_credentials').get() as { n: number }).n;
+    } catch {}
+    try {
+      const { hasTotpConfigured } = await import('./totp.js');
+      totpActive = hasTotpConfigured();
+    } catch {}
+    const authConfigured = hasWebapp && (yubiKeyCount > 0 || totpActive);
+    const authDetail     = !hasWebapp
+      ? 'Web app not configured'
+      : yubiKeyCount > 0
+        ? `${yubiKeyCount} key${yubiKeyCount > 1 ? 's' : ''} registered${totpActive ? ' + TOTP' : ''}`
+        : totpActive ? 'TOTP only' : 'No authentication registered yet';
+
+    // 3. Approval channel — detect from whichever bot is actually configured
+    // notifications.preferredChannel is the authoritative field (telegram_bot|telegram|slack|whatsapp)
+    // Fall back to heuristic: whichever bot token is present
+    const preferredChannel = cfg.notifications?.preferredChannel;
+    const hasTgBot    = secret('TELEGRAM_BOT_TOKEN');
+    const hasSlackBot = secret('SLACK_BOT_TOKEN');
+    const hasDcBot    = secret('DISCORD_BOT_TOKEN');
+    let channelConfigured = false;
+    let channelDetail: string | undefined;
+    if (preferredChannel === 'telegram_bot' || (!preferredChannel && hasTgBot)) {
+      channelConfigured = hasTgBot;
+      channelDetail     = channelConfigured ? 'Telegram Bot' : 'TELEGRAM_BOT_TOKEN missing';
+    } else if (preferredChannel === 'slack' || (!preferredChannel && hasSlackBot)) {
+      channelConfigured = hasSlackBot;
+      channelDetail     = channelConfigured ? 'Slack Bot' : 'SLACK_BOT_TOKEN missing';
+    } else if (hasDcBot) {
+      channelConfigured = true;
+      channelDetail     = 'Discord Bot';
+    } else {
+      // Web app only — acceptable if YubiKey is registered
+      channelConfigured = authConfigured;
+      channelDetail     = channelConfigured ? 'Web app only' : 'No approval channel configured';
+    }
+
+    // ── channel steps ────────────────────────────────────────────────────────
+    const channels = (cfg.channels ?? {}) as Record<string, unknown>;
+
+    // Telegram MTProto listener
+    const tgListener = (channels.telegram as Record<string, unknown> | undefined)?.listener as Record<string, unknown> | undefined;
+    const tgEnabled  = tgListener?.mode === 'mtproto';
+    const tgConfigured = tgEnabled && secret('TELEGRAM_API_ID') && secret('TELEGRAM_API_HASH');
+
+    // Slack listener
+    const slackCfg    = (channels.slack ?? {}) as Record<string, unknown>;
+    const slackEnabled = slackCfg.enabled === true;
+    const slackConfigured = slackEnabled && secret('SLACK_USER_TOKEN');
+
+    // Discord listener
+    const discordCfg    = (channels.discord ?? {}) as Record<string, unknown>;
+    const discordEnabled = discordCfg.enabled === true;
+    const discordConfigured = discordEnabled && secret('DISCORD_BOT_TOKEN');
+
+    // Email IMAP
+    const emailCfg  = (channels.email ?? {}) as Record<string, unknown>;
+    const imapCfg   = (emailCfg.imap ?? {}) as Record<string, unknown>;
+    const emailConfigured = !!(imapCfg.host && (cfgSecret(imapCfg.user) || secret('EMAIL_IMAP_USER'))
+                           && (cfgSecret(imapCfg.password) || secret('EMAIL_IMAP_PASSWORD')));
+
+    // WhatsApp
+    const waConfigured = (channels.whatsapp as Record<string, unknown> | undefined)?.enabled === true;
+
+    // ── integration steps ────────────────────────────────────────────────────
+
+    const notionConfigured   = secret('NOTION_API_KEY');
+    const calendarConfigured = secret('GOOGLE_CLIENT_ID') && secret('GOOGLE_REFRESH_TOKEN');
+    const linearConfigured   = secret('LINEAR_API_KEY');
+    const embedCfg = (cfg.embeddings ?? {}) as Record<string, unknown>;
+    const embeddingsConfigured = embedCfg.enabled === true;
+
+    // cloudMode
+    const security = (cfg.security ?? {}) as Record<string, unknown>;
+    const cloudMode = security.cloudMode === true;
+
+    // ── assemble steps ───────────────────────────────────────────────────────
+
+    const steps = [
+      // Required
+      {
+        id: 'llm',
+        name: 'LLM Provider',
+        category: 'required',
+        configured: llmConfigured,
+        detail: llmDetail,
+        unlocks: ['Classification', 'Planning', 'Memory summaries', 'All AI features'],
+        docsUrl: '/docs/configuration.md#llm--ai-provider',
+        setupCmd: 'npm run setup',
+      },
+      {
+        id: 'auth',
+        name: 'Web App & Authentication',
+        category: 'required',
+        configured: authConfigured,
+        detail: authDetail,
+        unlocks: ['Approval dashboard', 'High-risk approvals', 'Secure access from phone'],
+        docsUrl: '/docs/security.md',
+        setupCmd: 'npm run setup  → step 2',
+      },
+      {
+        id: 'channel',
+        name: 'Approval Channel',
+        category: 'required',
+        configured: channelConfigured,
+        detail: channelDetail ?? (preferredChannel ? preferredChannel : 'Not configured'),
+        unlocks: ['Proposal notifications', 'Inline approve / reject', 'Bot commands'],
+        docsUrl: '/docs/integrations.md',
+        setupCmd: 'npm run setup  → step 1',
+      },
+      // Channels
+      {
+        id: 'telegram-listener',
+        name: 'Telegram Listener',
+        category: 'channel',
+        configured: !!tgConfigured,
+        detail: tgConfigured ? `MTProto · api_id=${secrets['TELEGRAM_API_ID']}` : tgEnabled ? 'API credentials missing' : 'Not enabled',
+        unlocks: ['Monitor Telegram DMs', 'Partner message detection', 'Task extraction from chats'],
+        docsUrl: '/docs/integrations.md#telegram-mtproto',
+        setupCmd: 'npm run setup  → Telegram listener',
+      },
+      {
+        id: 'slack-listener',
+        name: 'Slack Listener',
+        category: 'channel',
+        configured: !!slackConfigured,
+        detail: slackConfigured ? 'xoxp- token active' : slackEnabled ? 'SLACK_USER_TOKEN missing' : 'Not enabled',
+        unlocks: ['Monitor Slack DMs and channels', 'Slack task extraction'],
+        docsUrl: '/docs/integrations.md#slack-listener',
+        setupCmd: 'npm run setup  → Slack listener',
+      },
+      {
+        id: 'discord',
+        name: 'Discord',
+        category: 'channel',
+        configured: !!discordConfigured,
+        detail: discordConfigured ? 'Bot token active' : discordEnabled ? 'DISCORD_BOT_TOKEN missing' : 'Not enabled',
+        unlocks: ['Monitor Discord servers', 'Discord task extraction'],
+        docsUrl: '/docs/integrations.md#discord',
+        setupCmd: 'npm run setup  → Discord',
+      },
+      {
+        id: 'email',
+        name: 'Email (IMAP)',
+        category: 'channel',
+        configured: emailConfigured,
+        detail: emailConfigured ? `${imapCfg.host ?? 'IMAP'}` : 'Not configured',
+        unlocks: ['Monitor inbox', 'Email task extraction'],
+        docsUrl: '/docs/integrations.md#email-imap',
+        setupCmd: 'npm run setup  → email',
+      },
+      {
+        id: 'whatsapp',
+        name: 'WhatsApp',
+        category: 'channel',
+        configured: waConfigured,
+        detail: waConfigured ? 'Enabled (Baileys)' : 'Not enabled',
+        unlocks: ['Monitor WhatsApp messages', 'WhatsApp task extraction'],
+        docsUrl: '/docs/integrations.md#whatsapp',
+        setupCmd: 'npm run setup  → WhatsApp',
+      },
+      // Integrations
+      {
+        id: 'notion',
+        name: 'Notion',
+        category: 'integration',
+        configured: notionConfigured,
+        detail: notionConfigured ? 'API key ✓' : 'Not configured',
+        unlocks: ['Knowledge from Notion pages', 'Create/update pages on approval', 'Notion search'],
+        docsUrl: '/docs/integrations.md#notion',
+        setupCmd: 'npm run setup  → integrations → Notion',
+      },
+      {
+        id: 'calendar',
+        name: 'Google Calendar',
+        category: 'integration',
+        configured: !!calendarConfigured,
+        detail: calendarConfigured ? 'OAuth configured' : 'Not configured',
+        unlocks: ['Calendar context for planning', 'Create calendar events on approval'],
+        docsUrl: '/docs/integrations.md#google-calendar',
+        setupCmd: 'npm run setup  → integrations → Google Calendar',
+      },
+      {
+        id: 'linear',
+        name: 'Linear',
+        category: 'integration',
+        configured: linearConfigured,
+        detail: linearConfigured ? `key ✓${secrets['LINEAR_TEAM_ID'] ? `  team=${secrets['LINEAR_TEAM_ID']}` : ''}` : 'Not configured',
+        unlocks: ['Issue context', 'Create/close Linear issues on approval', 'Linear search'],
+        docsUrl: '/docs/integrations.md#linear',
+        setupCmd: 'npm run setup  → integrations → Linear',
+      },
+      {
+        id: 'embeddings',
+        name: 'Vector Search (Ollama)',
+        category: 'integration',
+        configured: embeddingsConfigured,
+        detail: embeddingsConfigured ? `${(embedCfg.model as string | undefined) ?? 'nomic-embed-text'}` : 'Not enabled',
+        unlocks: ['Semantic memory search', 'Hybrid knowledge retrieval', 'Smarter context recall'],
+        docsUrl: '/docs/privacy.md#setting-up-local-privacy-model',
+        setupCmd: 'ollama pull nomic-embed-text  then enable in config',
+      },
+      {
+        id: 'cloudmode',
+        name: 'Cloud Mode (VPS security)',
+        category: 'security',
+        configured: cloudMode,
+        detail: cloudMode ? 'ON — YubiKey required for all approvals' : 'OFF — recommended for remote deployment',
+        unlocks: ['YubiKey enforcement for all risk levels', 'VPS-safe operation'],
+        docsUrl: '/docs/security.md#cloudmode--vps-deployment',
+        setupCmd: 'Set security.cloudMode: true in config',
+      },
+    ];
+
+    // ── models ────────────────────────────────────────────────────────────────
+    const noKeySet = new Set(['ollama', 'lmstudio', 'custom', 'anthropic-oauth']);
+    const providers = Object.entries((llm.providers ?? {}) as Record<string, Record<string, unknown>>).map(([id, p]) => ({
+      id,
+      name:      (p.name as string | undefined) ?? id,
+      api:       (p.api  as string | undefined) ?? 'openai',
+      baseUrl:   (p.baseUrl as string | undefined) ?? undefined,
+      models:    (p.models as string[] | undefined) ?? [],
+      hasKey:    noKeySet.has(id) || cfgSecret(p.apiKey),
+      isActive:  id === (llm.activeProvider as string | undefined),
+      isFallback: id === (llm.fallbackProvider as string | undefined),
+    }));
+
+    // ── voice ─────────────────────────────────────────────────────────────────
+    const voice = (cfg.voice ?? {}) as Record<string, unknown>;
+    const whisperBackend  = (voice.whisperBackend  as string | undefined) ?? 'local';
+    const whisperApiKey   = cfgSecret(voice.whisperApiKey) || secret('OPENAI_API_KEY');
+    const elevenLabsKey   = cfgSecret(voice.elevenLabsApiKey) || secret('ELEVENLABS_API_KEY');
+    const openAiTtsKey    = cfgSecret(voice.openAiTtsApiKey)  || secret('OPENAI_API_KEY');
+    const ttsProvider     = (voice.ttsProvider as string | undefined) ?? 'openai';
+    const voiceData = {
+      enabled:               voice.enabled === true,
+      whisperBackend,
+      whisperModel:          (voice.whisperModel as string | undefined) ?? 'base',
+      whisperEndpoint:       (voice.whisperEndpoint as string | undefined) ?? 'https://api.openai.com/v1',
+      whisperApiConfigured:  whisperBackend === 'local' ? true : whisperApiKey,
+      ttsEnabled:            voice.ttsEnabled === true,
+      ttsProvider,
+      ttsConfigured:         ttsProvider === 'elevenlabs' ? elevenLabsKey : openAiTtsKey,
+      elevenLabsConfigured:  elevenLabsKey,
+      elevenLabsVoiceId:     (voice.elevenLabsVoiceId as string | undefined),
+      openAiTtsModel:        (voice.openAiTtsModel as string | undefined) ?? 'tts-1',
+      openAiTtsVoice:        (voice.openAiTtsVoice as string | undefined) ?? 'onyx',
+    };
+
+    // ── embeddings ────────────────────────────────────────────────────────────
+    const embedCfg2 = (cfg.embeddings ?? {}) as Record<string, unknown>;
+    const embeddingsData = {
+      enabled:  embedCfg2.enabled === true,
+      baseUrl:  (embedCfg2.baseUrl as string | undefined) ?? 'http://localhost:11434',
+      model:    (embedCfg2.model   as string | undefined) ?? 'nomic-embed-text',
+      localOnly: (embedCfg2.localOnly as boolean | undefined) ?? true,
+    };
+
+    // ── MCP + skills summary ──────────────────────────────────────────────────
+    const mcpServers = (cfg.mcpServers ?? []) as Array<Record<string, unknown>>;
+    const skills     = (cfg.skills     ?? []) as Array<Record<string, unknown>>;
+
+    // ── secrets keys ─────────────────────────────────────────────────────────
+    const secretKeys = Object.keys(secrets).sort();
+
+    const required = steps.filter(s => s.category === 'required');
+    res.json({
+      steps,
+      requiredComplete: required.filter(s => s.configured).length,
+      requiredTotal:    required.length,
+      fullyOperational: required.every(s => s.configured),
+      models: {
+        activeProvider:  (llm.activeProvider  as string | undefined) ?? null,
+        activeModel:     (llm.activeModel     as string | undefined) ?? null,
+        fallbackProvider:(llm.fallbackProvider as string | undefined) ?? null,
+        fallbackModel:   (llm.fallbackModel   as string | undefined) ?? null,
+        providers,
+      },
+      voice: voiceData,
+      embeddings: embeddingsData,
+      mcp: {
+        total:   mcpServers.length,
+        enabled: mcpServers.filter(s => s.enabled !== false).length,
+        servers: mcpServers.map(s => ({
+          name:        s.name,
+          type:        s.type,
+          description: s.description ?? null,
+          enabled:     s.enabled !== false,
+          command:     s.command ?? null,
+          url:         s.url ?? null,
+        })),
+      },
+      skillsSummary: {
+        total:   skills.length,
+        enabled: skills.filter(s => s.enabled !== false).length,
+      },
+      secretKeys,
+    });
+  });
+
+  // ── Secrets store management ─────────────────────────────────────────────
+
+  // ── Config CRUD ────────────────────────────────────────────────────────────
+
+  // GET /api/configure/config — full config with $KEY refs (no secret values)
+  router.get('/configure/config', (_req, res) => {
+    const cfg = getConfig() as unknown as import('../config/schema.js').Config;
+    const redacted = redactSecretsForDisk(cfg);
+    res.json(redacted);
+  });
+
+  // PATCH /api/configure/config — deep-merge a partial patch, persist to disk
+  router.patch('/configure/config', (req, res) => {
+    const patch = req.body as Record<string, unknown>;
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      res.status(400).json({ error: 'body must be a plain object' });
+      return;
+    }
+    try {
+      patchConfig(cfg => {
+        function deepMerge(target: Record<string, unknown>, src: Record<string, unknown>): void {
+          for (const [k, v] of Object.entries(src)) {
+            if (v !== null && typeof v === 'object' && !Array.isArray(v) &&
+                target[k] !== null && typeof target[k] === 'object' && !Array.isArray(target[k])) {
+              deepMerge(target[k] as Record<string, unknown>, v as Record<string, unknown>);
+            } else {
+              target[k] = v;
+            }
+          }
+        }
+        deepMerge(cfg as unknown as Record<string, unknown>, patch);
+      });
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  // Restart the process (reload config changes that require a restart)
+  router.post('/configure/restart', (_req, res) => {
+    res.json({ ok: true, message: 'Restarting in 600ms…' });
+    setTimeout(() => process.exit(0), 600);
+  });
+
+  // List secret keys (names only — never values)
+  router.get('/configure/secrets', (_req, res) => {
+    const secrets = getAllSecretsSync();
+    res.json({ keys: Object.keys(secrets).sort() });
+  });
+
+  // Save a secret
+  router.post('/configure/secrets', (req, res) => {
+    const { key, value } = req.body as { key?: string; value?: string };
+    if (!key || typeof key !== 'string' || !key.match(/^[A-Z0-9_]+$/)) {
+      res.status(400).json({ error: 'key must be uppercase alphanumeric with underscores' });
+      return;
+    }
+    if (typeof value !== 'string') {
+      res.status(400).json({ error: 'value is required' });
+      return;
+    }
+    setSecretSync(key.toUpperCase(), value);
+    res.json({ ok: true, key: key.toUpperCase() });
+  });
+
+  // Delete a secret
+  router.delete('/configure/secrets/:key', (req, res) => {
+    const key = req.params.key;
+    if (!key.match(/^[A-Z0-9_]+$/)) {
+      res.status(400).json({ error: 'Invalid key format' });
+      return;
+    }
+    deleteSecretSync(key);
+    res.json({ ok: true });
   });
 
   router.get('/memories', (_req, res) => {

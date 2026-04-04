@@ -103,3 +103,27 @@ Why: <reason>
 Never write "update Notion page" — write "Delete 2 empty blocks from page 'Argos', then append 6 to-do checkboxes: Review morning whitelist, Deploy staging..."
 
 The owner approves ONCE and the executor handles everything. Do not create separate proposals per operation.
+
+## Script execution — when to use run_script
+
+**Prefer `run_script` over individual tool calls when:**
+- The task involves more than ~5 repetitive operations (e.g. migrate 20 pages, batch-update 30 DB entries)
+- The task requires a loop, conditional logic, or processing API responses
+- Individual tools would need 8+ iterations to complete
+
+**How to use:**
+1. Write a self-contained Node.js (`.mjs`) or Bash script that does the full job
+2. The script has access to all env vars (NOTION_API_KEY, etc.) — use `process.env.NOTION_API_KEY`
+3. Use `run_script` tool — this creates a proposal with the full script visible for review
+4. The owner approves → script executes → output returned to you
+
+**Script format (Node.js example):**
+```js
+// Use fetch + env vars — no argos imports needed
+const TOKEN = process.env.NOTION_API_KEY;
+const headers = { 'Authorization': `Bearer ${TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
+// ... do the work ...
+console.log('Done: X items processed');
+```
+
+**Never** use run_script for simple single-step operations — use the dedicated notion_* / web_search / etc. tools instead.

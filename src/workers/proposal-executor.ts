@@ -10,6 +10,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { spawn } from 'child_process';
 import { createLogger } from '../logger.js';
 import { getDb } from '../db/index.js';
 import { validateAndConsumeToken } from '../gateway/approval.js';
@@ -112,6 +113,33 @@ export async function executeApprovedProposal(
           break;
         }
 
+        case 'run_script': {
+          const script     = (input.script  ?? details) as string;
+          const lang       = ((input.lang   ?? 'node') as string).toLowerCase();
+          const timeoutSec = (input.timeout ?? 300) as number;
+
+          if (!script?.trim()) { errors.push('run_script: no script provided'); break; }
+
+          log.info(`run_script: executing ${lang} script (timeout ${timeoutSec}s)`);
+          const { output, success } = await runScriptDirect(script, lang, timeoutSec, notifyUser);
+
+          // Save for /rerun
+          try {
+            fs.writeFileSync(
+              path.join(getDataDir(), 'last_script.json'),
+              JSON.stringify({ script, lang, timeout: timeoutSec, ts: Date.now() }),
+              'utf8',
+            );
+          } catch { /* non-blocking */ }
+
+          if (success) {
+            results.push(`✅ Script completed\n\`\`\`\n${output.trim().slice(0, 3000)}\n\`\`\``);
+          } else {
+            errors.push(`❌ Script failed:\n\`\`\`\n${output.trim().slice(0, 2000)}\n\`\`\``);
+          }
+          break;
+        }
+
         case 'Create Notion database':
         case 'Create Notion page':
         case 'notion': {
@@ -175,6 +203,62 @@ export async function executeApprovedProposal(
 }
 
 /**
+ * Execute a script directly with real-time output streaming.
+ * Exported so /rerun can call it from telegram-bot without creating a proposal.
+ */
+export async function runScriptDirect(
+  script: string,
+  lang: string,
+  timeoutSec: number,
+  notifyUser: (text: string) => Promise<void>,
+): Promise<{ output: string; success: boolean }> {
+  const ext     = lang === 'bash' || lang === 'sh' ? '.sh' : '.mjs';
+  const tmpFile = path.join(os.tmpdir(), `argos-script-${Date.now()}${ext}`);
+  fs.writeFileSync(tmpFile, script, { mode: 0o700 });
+
+  let outputBuffer = '';
+  let lastFlushMs  = 0;
+  const FLUSH_INTERVAL = 3000; // max 1 Telegram message every 3s
+
+  const flushOutput = async (force = false) => {
+    const now = Date.now();
+    if (outputBuffer.trim() && (force || now - lastFlushMs >= FLUSH_INTERVAL)) {
+      const chunk = outputBuffer.slice(-2000);
+      await notifyUser(`📜 Script output:\n\`\`\`\n${chunk}\n\`\`\``).catch(() => {});
+      lastFlushMs = now;
+    }
+  };
+
+  let success = false;
+  try {
+    const cmd = lang === 'bash' || lang === 'sh' ? 'bash' : 'node';
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn(cmd, [tmpFile], { env: process.env, timeout: timeoutSec * 1000 });
+      const flushTimer = setInterval(() => { void flushOutput(); }, FLUSH_INTERVAL);
+
+      proc.stdout.on('data', (d: Buffer) => { outputBuffer += d.toString(); });
+      proc.stderr.on('data', (d: Buffer) => { outputBuffer += d.toString(); });
+
+      proc.on('close', (code) => {
+        clearInterval(flushTimer);
+        if (code === 0) resolve();
+        else reject(new Error(`Script exited with code ${code}`));
+      });
+
+      proc.on('error', (err) => { clearInterval(flushTimer); reject(err); });
+    });
+    success = true;
+  } catch (e) {
+    outputBuffer += `\nError: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+  }
+
+  await flushOutput(true);
+  return { output: outputBuffer, success };
+}
+
+/**
  * Use an LLM agent with tools to execute a complex action.
  */
 async function executeWithAgent(prompt: string, llmConfig: LLMConfig): Promise<string> {
@@ -201,8 +285,8 @@ async function executeWithAgent(prompt: string, llmConfig: LLMConfig): Promise<s
       return { output: `File written: ${relPath}` };
     }
 
-    // create_proposal — BLOCK in executor (prevents infinite proposal loop)
-    if (name === 'create_proposal') {
+    // create_proposal / run_script — BLOCK in executor (prevents infinite loops)
+    if (name === 'create_proposal' || name === 'run_script') {
       return { output: 'Already executing an approved proposal — no need to create another one. Use the available tools directly.', error: true };
     }
 

@@ -259,6 +259,17 @@ export class TelegramChannel implements Channel {
     // Skip own messages in group chats
     if (isSelf && !isSavedMessages) return;
 
+    // Skip messages sent by bots — automated notifications, not partner messages
+    if (senderId) {
+      try {
+        const senderEntity = await this.client.getEntity(senderId) as { bot?: boolean };
+        if (senderEntity?.bot === true) {
+          log.debug(`[listener] skipping bot sender ${senderId} in chat ${chatId}`);
+          return;
+        }
+      } catch { /* non-blocking — if we can't resolve, allow through */ }
+    }
+
     log.info(`[listener] message received — chatId=${chatId} senderId=${senderId} isSelf=${isSelf}`);
 
     // Resolve monitored chat from config

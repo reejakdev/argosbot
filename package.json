@@ -25,6 +25,7 @@
     "decrypt": "tsx src/scripts/decrypt.ts",
     "inject": "tsx src/scripts/inject.ts",
     "doctor": "tsx src/scripts/doctor.ts",
+    "status": "tsx src/scripts/status.ts",
     "verify-audit": "tsx src/scripts/verify-audit.ts",
     "test": "vitest run",
     "test:watch": "vitest",

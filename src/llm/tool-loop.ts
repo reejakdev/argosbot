@@ -10,7 +10,7 @@ import { createLogger } from '../logger.js';
 
 const log = createLogger('tool-loop');
 
-const MAX_ITERATIONS = 6;
+const MAX_ITERATIONS = 12;
 
 export interface ToolDefinition {
   name: string;
@@ -55,6 +55,8 @@ export async function runToolLoop(
     model: string;
   }>,
   onEvent?: (event: ToolLoopEvent) => void | Promise<void>,
+  /** Called between tool calls — return a string to inject a user interrupt message. */
+  getInterrupt?: () => string | undefined,
 ): Promise<LLMResponse> {
   // Extract system prompt and build raw message array
   const systemMsg = messages.find(m => m.role === 'system');
@@ -138,9 +140,26 @@ export async function runToolLoop(
         ...(r.is_error && { is_error: true }),
       })),
     });
+
+    // Check for user interrupt injected between tool calls
+    if (getInterrupt) {
+      const interrupt = getInterrupt();
+      if (interrupt) {
+        log.info(`Tool loop: injecting user interrupt — ${interrupt.slice(0, 80)}`);
+        rawMessages.push({ role: 'user', content: `[User sent a new message mid-task]: ${interrupt}` });
+        if (onEvent) await onEvent({ type: 'thinking', text: `↩️ User interrupted: ${interrupt.slice(0, 60)}` });
+      }
+    }
   }
 
   log.info(`Tool loop tokens: ${totalInputTokens}in / ${totalOutputTokens}out (${iterations} iteration${iterations > 1 ? 's' : ''})`);
+
+  // If we exited the loop because we hit MAX_ITERATIONS (not because the model stopped),
+  // the task is incomplete — surface it explicitly so the user knows.
+  if (iterations >= MAX_ITERATIONS) {
+    log.warn(`Tool loop hit MAX_ITERATIONS (${MAX_ITERATIONS}) — task may be incomplete`);
+    finalText += `\n\n⚠️ *Limite atteinte* — j'ai utilisé ${MAX_ITERATIONS} itérations sans terminer. La tâche est incomplète. Dis-moi de continuer ou découpe en sous-tâches plus petites.`;
+  }
 
   return {
     content: finalText,

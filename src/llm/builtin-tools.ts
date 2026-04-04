@@ -91,21 +91,23 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
   // ── Notion tools (direct SDK — full API coverage) ──────────────────────────
   {
     name: 'notion_create',
-    description: 'Create a page in a Notion database. Supports tasks, todos, notes, deals, projects with checkboxes, tags, priority, due date, and custom properties.',
+    description: 'Create a Notion page — either inside a database (use database_type or database_id) or as a subpage of an existing page (use parent_page_id). Use parent_page_id when you want to create a plain subpage, not a database entry.',
     input_schema: {
       type: 'object',
       properties: {
-        title:         { type: 'string', description: 'Page title' },
-        database_type: { type: 'string', enum: ['task', 'todo', 'note', 'partner', 'deal', 'tx_review', 'project', 'meeting', 'doc'], description: 'Type of entry' },
-        database_id:   { type: 'string', description: 'Explicit Notion database ID (overrides database_type routing)' },
-        content:       { type: 'string', description: 'Page body / description' },
-        tags:          { type: 'array', items: { type: 'string' }, description: 'Tags (multi-select)' },
-        priority:      { type: 'string', enum: ['Low', 'Medium', 'High'], description: 'Priority' },
-        due_date:      { type: 'string', description: 'Due date (ISO 8601, e.g. 2026-04-10)' },
-        status:        { type: 'string', description: 'Status value (e.g. "In progress", "Done")' },
-        assignee:      { type: 'string', description: 'Assignee name' },
-        blocks:        { type: 'array', description: 'Custom Notion block objects to append as page body' },
-        properties:    { type: 'object', description: 'Additional raw Notion properties to merge' },
+        title:          { type: 'string', description: 'Page title' },
+        parent_page_id: { type: 'string', description: 'Parent page ID — creates a plain subpage inside that page (not a database entry). Use this instead of database_type when the parent is a page.' },
+        database_type:  { type: 'string', enum: ['task', 'todo', 'note', 'partner', 'deal', 'tx_review', 'project', 'meeting', 'doc'], description: 'Type of entry (only when creating inside a database)' },
+        database_id:    { type: 'string', description: 'Explicit Notion database ID (overrides database_type routing)' },
+        icon:           { type: 'string', description: 'Emoji icon for the page' },
+        content:        { type: 'string', description: 'Page body / description' },
+        tags:           { type: 'array', items: { type: 'string' }, description: 'Tags (multi-select, database pages only)' },
+        priority:       { type: 'string', enum: ['Low', 'Medium', 'High'], description: 'Priority (database pages only)' },
+        due_date:       { type: 'string', description: 'Due date ISO 8601 (database pages only)' },
+        status:         { type: 'string', description: 'Status value (database pages only)' },
+        assignee:       { type: 'string', description: 'Assignee name (database pages only)' },
+        blocks:         { type: 'array', description: 'Custom Notion block objects to append as page body' },
+        properties:     { type: 'object', description: 'Additional raw Notion properties to merge (database pages only)' },
       },
       required: ['title'],
     },
@@ -176,15 +178,14 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'notion_search',
-    description: 'Full-text search across the entire Notion workspace.',
+    description: 'Search or list the Notion workspace. Omit query to list ALL accessible pages/databases (up to 50). Use filter_type to scope to pages or databases only.',
     input_schema: {
       type: 'object',
       properties: {
-        query:       { type: 'string', description: 'Search query' },
+        query:       { type: 'string', description: 'Search query — omit to list everything the integration can access' },
         filter_type: { type: 'string', enum: ['page', 'database'], description: 'Limit to pages or databases' },
-        limit:       { type: 'number', description: 'Max results (default 10)' },
+        limit:       { type: 'number', description: 'Max results (default 50)' },
       },
-      required: ['query'],
     },
   },
   {
@@ -211,6 +212,17 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
         content: { type: 'string', description: 'Comment text' },
       },
       required: ['page_id', 'content'],
+    },
+  },
+  {
+    name: 'notion_delete',
+    description: 'Archive (delete) a Notion page. Use after migrating content, or to clean up empty/unused pages.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string', description: 'Page ID to archive' },
+      },
+      required: ['page_id'],
     },
   },
   {
@@ -244,15 +256,41 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'create_proposal',
-    description: 'Create an approval request for any action that requires user permission. Use this for: creating Notion databases, sending messages, creating tickets, modifying external services, or any write operation. The user will approve/reject in the web app with 2FA.',
+    description: 'Create an approval request for any action that requires user permission. Use this for: creating Notion databases, sending messages, creating tickets, modifying external services, write operations, or running scripts. The user will approve/reject in the web app with 2FA.',
     input_schema: {
       type: 'object',
       properties: {
-        action: { type: 'string', description: 'What to do (e.g. "Create Notion database", "Send reply to partner")' },
-        details: { type: 'string', description: 'Full details of the action (parameters, content, etc.)' },
-        risk: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Risk level' },
+        action:  { type: 'string', description: 'What to do (e.g. "Create Notion database", "Send reply to partner", "run_script")' },
+        details: { type: 'string', description: 'Full details of the action. For run_script: paste the full script here.' },
+        risk:    { type: 'string', enum: ['low', 'medium', 'high'], description: 'Risk level' },
+        actions: {
+          type: 'array',
+          description: 'Structured action list — use instead of details for multi-step or script proposals',
+          items: {
+            type: 'object',
+            properties: {
+              tool:    { type: 'string', description: 'Tool name: write_file | run_script | notion | draft_reply | …' },
+              details: { type: 'string', description: 'Human-readable description of this step' },
+              input:   { type: 'object', description: 'Tool input. For run_script: { script, lang, timeout }' },
+            },
+          },
+        },
       },
       required: ['action', 'details'],
+    },
+  },
+  {
+    name: 'run_script',
+    description: 'Propose running a Node.js or Bash script. Creates an approval request — the script is NOT executed until the user approves. Use this when a task is too complex for individual tools (bulk ops, API loops, data processing). Always show the full script in the proposal so the user can review it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        script:  { type: 'string', description: 'Full script content to execute' },
+        lang:    { type: 'string', enum: ['node', 'bash'], description: 'Language (default: node)' },
+        timeout: { type: 'number', description: 'Max execution time in seconds (default: 300, max: 600)' },
+        reason:  { type: 'string', description: 'Why this script is needed' },
+      },
+      required: ['script'],
     },
   },
   {
@@ -373,7 +411,21 @@ export const executeBuiltinTool: ToolExecutor = async (name, input) => {
     case 'list_proposals':
       return await toolListProposals();
     case 'create_proposal':
-      return await toolCreateProposal(input.action as string, input.details as string, input.risk as string | undefined);
+      return await toolCreateProposal(input.action as string, input.details as string, input.risk as string | undefined, input.actions as unknown[] | undefined);
+    case 'run_script': {
+      // run_script from chat → creates a proposal for approval (never executes inline)
+      const lang    = (input.lang ?? 'node') as string;
+      const timeout = (input.timeout ?? 300) as number;
+      const reason  = (input.reason ?? '') as string;
+      const script  = input.script as string;
+      const details = `${reason ? reason + '\n\n' : ''}Language: ${lang} | Timeout: ${timeout}s\n\n\`\`\`${lang}\n${script}\n\`\`\``;
+      return await toolCreateProposal(
+        'run_script',
+        details,
+        'medium',
+        [{ tool: 'run_script', details: `Run ${lang} script`, input: { script, lang, timeout } }],
+      );
+    }
     case 'api_call':
       return await toolApiCall(input);
     case 'spawn_agent':
@@ -393,6 +445,7 @@ export const executeBuiltinTool: ToolExecutor = async (name, input) => {
     case 'notion_search':
     case 'notion_create_db':
     case 'notion_comment':
+    case 'notion_delete':
       return await toolNotion(name, input);
     default:
       return { output: `Unknown tool: ${name}`, error: true };
@@ -867,13 +920,16 @@ async function createProposalInDb(
   return proposalId;
 }
 
-async function toolCreateProposal(action: string, details: string, risk?: string): Promise<{ output: string; error?: boolean }> {
+async function toolCreateProposal(action: string, details: string, risk?: string, actions?: unknown[]): Promise<{ output: string; error?: boolean }> {
   try {
     const riskLevel = risk ?? 'medium';
+    const actionsPayload = actions && actions.length > 0
+      ? actions
+      : [{ action, details, risk: riskLevel }];
     const proposalId = await createProposalInDb(
       `${action}\n\n${details}`,
       action,
-      [{ action, details, risk: riskLevel }],
+      actionsPayload,
       riskLevel,
     );
 
@@ -1030,6 +1086,10 @@ async function toolNotion(tool: string, input: Record<string, unknown>): Promise
       case 'notion_comment':
         result = await worker.createComment(input as Parameters<NotionWorker['createComment']>[0]);
         break;
+      case 'notion_delete':
+        result = await worker.deletePage(input.page_id as string);
+        break;
+
       default:
         return { output: `Unknown notion tool: ${tool}`, error: true };
     }

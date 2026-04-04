@@ -290,13 +290,28 @@ openssl req -x509 -newkey rsa:4096 -keyout ~/.argos/tls/key.pem \
 ## Commands
 
 ```bash
-npm run dev           # hot reload
-npm run build         # compile TypeScript
-npm start             # production
-npm run setup         # interactive setup
-npm run doctor        # health check + diagnostics
-npm run anon-test     # test anonymizer patterns on a string
+npm run dev             # hot reload
+npm run build           # compile TypeScript
+npm start               # production
+npm run setup           # interactive setup wizard
+npm run doctor          # health check (--fix, --llm, --all, --json)
+npm run status          # live snapshot: proposals, tasks, memories (--watch)
+npm run verify-audit    # verify tamper-evident audit log chain
+npm run anon-test       # test anonymizer patterns on a string
+npm run decrypt         # decrypt stored message by ID (if encryptMessages: true)
 ```
+
+---
+
+## Documentation
+
+Full guides in [docs/](./docs/):
+
+- [Getting Started](./docs/getting-started.md) — install + first run
+- [Configuration](./docs/configuration.md) — full config reference
+- [Security](./docs/security.md) — YubiKey, cloudMode, audit log
+- [Privacy](./docs/privacy.md) — anonymization pipeline
+- [Integrations](./docs/integrations.md) — all channels and services
 
 ---
 

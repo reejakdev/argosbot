@@ -8,11 +8,12 @@ import Tasks from './pages/Tasks.tsx';
 import MemoryPage from './pages/MemoryPage.tsx';
 import History from './pages/History.tsx';
 import Status from './pages/Status.tsx';
+import Configure from './pages/Configure.tsx';
 import { ToastProvider } from './components/Toast.tsx';
 import { useWebSocket } from './hooks/useWebSocket.ts';
 
 type AppState = 'loading' | 'setup' | 'login' | 'app';
-type Page = 'approvals' | 'tasks' | 'memory' | 'history' | 'status';
+type Page = 'approvals' | 'tasks' | 'memory' | 'history' | 'status' | 'configure';
 
 export default function App() {
   const [appState, setAppState] = useState<AppState>('loading');
@@ -94,6 +95,7 @@ export default function App() {
         {page === 'memory' && <MemoryPage />}
         {page === 'history' && <History />}
         {page === 'status' && <Status onLogout={() => setAppState('login')} />}
+        {page === 'configure' && <Configure />}
       </Layout>
     </ToastProvider>
   );
