@@ -83,11 +83,15 @@ async function probeKeychain(): Promise<void> {
       if (!existing) await kt.setPassword(KEYCHAIN_SERVICE, k, v);
     }
 
-    // ── Load any keychain-only secrets into cache ─────────────────────────
+    // ── Load any keychain-only secrets into cache + file ─────────────────────
     const creds = await kt.findCredentials(KEYCHAIN_SERVICE);
+    let addedToFile = 0;
     for (const { account, password } of creds) {
+      if (!_cache[account]) addedToFile++;
       _cache[account] = password;
     }
+    // Sync keychain → file so next boot's sync read has everything
+    if (addedToFile > 0) writeSecretsFile(_cache);
 
     log.info(`Secrets upgraded to system keychain (${creds.length} entries)`);
   } catch {
@@ -125,27 +129,27 @@ export function getAllSecretsSync(): Record<string, string> {
   return { ..._cache };
 }
 
-/** Write one secret — sync to file, fire-and-forget to keychain. */
+/** Write one secret — sync to file always, fire-and-forget to keychain. */
 export function setSecretSync(key: string, value: string): void {
   _cache[key] = value;
+  // Always persist to file so next boot's sync read sees it regardless of keychain timing
+  writeSecretsFile(_cache);
   if (_backend === 'keychain' && _keytar) {
     _keytar.setPassword(KEYCHAIN_SERVICE, key, value).catch((e: unknown) => {
       log.warn(`Keychain write failed for ${key}: ${e}`);
     });
-  } else {
-    writeSecretsFile(_cache);
   }
 }
 
-/** Write many secrets atomically — sync to file, fire-and-forget to keychain. */
+/** Write many secrets atomically — sync to file always, fire-and-forget to keychain. */
 export function setManySecretsSync(entries: Record<string, string>): void {
   Object.assign(_cache, entries);
+  // Always persist to file so next boot's sync read sees it regardless of keychain timing
+  writeSecretsFile(_cache);
   if (_backend === 'keychain' && _keytar) {
     const kt = _keytar;
     Promise.all(Object.entries(entries).map(([k, v]) => kt.setPassword(KEYCHAIN_SERVICE, k, v)))
       .catch((e: unknown) => log.warn(`Keychain bulk write failed: ${e}`));
-  } else {
-    writeSecretsFile(_cache);
   }
 }
 

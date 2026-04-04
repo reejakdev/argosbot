@@ -85,6 +85,7 @@ export interface RawMessage {
   // ─── Threading ───────────────────────────────────────────────────────────
   replyToId?:   string;
   threadId?:    string;
+  threadName?:  string; // Forum topic name (resolved from threadId)
 
   // ─── Timestamps ──────────────────────────────────────────────────────────
   /** When Argos received the message (unix ms) */
@@ -134,6 +135,7 @@ export interface ContextWindow {
   channel?:         string;
   chatId:           string;
   chatName?:        string;
+  threadName?:      string; // Forum topic name if chatType === 'thread'
   partnerName?:     string;
   /** Messages in this batch (the new incoming ones) */
   messages:         SanitizedMessage[];

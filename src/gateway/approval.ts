@@ -32,10 +32,19 @@ const log = createLogger('approval');
 type SendMessageFn = (chatId: string, text: string, options?: unknown) => Promise<{ message_id: number }>;
 let _sendMessage: SendMessageFn | null = null;
 let _approvalChatId: string = '';
+let _cloudMode = false;
 
-export function initApprovalGateway(sendMessage: SendMessageFn, approvalChatId: string): void {
+export function initApprovalGateway(
+  sendMessage: SendMessageFn,
+  approvalChatId: string,
+  cloudMode = false,
+): void {
   _sendMessage = sendMessage;
   _approvalChatId = approvalChatId;
+  _cloudMode = cloudMode;
+  if (cloudMode) {
+    log.warn('Security: cloudMode=true — Telegram approval fully disabled, YubiKey required for all proposals');
+  }
   log.info(`Approval gateway initialized → chat ${approvalChatId}`);
 }
 
@@ -86,6 +95,8 @@ function formatApprovalMessage(proposal: Proposal): string {
 // This function is the single enforcement point — called before any Telegram approval.
 
 export function proposalRequiresYubiKey(actions: ProposedAction[]): boolean {
+  // cloudMode: ALL proposals require YubiKey regardless of risk level
+  if (_cloudMode) return true;
   return actions.some(a => a.risk === 'medium' || a.risk === 'high');
 }
 

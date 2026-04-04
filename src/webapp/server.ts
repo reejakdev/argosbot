@@ -36,6 +36,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // React build output (produced by `npm run build:client`)
 const CLIENT_DIST = path.resolve(__dirname, '../../dist/client');
 import { getDb } from '../db/index.js';
+import { getChannelStatuses } from '../ingestion/channels/registry.js';
 import {
   hasRegisteredKeys,
   requireAuth,
@@ -1406,6 +1407,26 @@ export function startWebApp(options: WebAppOptions): void {
 
   const app = express();
 
+  // ── Health check — no auth, no CORS restriction (for monitoring tools) ───
+  const startedAt = Date.now();
+  app.get('/health', (_req, res) => {
+    let dbStatus: 'ok' | 'error' = 'ok';
+    try {
+      getDb().prepare('SELECT 1').get();
+    } catch {
+      dbStatus = 'error';
+    }
+    const channels = getChannelStatuses();
+    const degraded = dbStatus === 'error' || channels.some(c => c.status === 'failed');
+    res.status(degraded ? 503 : 200).json({
+      status: degraded ? 'degraded' : 'ok',
+      version: '0.1.0',
+      uptime: Math.round((Date.now() - startedAt) / 1000),
+      db: dbStatus,
+      channels,
+    });
+  });
+
   // ── Security headers ──────────────────────────────────────────────────────
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -1441,32 +1462,36 @@ export function startWebApp(options: WebAppOptions): void {
     next();
   });
 
-  // ── Rate limiting for auth routes ─────────────────────────────────────────
-  const authAttempts = new Map<string, { count: number; resetAt: number }>();
-  const AUTH_RATE_WINDOW = 60_000;  // 1 minute
-  const AUTH_RATE_LIMIT = 10;       // max attempts per window
-
-  function rateLimitAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {
-    const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
-    const now = Date.now();
-    const entry = authAttempts.get(ip);
-    if (entry && entry.resetAt > now) {
-      if (entry.count >= AUTH_RATE_LIMIT) {
-        res.status(429).json({ error: 'Too many auth attempts — try again later' });
-        return;
+  // ── Rate limiting ────────────────────────────────────────────────────────
+  function makeRateLimiter(maxReq: number, windowMs: number, message: string) {
+    const buckets = new Map<string, { count: number; resetAt: number }>();
+    return function rateLimiter(req: express.Request, res: express.Response, next: express.NextFunction): void {
+      const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+      const now = Date.now();
+      const entry = buckets.get(ip);
+      if (entry && entry.resetAt > now) {
+        if (entry.count >= maxReq) {
+          res.status(429).json({ error: message });
+          return;
+        }
+        entry.count++;
+      } else {
+        buckets.set(ip, { count: 1, resetAt: now + windowMs });
       }
-      entry.count++;
-    } else {
-      authAttempts.set(ip, { count: 1, resetAt: now + AUTH_RATE_WINDOW });
-    }
-    // Cleanup old entries periodically
-    if (authAttempts.size > 1000) {
-      for (const [key, val] of authAttempts) {
-        if (val.resetAt < now) authAttempts.delete(key);
+      // Prune stale entries periodically
+      if (buckets.size > 2000) {
+        for (const [key, val] of buckets) {
+          if (val.resetAt < now) buckets.delete(key);
+        }
       }
-    }
-    next();
+      next();
+    };
   }
+
+  // Auth: 10 req/min (brute-force protection)
+  const rateLimitAuth = makeRateLimiter(10, 60_000, 'Too many auth attempts — try again later');
+  // API: 120 req/min per IP (normal usage ceiling)
+  const rateLimitApi  = makeRateLimiter(120, 60_000, 'Too many requests — slow down');
 
   app.use(express.json());
 
@@ -1474,6 +1499,9 @@ export function startWebApp(options: WebAppOptions): void {
   app.use('/api/auth/login', rateLimitAuth);
   app.use('/api/auth/register', rateLimitAuth);
   app.use('/api/auth/totp', rateLimitAuth);
+
+  // Rate limit all other API endpoints
+  app.use('/api', rateLimitApi);
 
   // WebAuthn routes + authenticated API
   app.use('/api', buildApi(options.sendToApprovalChat, options.getConfig));

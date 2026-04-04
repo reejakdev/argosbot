@@ -362,12 +362,16 @@ function buildUserPrompt(
     ? `\n=== AGENT PRE-ANALYSIS ===\n${window.agentContext}\n`
     : '';
 
+  const duplicateNote = result.isDuplicate
+    ? `\n⚠️  DUPLICATE FLAG: This is a repeat of a previous request. The partner has NOT received a reply yet — draft a reply to acknowledge and handle it, or escalate to the owner.`
+    : '';
+
   return `=== INCOMING MESSAGES (${window.messages.length} in batch) ===
-Partner: ${window.partnerName ?? 'unknown'} | Chat: ${window.chatId}
+Partner: ${window.partnerName ?? 'unknown'} | Chat: ${window.chatId}${window.threadName ? ` | Topic: ${window.threadName}` : ''}
 Category: ${result.category} | Urgency: ${result.urgency} | Importance: ${result.importance}/10
 Is my task: ${result.isMyTask} | Team: ${result.assignedTeam ?? 'none'}
 Tags: ${result.tags.join(', ') || 'none'}
-
+${duplicateNote}
 Classification summary: ${result.summary}
 
 ${messages}
@@ -376,7 +380,8 @@ ${messages}
 ${relevantMemories || '(no relevant previous context)'}
 ${agentSection}
 Based on this, propose the appropriate actions using the available tools.${window.agentContext ? '\nAgent pre-analysis is provided above — use it directly, do not re-run the same analysis.' : ''}
-If this is category "ignore" or importance < 3, you may propose nothing.`;
+If this is category "ignore" or importance < 3, you may propose nothing.
+For client_request or task categories with requiresAction=true, ALWAYS propose at minimum a draft_reply — even if it's to acknowledge receipt and say you'll follow up.`;
 }
 
 // ─── Tool call → ProposedAction ───────────────────────────────────────────────

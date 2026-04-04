@@ -599,6 +599,28 @@ export class TelegramBot {
   }
 
   private async handleCommand(chatId: string, userId: string, text: string): Promise<void> {
+    // /done_XXXXXX shortcut (Telegram inline command with underscore-separated ID)
+    const doneShortcut = text.match(/^\/done_([A-Z0-9]+)(@\S+)?$/i);
+    if (doneShortcut) {
+      const shortId = doneShortcut[1];
+      try {
+        const { getDb } = await import('../../db/index.js');
+        const db = getDb();
+        const row = db.prepare(
+          "SELECT id, title FROM tasks WHERE id LIKE ? AND status IN ('open','in_progress','done_inferred') LIMIT 1"
+        ).get(`%${shortId}`) as { id: string; title: string } | null;
+        if (!row) {
+          await this.sendMessage(chatId, `⚠️ Task \`${shortId}\` not found or already closed.`);
+        } else {
+          db.prepare("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?").run(Date.now(), row.id);
+          await this.sendMessage(chatId, `✅ *${row.title.slice(0, 80)}* marked as done.`);
+        }
+      } catch (e) {
+        await this.sendMessage(chatId, `⚠️ Error: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      return;
+    }
+
     const [cmd, ...args] = text.split(' ');
     const arg = args.join(' ');
 
@@ -711,14 +733,16 @@ export class TelegramBot {
           const { getDb } = await import('../../db/index.js');
           const db = getDb();
           const rows = db.prepare(
-            "SELECT id, title, urgency, detected_at FROM tasks WHERE status IN ('open','in_progress') ORDER BY detected_at DESC LIMIT 15"
-          ).all() as Array<{ id: string; title: string; urgency: string; detected_at: number }>;
+            "SELECT id, title, status, partner_name, message_url, detected_at FROM tasks WHERE status IN ('open','in_progress','done_inferred') ORDER BY detected_at DESC LIMIT 15"
+          ).all() as Array<{ id: string; title: string; status: string; partner_name: string | null; message_url: string | null; detected_at: number }>;
           if (!rows.length) {
             await this.sendMessage(chatId, '✅ No open tasks.');
           } else {
-            const list = rows.map(r =>
-              `• \`${r.id.slice(-6)}\` [${r.urgency}] ${r.title.slice(0, 80)}\n  /done_${r.id.slice(-6)}`
-            ).join('\n');
+            const list = rows.map(r => {
+              const partner = r.partner_name ? ` _${r.partner_name}_` : '';
+              const link = r.message_url ? `\n  [↗ source](${r.message_url})` : '';
+              return `• \`${r.id.slice(-6)}\` ${r.title.slice(0, 80)}${partner}${link}\n  /done_${r.id.slice(-6)}`;
+            }).join('\n\n');
             await this.sendMessage(chatId, `📋 *Open tasks (${rows.length}):*\n\n${list}`);
           }
         } catch (e) {
@@ -1110,8 +1134,8 @@ You are meeting this user for the first time. You MUST:
     const { callAnthropicBearerRaw } = await import('../../llm/index.js');
     const { getMcpTools, executeMcpToolSafe } = await import('../../mcp/client.js');
 
-    // Merge builtin + MCP tools — MCP writes go through proposal (safe mode)
-    const allTools = [...BUILTIN_TOOLS, ...getMcpTools()];
+    // Merge builtin + MCP tools — exclude notion-mcp (use notion_* builtins instead)
+    const allTools = [...BUILTIN_TOOLS, ...getMcpTools().filter(t => !t.name.startsWith('mcp_notion-mcp_'))];
     const combinedExecutor = async (name: string, input: Record<string, unknown>) => {
       if (name.startsWith('mcp_')) return executeMcpToolSafe(name, input);
       return executeBuiltinTool(name, input);
@@ -1249,12 +1273,19 @@ You are meeting this user for the first time. You MUST:
 
     // Final render: edit stream bubble in place (no flicker) or send fresh if no stream bubble
     if (streamMsgId) {
+      // Try Markdown first; fall back to plain edit (NOT sendMessage — avoid duplicate)
       const edited = await this.api('editMessageText', {
         chat_id: chatId,
         message_id: streamMsgId,
         text: displayContent,
         parse_mode: 'Markdown',
+      }).catch(() => null) ??
+      await this.api('editMessageText', {
+        chat_id: chatId,
+        message_id: streamMsgId,
+        text: displayContent,
       }).catch(() => null);
+      // Only send fresh if both edits failed (e.g. message deleted by user)
       if (!edited) await this.sendMessage(chatId, displayContent);
     } else {
       await this.sendMessage(chatId, displayContent);

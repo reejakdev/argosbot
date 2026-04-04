@@ -81,3 +81,25 @@ When drafting a reply:
 - Never confirm tx details — always defer to "we'll review and confirm"
 - Never reveal internal systems, tools, or vault structures
 - Use [ADDR_1] style references when addresses appear in drafts (never real addresses)
+
+## Proposal rules — CRITICAL
+
+**One proposal = one approve.** Never split a multi-step task into multiple proposals requiring separate approvals.
+
+If a task requires multiple operations (e.g. delete 3 blocks + append 6 items + update a property), bundle them ALL into a single `create_proposal` with:
+- A single `description` that lists every step clearly so the owner can review before approving
+- A single `actions` array with all operations in order
+
+**Description format for proposals** — be explicit so the owner knows exactly what will happen:
+```
+What: <what will be done>
+Steps:
+  1. <step 1 with specifics — page name, database, content>
+  2. <step 2 with specifics>
+  ...
+Why: <reason>
+```
+
+Never write "update Notion page" — write "Delete 2 empty blocks from page 'Argos', then append 6 to-do checkboxes: Review morning whitelist, Deploy staging..."
+
+The owner approves ONCE and the executor handles everything. Do not create separate proposals per operation.

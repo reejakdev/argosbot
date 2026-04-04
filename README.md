@@ -2,11 +2,14 @@
 
 > **Read by default. Sanitize before memory. Approve before action.**
 
-A local-first AI operations layer for professionals and teams.
+A local-first AI operations layer built for one person.
 Argos monitors your messages, classifies signals, and proposes actions — you approve, it executes.
 Raw data never leaves your machine. Nothing runs without your sign-off.
 
 Named after *Argos Panoptes* — the hundred-eyed giant who never slept, but acted only on orders.
+
+> **Current version: single-user only.**
+> Argos runs as a personal assistant for one owner. Multi-user and enterprise support is on the roadmap — see [Roadmap](#roadmap) below.
 
 ---
 
@@ -318,6 +321,28 @@ npx vitest run src/tests/
 ```
 
 Covers: `chunkText`, `chunkCode` (brace-aware splitting, mBASIS bug regression), `storeQuick`, FTS5 search, archive, `purgeExpired`, `formatVerificationNotif` (whitelist score bar, decision icons).
+
+---
+
+## Roadmap
+
+### v1 — Personal, local (current)
+Single user, runs on your Mac or a VPS. All data stays on-device.
+All core features shipped: multi-channel ingestion, privacy pipeline, approval gateway, YubiKey auth, workers, knowledge base, memory.
+
+### v2 — Extended channels + omniscience (in progress)
+Wallet monitoring, Linear, GitHub issues, Google Drive, Slack, Discord, Signal.
+Proactive heartbeat — Argos surfaces what matters without being asked.
+
+### v2.5 — Cloud-ready solo
+`security.cloudMode` for secure VPS deployment (YubiKey required for all approvals).
+Cloudflare Tunnel + Zero Trust access layer.
+Tamper-evident audit log with hash chain verification (`npm run verify-audit`).
+
+### v3 — Enterprise
+Multi-user, per-user permission model, team routing, org-wide knowledge base.
+Docker image, SSO/SAML, SOC2 audit export.
+If you want early access or are interested in an enterprise build, open an issue.
 
 ---
 

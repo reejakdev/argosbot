@@ -17,6 +17,25 @@ import type { LLMConfig } from '../llm/index.js';
 
 const log = createLogger('executor');
 
+/** Retry an async worker action on transient failures (network, 429, 5xx). */
+async function withWorkerRetry<T>(label: string, fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastError = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      const retryable = /\b(5\d\d|429|rate.limit|timeout|ECONNREFUSED|ECONNRESET|ETIMEDOUT)/i.test(msg);
+      if (!retryable || attempt === maxAttempts - 1) throw e;
+      const delay = 1000 * (2 ** attempt); // 1s → 2s → 4s
+      log.warn(`Worker "${label}" failed (attempt ${attempt + 1}/${maxAttempts}), retrying in ${delay}ms — ${msg}`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastError;
+}
+
 function getDataDir(): string {
   const dir = process.env.DATA_DIR ?? path.join(os.homedir(), '.argos');
   return dir.startsWith('~') ? path.join(os.homedir(), dir.slice(1)) : dir;
@@ -50,12 +69,19 @@ export async function executeApprovedProposal(
 
   const db = getDb();
   const proposal = db.prepare(
-    "SELECT id, plan, actions, context_summary FROM proposals WHERE id = ?"
-  ).get(proposalId) as { id: string; plan: string; actions: string; context_summary: string } | undefined;
+    "SELECT id, plan, actions, context_summary, execution_count FROM proposals WHERE id = ?"
+  ).get(proposalId) as { id: string; plan: string; actions: string; context_summary: string; execution_count: number } | undefined;
 
   if (!proposal) {
     return { success: false, results: [], errors: ['Proposal not found'] };
   }
+
+  // Idempotency guard — increment atomically; block if already executed
+  if (proposal.execution_count > 0) {
+    log.warn(`Idempotency: proposal ${proposalId} already executed ${proposal.execution_count} time(s) — blocking duplicate`);
+    return { success: false, results: [], errors: [`Already executed (count: ${proposal.execution_count})`] };
+  }
+  db.prepare("UPDATE proposals SET execution_count = execution_count + 1 WHERE id = ?").run(proposalId);
 
   const actions = JSON.parse(proposal.actions) as Array<Record<string, unknown>>;
   const results: string[] = [];
@@ -89,10 +115,10 @@ export async function executeApprovedProposal(
         case 'Create Notion database':
         case 'Create Notion page':
         case 'notion': {
-          const result = await executeWithAgent(
+          const result = await withWorkerRetry(tool, () => executeWithAgent(
             `Execute this Notion action:\n${details}\n\nUse the available tools to complete this task.`,
             llmConfig,
-          );
+          ));
           results.push(`✅ Notion: ${result}`);
           break;
         }
@@ -102,12 +128,12 @@ export async function executeApprovedProposal(
           const { sendDirectReply } = await import('./index.js');
           const { loadConfig } = await import('../config/index.js');
           const cfg = loadConfig();
-          const r = await sendDirectReply(
+          const r = await withWorkerRetry(tool, () => sendDirectReply(
             String(input.to ?? ''),
             String(input.chatId ?? input.to ?? ''),
             String(input.content ?? ''),
             cfg,
-          );
+          ));
           results.push(r.success ? `✅ ${r.output}` : `❌ ${r.output}`);
           if (r.dryRun) log.warn('draft_reply: dryRun=true — MTProto not ready or readOnly');
           break;
@@ -115,10 +141,10 @@ export async function executeApprovedProposal(
 
         default: {
           // Generic action — use LLM agent to figure out how to execute
-          const result = await executeWithAgent(
+          const result = await withWorkerRetry(tool, () => executeWithAgent(
             `Execute this action: ${tool}\nDetails: ${details}\n\nContext: ${proposal.context_summary}`,
             llmConfig,
-          );
+          ));
           results.push(`✅ ${tool}: ${result}`);
           break;
         }
@@ -157,7 +183,9 @@ async function executeWithAgent(prompt: string, llmConfig: LLMConfig): Promise<s
   const { BUILTIN_TOOLS, executeBuiltinTool } = await import('../llm/builtin-tools.js');
   const { getMcpTools, executeMcpTool } = await import('../mcp/client.js');
 
-  const tools = [...BUILTIN_TOOLS, ...getMcpTools()];
+  // Exclude mcp_notion-mcp_* tools — we use notion_* builtin tools instead (full SDK coverage)
+  const mcpTools = getMcpTools().filter(t => !t.name.startsWith('mcp_notion-mcp_'));
+  const tools = [...BUILTIN_TOOLS, ...mcpTools];
 
   // Executor: approved actions execute DIRECTLY — no more proposals!
   const executor = async (name: string, input: Record<string, unknown>) => {
@@ -178,7 +206,12 @@ async function executeWithAgent(prompt: string, llmConfig: LLMConfig): Promise<s
       return { output: 'Already executing an approved proposal — no need to create another one. Use the available tools directly.', error: true };
     }
 
-    // MCP tools — execute directly (all Notion etc. goes through MCP)
+    // Block mcp_notion-mcp_* — use notion_* builtin tools instead
+    if (name.startsWith('mcp_notion-mcp_')) {
+      return { output: 'Use notion_create / notion_update / notion_query / notion_search instead of mcp_notion-mcp_* tools.', error: true };
+    }
+
+    // Other MCP tools — execute directly
     if (name.startsWith('mcp_')) {
       return executeMcpTool(name, input);
     }
@@ -188,10 +221,40 @@ async function executeWithAgent(prompt: string, llmConfig: LLMConfig): Promise<s
   };
 
   const messages = [
-    { role: 'system' as const, content: 'You are an execution agent. Complete the requested action using available tools. Be precise and report what you did.' },
+    { role: 'system' as const, content: `You are an execution agent. Complete the requested action using available tools.
+
+## Tool priority for Notion
+ALWAYS use notion_* tools (notion_create, notion_update, notion_get, notion_get_content, notion_append, notion_query, notion_search, notion_create_db, notion_comment).
+NEVER use api_call for Notion — the auth injection doesn't work.
+NEVER use mcp_notion-mcp_* tools — they are disabled.
+
+## Batching
+Group ALL related operations into the fewest tool calls possible. For example: if you need to delete 3 blocks and add 6 items, do it in 2 tool calls (one delete loop, one append), not 9 separate calls.
+
+## Rules
+1. Execute the task fully using the correct tools.
+2. After executing, VERIFY by reading back what you created/modified (notion_get, notion_get_content). Never skip verification.
+3. If the result doesn't match what was asked — fix it in the same execution, don't stop.
+4. If a tool returns 404/403: STOP, report exact error with fix instructions. Never create workarounds.
+5. End your response with exactly one of:
+   - "RESULT: SUCCESS — <what was done and verified>" if fully complete
+   - "RESULT: PARTIAL — <what worked> / <what failed>" if partial
+   - "RESULT: FAILED — <exact reason>" if nothing worked` },
     { role: 'user' as const, content: prompt },
   ];
 
   const response = await runToolLoop(llmConfig, messages[0].content, messages, tools, executor, callAnthropicBearerRaw);
-  return response.content || 'Action completed (no output)';
+  const output = response.content || '';
+
+  // Parse result tag — if agent reports PARTIAL or FAILED, surface as error
+  const resultMatch = output.match(/RESULT:\s*(SUCCESS|PARTIAL|FAILED)\s*[—-]\s*(.+)/i);
+  if (resultMatch) {
+    const status = resultMatch[1].toUpperCase();
+    const detail = resultMatch[2].trim();
+    if (status === 'FAILED') throw new Error(detail);
+    if (status === 'PARTIAL') return `⚠️ Partial: ${detail}`;
+    return `✅ ${detail}`;
+  }
+
+  return output || 'Action completed (no output)';
 }

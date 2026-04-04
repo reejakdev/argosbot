@@ -187,10 +187,12 @@ export async function cmdTeamOwn(args: string[], send: SendFn): Promise<void> {
 export async function cmdAddHandle(args: string[], send: SendFn): Promise<void> {
   if (args.length < 2) { await send('❌ Usage: /add_handle <équipe> <handle>'); return; }
   const [name, handle] = args;
-  const norm = handle; // store as-is; matching works with or without @
+  const norm = handle.startsWith('@') ? handle : `@${handle}`;  // always store with @
   const found = getConfig().triage.watchedTeams.find(t => t.name.toLowerCase() === name.toLowerCase());
   if (!found) { await send(`❌ Équipe *${name}* introuvable. /add_team ${name} pour la créer.`); return; }
-  if (found.handles.includes(norm)) { await send(`⚠️ \`${norm}\` déjà dans l'équipe *${found.name}*`); return; }
+  if (found.handles.some(h => h.replace(/^@/, '') === norm.replace(/^@/, ''))) {
+    await send(`⚠️ \`${norm}\` déjà dans l'équipe *${found.name}*`); return;
+  }
   patchConfig(c => {
     const t = c.triage.watchedTeams.find(t => t.name.toLowerCase() === name.toLowerCase());
     t?.handles.push(norm);
@@ -201,14 +203,20 @@ export async function cmdAddHandle(args: string[], send: SendFn): Promise<void> 
 export async function cmdRemoveHandle(args: string[], send: SendFn): Promise<void> {
   if (args.length < 2) { await send('❌ Usage: /remove_handle <équipe> <handle>'); return; }
   const [name, handle] = args;
-  const norm = handle;
+  const norm = handle.replace(/^@/, '');  // strip @ for comparison
   const found = getConfig().triage.watchedTeams.find(t => t.name.toLowerCase() === name.toLowerCase());
   if (!found) { await send(`❌ Équipe *${name}* introuvable`); return; }
+  const before = found.handles.length;
   patchConfig(c => {
     const t = c.triage.watchedTeams.find(t => t.name.toLowerCase() === name.toLowerCase());
-    if (t) t.handles = t.handles.filter(h => h !== norm);
+    if (t) t.handles = t.handles.filter(h => h.replace(/^@/, '') !== norm);
   });
-  await send(`✅ \`${norm}\` retiré de l'équipe *${found.name}*`);
+  const after = getConfig().triage.watchedTeams.find(t => t.name.toLowerCase() === name.toLowerCase())?.handles.length ?? 0;
+  if (after === before) {
+    await send(`⚠️ Handle \`${handle}\` non trouvé dans l'équipe *${found.name}*`);
+  } else {
+    await send(`✅ \`${handle}\` retiré de l'équipe *${found.name}*`);
+  }
 }
 
 // ─── /add_keyword / /remove_keyword ──────────────────────────────────────────

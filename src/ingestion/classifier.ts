@@ -44,6 +44,8 @@ function buildPrompt(
   ownerTeams: string[],
   ownerRoles: string[],
   openTasks: Task[],
+  ownerName?: string,
+  myHandles?: string[],
 ): string {
   const prevContext = window.previousMessages.length > 0
     ? window.previousMessages
@@ -62,12 +64,16 @@ function buildPrompt(
   const teamContext = ownerTeams.length > 0
     ? `Owner teams: ${ownerTeams.join(', ')}\nOwner roles: ${ownerRoles.join(', ')}`
     : 'Owner teams: not specified';
+  const ownerCtx = [
+    ownerName ? `Owner name: ${ownerName}` : '',
+    myHandles?.length ? `Owner handles (messages mentioning these are likely directed at the owner): ${myHandles.join(', ')}` : '',
+  ].filter(Boolean).join('\n');
 
   return `You are a message classifier for an operations assistant.
 You receive anonymized messages (placeholders like [ADDR_1], [PERSON_1] are redacted — never guess them).
 
-${teamContext}
-Partner: ${window.partnerName ?? 'unknown'}
+${teamContext}${ownerCtx ? `\n${ownerCtx}` : ''}
+Partner: ${window.partnerName ?? 'unknown'}${window.threadName ? `\nTopic/thread: ${window.threadName}` : ''}
 
 ${prevContext ? `=== PREVIOUS CONTEXT (same chat, before this batch) ===\n${prevContext}\n` : ''}
 === INCOMING MESSAGES (${window.messages.length} in batch) ===
@@ -104,11 +110,12 @@ Classification guide:
 - "ignore": noise, social, irrelevant
 
 taskScope:
-- "my_task" → clearly for the owner's team (${ownerTeams.join('/')}) or role
-- "team_task" → for a colleague or shared team responsibility
-- "info_only" → FYI, no ownership
+- "my_task" → owner is explicitly addressed or named, OR the task clearly falls under owner's direct responsibility
+- "team_task" → for a colleague or shared team responsibility — owner is CC'd but not the actor
+- "info_only" → FYI, no ownership, conversation between other parties
 
-ownerConfidence: how sure you are about taskScope (0 = guessing, 1 = explicit tag/address)
+ownerConfidence: how sure you are that the owner must act (0 = guessing, 1 = explicit mention/address)
+IMPORTANT: if the owner's name/handle is NOT mentioned and the message is a conversation between other parties, set isMyTask=false, taskScope="info_only", ownerConfidence ≤ 0.3
 
 completionSignal:
 - "none" → no completion indicator
@@ -129,7 +136,14 @@ export async function classify(
   config: Config,
 ): Promise<ClassificationResult> {
   const openTasks = getOpenTasks(window.chatId, window.partnerName);
-  const prompt = buildPrompt(window, config.owner.teams, config.owner.roles, openTasks);
+  const prompt = buildPrompt(
+    window,
+    config.owner.teams,
+    config.owner.roles,
+    openTasks,
+    config.owner.name,
+    config.triage?.myHandles,
+  );
   const systemPrompt = buildSystemPrompt('classifier', config);
 
   log.debug(`Classifying window ${window.id}`, {

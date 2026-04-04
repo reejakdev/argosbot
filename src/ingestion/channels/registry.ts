@@ -30,8 +30,12 @@ export interface Channel {
 
 const channels = new Map<string, Channel>();
 
+export type ChannelHealth = 'registered' | 'started' | 'failed';
+const channelHealth = new Map<string, ChannelHealth>();
+
 export function registerChannel(channel: Channel): void {
   channels.set(channel.name, channel);
+  channelHealth.set(channel.name, 'registered');
   log.info(`Channel registered: ${channel.name}`);
 }
 
@@ -42,11 +46,20 @@ export async function startAllChannels(
     channel.onMessage(onMessage);
     try {
       await channel.start();
+      channelHealth.set(channel.name, 'started');
       log.info(`Channel started: ${channel.name}`);
     } catch (e) {
+      channelHealth.set(channel.name, 'failed');
       log.error(`Channel "${channel.name}" failed to start — skipping`, e);
     }
   }
+}
+
+export function getChannelStatuses(): Array<{ name: string; status: ChannelHealth }> {
+  return Array.from(channels.keys()).map(name => ({
+    name,
+    status: channelHealth.get(name) ?? 'registered',
+  }));
 }
 
 export async function stopAllChannels(): Promise<void> {

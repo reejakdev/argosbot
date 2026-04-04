@@ -176,7 +176,7 @@ export default function Tasks() {
                     className="text-sm leading-snug mb-1.5"
                     style={{
                       fontFamily: "'Inter', sans-serif",
-                      color: t.is_my_task ? '#7b96ff' : '#f0f4ff',
+                      color: t.is_my_task ? '#4f6eff' : '#111827',
                       fontWeight: t.is_my_task ? 500 : 400,
                     }}
                   >

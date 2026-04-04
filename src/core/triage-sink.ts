@@ -69,7 +69,8 @@ async function sinkTask(
     }
     const icon   = isMyTask ? '📋' : '👥';
     const urgent = result.urgency === 'high' ? ' 🔴' : '';
-    await notify(`${icon} *${result.title}*${urgent} _(task already open)_\n_${result.partner}_`).catch(() => {});
+    const link   = result.messageUrl ? `\n[↗ source](${result.messageUrl})` : '';
+    await notify(`${icon} *${result.title}*${urgent} _(task already open)_\n_${result.partner}_${link}`).catch(() => {});
     return;
   }
 
@@ -78,8 +79,8 @@ async function sinkTask(
   // 1. SQLite — always
   db.prepare(`
     INSERT INTO tasks (id, title, description, category, source_ref, partner_name,
-                       chat_id, channel, assigned_team, is_my_task, status, detected_at)
-    VALUES (?, ?, ?, 'task', ?, ?, ?, ?, ?, ?, 'open', ?)
+                       chat_id, channel, assigned_team, is_my_task, status, detected_at, message_url)
+    VALUES (?, ?, ?, 'task', ?, ?, ?, ?, ?, ?, 'open', ?, ?)
   `).run(
     id,
     result.title,
@@ -91,6 +92,7 @@ async function sinkTask(
     result.assignee && result.assignee !== 'me' ? result.assignee : null,
     isMyTask,
     now,
+    result.messageUrl ?? null,
   );
 
   log.info(`Task saved: ${id} — "${result.title.slice(0, 60)}"`);
@@ -131,7 +133,8 @@ async function sinkTask(
   const icon   = isMyTask ? '📋' : '👥';
   const team   = result.assignee && result.assignee !== 'me' ? ` → ${result.assignee}` : '';
   const urgent = result.urgency === 'high' ? ' 🔴' : '';
-  await notify(`${icon} *${result.title}*${team}${urgent}\n_${result.partner}_`).catch(() => {});
+  const link   = result.messageUrl ? `\n[↗ source](${result.messageUrl})` : '';
+  await notify(`${icon} *${result.title}*${team}${urgent}\n_${result.partner}_${link}`).catch(() => {});
 }
 
 // ─── Draft reply generator ────────────────────────────────────────────────────
@@ -310,115 +313,42 @@ async function sinkTxWhitelist(
   result: TriageResult,
   config: Config,
   notify: (text: string) => Promise<void>,
-  llmConfig?: LLMConfig,
+  _llmConfig?: LLMConfig,
 ): Promise<void> {
   const db  = getDb();
   const now = Date.now();
   const id  = ulid();
 
-  // Extract any addresses from title/body for the checklist
+  // Extract any addresses from title/body for display
   const ethAddrRegex = /\b0x[0-9a-fA-F]{40}\b/g;
   const addrs = [...(result.title + ' ' + result.body).matchAll(ethAddrRegex)].map(m => m[0]);
 
-  // ── DOCS-first verification ────────────────────────────────────────────────
-  // Run async — we notify immediately but the proposal gets enriched once done.
-  let verification = null as import('./whitelist-verifier.js').WhitelistVerification | null;
-
-  if (llmConfig && !config.readOnly) {
-    try {
-      const { verifyWhitelistDocs } = await import('./whitelist-verifier.js');
-      // Build the raw partner message from triage result for the verifier
-      const partnerMsg = `${result.title}\n\n${result.body}`;
-      verification = await verifyWhitelistDocs(partnerMsg, llmConfig);
-      log.info(`Whitelist verification: ${verification.decision} (score=${verification.score.toFixed(2)}) — ${result.partner}`);
-    } catch (e) {
-      log.warn(`Whitelist verifier failed, falling back to manual checklist: ${e}`);
-    }
-  }
-
-  // ── Build checklist (enhanced when verification ran) ──────────────────────
-  const verificationBlock = verification
-    ? [
-        `--- DOCS verification ---`,
-        `Decision: ${verification.decision} (score ${(verification.score * 100).toFixed(0)}%)`,
-        `Protocol: ${verification.protocol} | Chain: ${verification.chain}`,
-        `Summary: ${verification.summary}`,
-        ...(verification.sources.docs ? [`Docs: ${verification.sources.docs}`] : []),
-        ...(verification.sources.matchPages?.length ? [`Match pages: ${verification.sources.matchPages.join(', ')}`] : []),
-        `--- Manual checks below ---`,
-      ]
-    : [];
-
-  const checklist = [
-    ...verificationBlock,
-    'Verify address format and checksum',
-    'Confirm partner identity out-of-band (call / Signal)',
-    'Check address against known blacklists',
-    'Verify on-chain: no suspicious tx history',
-    'Confirm network (mainnet vs testnet)',
-    ...(addrs.length ? [`Address(es): ${addrs.join(', ')}`] : ['⚠️ No address extracted — confirm with partner']),
-    'Get second approval if amount > threshold',
-    'Submit whitelist request on Fordefi',
-  ];
-
-  const risks = [
-    'Address not yet verified out-of-band',
-    'Urgency pressure — take time to verify',
-    result.urgency === 'high' ? '⚠️ High urgency flagged — double-check identity' : null,
-    verification?.decision === 'REJECT'
-      ? `❌ DOCS verification REJECTED — official source contradicts this address`
-      : null,
-    verification?.decision === 'MANUAL_REVIEW' && verification.score < 0.3
-      ? `⚠️ Low confidence score (${(verification.score * 100).toFixed(0)}%) — docs inconclusive`
-      : null,
-  ].filter(Boolean);
-
-  const actions = JSON.stringify([{
-    tool: 'prepare_tx_pack',
-    input: {
-      chain:         verification?.chain ?? 'unknown — confirm with partner',
-      operation:     'approve',
-      vault_ref:     '[VAULT_REF]',
-      asset:         '[TOKEN]',
-      checklist,
-      risks,
-      verification:  verification ?? null,
-      notes:         result.body,
-    },
-    description: `Tx whitelist review — ${result.partner}`,
-  }]);
-
+  // Save as a task — owner handles the actual whitelisting via their own tooling
   db.prepare(`
-    INSERT INTO proposals (id, context_summary, plan, actions, draft_reply, status, created_at, expires_at)
-    VALUES (?, ?, ?, ?, NULL, 'proposed', ?, ?)
+    INSERT INTO tasks (id, title, description, category, source_ref, partner_name,
+                       chat_id, channel, assigned_team, is_my_task, status, detected_at, message_url)
+    VALUES (?, ?, ?, 'tx_request', ?, ?, ?, ?, NULL, 1, 'open', ?, ?)
   `).run(
     id,
-    `[Triage] Whitelist request — ${result.partner}: ${result.title}`,
+    result.title,
     result.body,
-    actions,
+    `triage:${result.rawRef}`,
+    result.partner,
+    result.chatId,
+    result.channel,
     now,
-    now + 10 * 60 * 1000, // 10min expiry — tx requests are time-sensitive
+    result.messageUrl ?? null,
   );
 
-  log.info(`Tx whitelist proposal: ${id} — ${result.partner}`);
-  audit('triage_whitelist_proposal', id, 'proposal', {
-    partner:  result.partner,
-    addrs,
-    decision: verification?.decision ?? 'not_verified',
-    score:    verification?.score,
-  });
+  log.info(`Whitelist task: ${id} — ${result.partner}`);
+  audit('triage_whitelist_task', id, 'task', { partner: result.partner, addrs });
 
   // ── Notification ──────────────────────────────────────────────────────────
   const addrNote = addrs.length ? `\nAddresses: \`${addrs.join('`, `')}\`` : '\n⚠️ No address extracted';
-
-  let verifLine = '';
-  if (verification) {
-    const { formatVerificationNotif } = await import('./whitelist-verifier.js');
-    verifLine = `\n\n${formatVerificationNotif(verification)}`;
-  }
+  const link = result.messageUrl ? `\n[↗ source](${result.messageUrl})` : '';
 
   await notify(
-    `🔐 *Whitelist request — ${result.partner}*\n${result.title}${addrNote}${verifLine}\n\n_Proposal \`${id.slice(-8)}\` — review in web app_`,
+    `🔐 *${result.title}*\n_${result.partner}_${addrNote}${link}`,
   ).catch(() => {});
 }
 

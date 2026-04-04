@@ -96,10 +96,14 @@ export class TelegramChannel implements Channel {
   private sessionPath: string;
   // "Me" entity — resolved after auth
   private meId: bigint | null = null;
+  // Bot's own user ID extracted from TELEGRAM_BOT_TOKEN — skip its chatId in notifyUnknownChat
+  private botId: string | null = null;
   // chatId → last notification timestamp (avoid spamming same unknown chat)
   private unknownChatCooldown = new Map<string, number>();
   // True while catch-up is draining — unknown chats are silently skipped
   private isCatchingUp = false;
+  // chatId → topicId → topicName (in-memory cache, populated on demand)
+  private topicNameCache = new Map<string, Map<number, string>>();
 
   constructor(
     private apiId: number,
@@ -120,7 +124,13 @@ export class TelegramChannel implements Channel {
     const session = new StringSession(sessionStr);
 
     this.client = new TelegramClient(session, this.apiId, this.apiHash, {
-      connectionRetries: 5,
+      connectionRetries:  10,
+      retryDelay:         3000,
+      autoReconnect:      true,
+      requestRetries:     5,
+      // Use WSS (port 443) — more stable than TCPFull/80, has built-in keepalive,
+      // and survives NAT timeouts / router resets much better.
+      useWSS:             true,
     });
 
     await this.client.start({
@@ -148,6 +158,14 @@ export class TelegramChannel implements Channel {
     const me = await this.client.getMe();
     this.meId = BigInt((me as Api.User).id.toString());
     log.info(`Logged in as: ${(me as Api.User).firstName} (@${(me as Api.User).username})`);
+
+    // Extract bot ID from TELEGRAM_BOT_TOKEN (format: <id>:<hash>) so we can
+    // skip the bot's own chatId in notifyUnknownChat (it's not a real partner chat).
+    const botToken = process.env.TELEGRAM_BOT_TOKEN ?? getConfig().channels.telegram.personal.botToken;
+    if (botToken) {
+      this.botId = botToken.split(':')[0] ?? null;
+      if (this.botId) log.debug(`Bot ID extracted: ${this.botId} — will be filtered from unknown-chat notifications`);
+    }
 
     // Register message listener BEFORE catchUp so missed messages flow through
     this.client.addEventHandler(
@@ -258,18 +276,46 @@ export class TelegramChannel implements Channel {
     const content = msg.text || (msg as unknown as { message?: string }).message || '';
     const msgId   = typeof msg.id === 'number' ? msg.id : Number(msg.id);
 
+    // Lazy-resolve chat name: if the stored name is the raw chatId (never resolved),
+    // fetch the real display name and username from Telegram and patch the config entry.
+    let resolvedChatName = monitored.name;
+    let resolvedUsername: string | undefined;
+    if (monitored.name === chatId || monitored.name === `-100${chatId}` || /^\d+$/.test(monitored.name)) {
+      try {
+        const entity = await this.client.getEntity(chatId);
+        const e = entity as unknown as { title?: string; firstName?: string; username?: string };
+        resolvedUsername = e.username;
+        const realName = e.title ?? e.firstName ?? e.username;
+        if (realName) {
+          resolvedChatName = realName;
+          monitored.name = realName; // patch in-memory config so subsequent messages use real name
+          // Persist to disk
+          const { patchConfig } = await import('../../config/index.js');
+          patchConfig((cfg) => {
+            const m = cfg.channels.telegram.listener.monitoredChats.find(
+              c => c.chatId === chatId || c.chatId === `-100${chatId}`,
+            );
+            if (m) m.name = realName;
+          });
+          log.info(`Resolved chat name for ${chatId}: "${realName}" (@${resolvedUsername ?? '?'})`);
+        }
+      } catch (e) {
+        log.debug(`Could not resolve entity name for ${chatId}: ${(e as Error).message}`);
+      }
+    }
+
     const rawMessage: RawMessage = {
       id:          ulid(),
       channel:     'telegram',
       source:      'telegram',
       chatId,
-      chatName:    monitored.name,
+      chatName:    resolvedChatName,
       chatType:    resolveChatType(chatId, msg),
-      partnerName: monitored.name,
+      partnerName: resolvedChatName,
       senderId,
       senderName:  await this.resolveSenderName(msg),
       content,
-      messageUrl:  buildTelegramMessageUrl(chatId, msgId, monitored.name),
+      messageUrl:  buildTelegramMessageUrl(chatId, msgId, resolvedUsername, (msg.replyTo as unknown as { replyToTopId?: number })?.replyToTopId),
       links:       extractLinks(content),
       isForward:   !!msg.fwdFrom,
       forwardFrom: resolveForwardSource(msg),
@@ -277,6 +323,9 @@ export class TelegramChannel implements Channel {
       replyToId:   msg.replyTo?.replyToMsgId ? String(msg.replyTo.replyToMsgId) : undefined,
       threadId:    (msg.replyTo as unknown as { replyToTopId?: number })?.replyToTopId
                      ? String((msg.replyTo as unknown as { replyToTopId?: number }).replyToTopId)
+                     : undefined,
+      threadName:  (msg.replyTo as unknown as { replyToTopId?: number })?.replyToTopId
+                     ? await this.resolveTopicName(chatId, (msg.replyTo as unknown as { replyToTopId?: number }).replyToTopId!)
                      : undefined,
       receivedAt:  Date.now(),
       timestamp:   msg.date ? msg.date * 1000 : undefined,
@@ -334,9 +383,19 @@ export class TelegramChannel implements Channel {
   // ─── Discovery: proactive notification for unknown chats ─────────────────────
 
   private async notifyUnknownChat(chatId: string, msg: Api.Message): Promise<void> {
+    // Feature disabled by default — opt-in via telegram.listener.discoverUnknownChats: true
+    if (!getConfig().channels.telegram.listener.discoverUnknownChats) return;
+
     // Skip if owner explicitly ignored this chat
     if (isIgnoredChat(chatId)) {
       log.debug(`Skipping ignored chat ${chatId}`);
+      return;
+    }
+
+    // Skip the bot's own chatId — it's not a partner, it's the Argos bot itself.
+    // Bot ID is extracted from TELEGRAM_BOT_TOKEN at startup.
+    if (this.botId && chatId === this.botId) {
+      log.debug(`Skipping bot's own chatId ${chatId} in notifyUnknownChat`);
       return;
     }
 
@@ -352,8 +411,9 @@ export class TelegramChannel implements Channel {
     if (Date.now() - last < COOLDOWN_MS) return;
     this.unknownChatCooldown.set(chatId, Date.now());
 
-    // Try to resolve chat display name from Telegram
+    // Try to resolve chat display name from Telegram + check if it's a bot
     let displayName = chatId;
+    let isBot = false;
     try {
       const entity = await this.client.getEntity(chatId);
       displayName = (entity as unknown as { title?: string; firstName?: string; username?: string })
@@ -361,7 +421,15 @@ export class TelegramChannel implements Channel {
         ?? (entity as unknown as { firstName?: string }).firstName
         ?? (entity as unknown as { username?: string }).username
         ?? chatId;
+      isBot = (entity as unknown as { bot?: boolean }).bot === true;
     } catch { /* not critical */ }
+
+    // Auto-ignore Telegram bots — they send automated updates, not partner messages
+    if (isBot) {
+      log.info(`Auto-ignoring bot chatId ${chatId} ("${displayName}") — adding to ignored list`);
+      ignoreChat(chatId);
+      return;
+    }
 
     const preview = (msg.text ?? '').slice(0, 80).replace(/\n/g, ' ');
     const isGroup = chatId.startsWith('-');
@@ -427,6 +495,30 @@ export class TelegramChannel implements Channel {
     }
 
     log.info(`Unknown chat discovered: ${displayName} (${chatId}) — proposal ${proposalId} created`);
+  }
+
+  private async resolveTopicName(chatId: string, topicId: number): Promise<string | undefined> {
+    // Check cache first
+    const chatCache = this.topicNameCache.get(chatId);
+    if (chatCache?.has(topicId)) return chatCache.get(topicId);
+
+    try {
+      const entity = await this.client.getEntity(chatId);
+      const result = await this.client.invoke(new Api.channels.GetForumTopics({
+        channel: entity,
+        offsetDate: 0,
+        offsetId: 0,
+        offsetTopic: 0,
+        limit: 100,
+      }));
+      const topics = (result as unknown as { topics: Array<{ id: number; title: string }> }).topics ?? [];
+      const map = this.topicNameCache.get(chatId) ?? new Map<number, string>();
+      for (const t of topics) map.set(t.id, t.title);
+      this.topicNameCache.set(chatId, map);
+      return map.get(topicId);
+    } catch {
+      return undefined;
+    }
   }
 
   private async resolveSenderName(msg: Api.Message): Promise<string> {
@@ -866,22 +958,28 @@ function extractLinks(text: string): string[] {
 // Private group/channel (-100...): https://t.me/c/{numericId}/{msgId}
 // DM: no public permalink
 
-function buildTelegramMessageUrl(chatId: string, msgId: number, chatName?: string): string | undefined {
-  if (!msgId) return undefined;
+function buildTelegramMessageUrl(chatId: string, msgId: number, username?: string, topicId?: number): string | undefined {
+  // DM (positive chatId = user ID)
+  if (!chatId.startsWith('-')) {
+    // If we have a username, t.me/{username} opens in app and works universally
+    if (username) return `https://t.me/${username}`;
+    // No username (user has none set) — open chat via web
+    return `https://web.telegram.org/a/#${chatId}`;
+  }
 
-  // Private supergroup/channel — chatId starts with -100
-  if (chatId.startsWith('-100')) {
+  // Supergroup/channel with -100 prefix: use t.me/c/... format
+  if (chatId.startsWith('-100') && msgId) {
     const numericId = chatId.slice(4); // strip "-100"
+    if (topicId) {
+      // Forum topic: https://t.me/c/{numericId}/{topicId}/{msgId}
+      return `https://t.me/c/${numericId}/${topicId}/${msgId}`;
+    }
     return `https://t.me/c/${numericId}/${msgId}`;
   }
 
-  // Negative chatId (legacy group) — no public link
-  if (chatId.startsWith('-')) return undefined;
-
-  // Positive chatId could be a public channel — but we'd need the username,
-  // not the numeric ID, to build the link. Leave undefined (no false links).
-  void chatName;
-  return undefined;
+  // Legacy group or no msgId — web anchor
+  if (msgId) return `https://web.telegram.org/a/#${chatId}_${msgId}`;
+  return `https://web.telegram.org/a/#${chatId}`;
 }
 
 // ─── Chat type ────────────────────────────────────────────────────────────────

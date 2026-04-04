@@ -59,15 +59,29 @@ Extract from the message (do NOT invent):
 - reason / use-case (or "missing reason")
 - any URLs present in the message
 
-Then find ONLY:
+## Verification steps (in order)
+
+### Step 1 — Contract metadata
+Use explorer_api to get: contract name, verified status, deployer address.
+Pass the appropriate explorer base URL for the chain (e.g. https://api.hyperevmscan.io for HyperEVM, https://api.etherscan.io for Ethereum, https://api.basescan.org for Base).
+
+### Step 2 — Deployer cross-reference
+Take the deployer address from step 1.
+Check if it's labeled on Etherscan or Basescan using explorer_api with the deployer address.
+A labeled deployer ("LayerZero: Deployer", "Uniswap: Deployer", etc.) is strong secondary confirmation.
+Also search GitHub: query "{deployer_address} site:github.com/LayerZero-Labs" or relevant org.
+
+### Step 3 — Official docs
+Find ONLY:
 - the official website of the protocol
 - the official documentation (docs.*, official GitBook, /docs on official domain)
 FORBIDDEN sources: blogs, Medium, CoinGecko, DefiLlama, DEXscreener, forums, Reddit.
-Block explorers (Etherscan, Basescan, etc.) are NOT proof — do not cite them as official.
+Block explorer HTML pages are NOT proof.
 
-Priority: verify if the address appears in the official docs.
-- Browse TOC / sidebar if GitBook or Nextra.
-- Search for the exact address (case-insensitive).
+For LayerZero: check https://docs.layerzero.network/v2/developers/value-transfer-api/contracts/addresses (full address list) and https://docs.layerzero.network/v2/deployments/chains/{chain-slug}
+For other protocols: search "{protocol} official contract addresses {chain}"
+
+Priority: find the address in official docs OR confirm deployer is a known protocol deployer.
 
 ## Decision
 
@@ -78,10 +92,13 @@ Priority: verify if the address appears in the official docs.
 ## Score (0.00–1.00)
 Start at 0.30
 +0.50 if address found in official docs with clear context
++0.20 if deployer is labeled on a major explorer as an official protocol deployer
++0.10 if explorer_api confirms contract is verified and name matches the expected protocol
 +0.10 if the doc has a structured "Contracts / Deployments / Addresses" section
-−0.30 if address NOT found in docs
+−0.20 if address NOT found in docs but deployer is confirmed
+−0.40 if address NOT found in docs AND deployer is unlabeled/unknown
 −0.20 if protocol or chain unknown
-−0.20 if reason is absent
+−0.10 if reason is absent
 Clamp to [0, 1].
 
 ## Output format (STRICT — Slack-friendly, 6–10 lines max)
@@ -91,6 +108,7 @@ Summary: <one sentence>
 Why it's ok to approve:
 • <point 1>
 • <point 2>
+Deployer: <deployer address> — <labeled / unlabeled>
 Score: 0.XX
 Sources:
   Docs: <url>
@@ -122,6 +140,18 @@ const VERIFIER_TOOLS = [
         url: { type: 'string' },
       },
       required: ['url'],
+    },
+  },
+  {
+    name: 'explorer_api',
+    description: 'Query a block explorer JSON API to get verified contract metadata (name, source, creator). Works on all Etherscan-compatible explorers. Pass the address and the explorer base URL (e.g. "https://api.etherscan.io", "https://api.basescan.org", "https://api.hyperevmscan.io").',
+    input_schema: {
+      type: 'object',
+      properties: {
+        address:      { type: 'string', description: 'Contract address (0x...)' },
+        explorer_api: { type: 'string', description: 'Base API URL, e.g. https://api.etherscan.io' },
+      },
+      required: ['address', 'explorer_api'],
     },
   },
 ];
@@ -186,10 +216,51 @@ export async function verifyWhitelistDocs(
     const { callAnthropicBearerRaw }   = await import('../llm/index.js');
     const { executeBuiltinTool }       = await import('../llm/builtin-tools.js');
 
-    // Restrict executor to web_search + fetch_url only — no side effects
+    // Restrict executor to web_search + fetch_url + explorer_api — no side effects
     const safeExecutor = async (name: string, input: Record<string, unknown>) => {
       if (name === 'web_search' || name === 'fetch_url') {
         return executeBuiltinTool(name, input);
+      }
+      if (name === 'explorer_api') {
+        const address     = input.address as string;
+        const explorerApi = (input.explorer_api as string).replace(/\/$/, '');
+        try {
+          // Etherscan-compatible: /api?module=contract&action=getsourcecode
+          const url = `${explorerApi}/api?module=contract&action=getsourcecode&address=${address}`;
+          const res = await fetch(url, { headers: { 'User-Agent': 'argos-verifier/1.0' }, signal: AbortSignal.timeout(10_000) });
+          const json = await res.json() as { status: string; result: Array<{ ContractName?: string; CompilerVersion?: string; ABI?: string }> };
+          if (json.status === '1' && json.result?.[0]) {
+            const r = json.result[0] as { ContractName?: string; CompilerVersion?: string; ABI?: string };
+            // Also fetch deployer via getcontractcreation
+            let deployer = 'unknown';
+            try {
+              const creatorRes = await fetch(`${explorerApi}/api?module=contract&action=getcontractcreation&contractaddresses=${address}`, { signal: AbortSignal.timeout(5_000) });
+              const creatorJson = await creatorRes.json() as { status: string; result: Array<{ contractCreator?: string }> };
+              if (creatorJson.status === '1') deployer = creatorJson.result[0]?.contractCreator ?? 'unknown';
+            } catch { /* non-fatal */ }
+            return { output: `ContractName: ${r.ContractName ?? 'unknown'}\nCompiler: ${r.CompilerVersion ?? 'unknown'}\nVerified: yes\nDeployer: ${deployer}` };
+          }
+          // Blockscout format fallback: /api/v2/smart-contracts/{address}
+          const baseUrl = explorerApi.replace(/\/api$/, '');
+          const bsUrl = `${baseUrl}/api/v2/smart-contracts/${address}`;
+          const bsRes = await fetch(bsUrl, { headers: { 'User-Agent': 'argos-verifier/1.0' }, signal: AbortSignal.timeout(10_000) });
+          if (bsRes.ok) {
+            const bsJson = await bsRes.json() as { name?: string; compiler_version?: string; is_verified?: boolean; deployed_bytecode?: unknown };
+            // Blockscout: get deployer via /api/v2/addresses/{address}
+            let deployer = 'unknown';
+            try {
+              const addrRes = await fetch(`${baseUrl}/api/v2/addresses/${address}`, { signal: AbortSignal.timeout(5_000) });
+              if (addrRes.ok) {
+                const addrJson = await addrRes.json() as { creator_address_hash?: string; creation_tx_hash?: string };
+                deployer = addrJson.creator_address_hash ?? 'unknown';
+              }
+            } catch { /* non-fatal */ }
+            return { output: `ContractName: ${bsJson.name ?? 'unknown'}\nCompiler: ${bsJson.compiler_version ?? 'unknown'}\nVerified: ${bsJson.is_verified ?? false}\nDeployer: ${deployer}` };
+          }
+          return { output: `No verified contract found at ${explorerApi} for ${address}` };
+        } catch (e) {
+          return { output: `explorer_api error: ${(e as Error).message}`, error: true };
+        }
       }
       return { output: `Tool "${name}" is not available in verification mode.`, error: true };
     };

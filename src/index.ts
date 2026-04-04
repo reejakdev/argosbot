@@ -167,6 +167,7 @@ async function boot() {
       initApprovalGateway(
         async (chatId, text) => { await telegramBot!.sendMessage(chatId, text); return { message_id: 0 }; },
         approvalChatId,
+        config.security?.cloudMode ?? false,
       );
     }
   }
@@ -228,20 +229,24 @@ async function boot() {
   }
 
   // 7. Approval gateway — Telegram bot > MTProto > Slack bot > web app only
+  const cloudMode = config.security?.cloudMode ?? false;
   if (telegramBot) {
     initApprovalGateway(
       async (chatId, text) => { await telegramBot!.sendMessage(chatId, text); return { message_id: 0 }; },
       approvalChatId,
+      cloudMode,
     );
   } else if (telegramChannel) {
     initApprovalGateway(
       (chatId, text, opts) => telegramChannel!.sendMessage(chatId, text, opts),
       approvalChatId,
+      cloudMode,
     );
   } else if (slackBot) {
     initApprovalGateway(
       async (_chatId, text) => { await slackBot!.sendToApprovalChat(text); return { message_id: 0 }; },
       slackApprovalChannelId!,
+      cloudMode,
     );
     log.info('Approval gateway wired via Slack bot');
   } else {
@@ -395,8 +400,13 @@ async function boot() {
     db.close();
     process.exit(0);
   };
-  process.on('SIGINT',  () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  const handleSignal = (signal: string) => {
+    // Force exit after 3s in case graceful shutdown hangs (e.g. gramjs disconnect)
+    setTimeout(() => process.exit(0), 3000).unref();
+    shutdown(signal).catch(() => process.exit(0));
+  };
+  process.on('SIGINT',  () => handleSignal('SIGINT'));
+  process.on('SIGTERM', () => handleSignal('SIGTERM'));
 }
 
 boot().catch(e => {

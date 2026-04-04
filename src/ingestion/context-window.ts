@@ -71,6 +71,7 @@ export class ContextWindowManager {
       channel:     message.channel,
       chatId:      message.chatId,
       chatName:    message.chatName,
+      threadName:  message.threadName,
       partnerName: message.partnerName,
       messages: [{
         id:           ulid(),

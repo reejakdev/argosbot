@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { createHash } from 'crypto';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('db');
@@ -65,6 +66,11 @@ function runMigrations(db: Database.Database): void {
     { version: 9, sql: MIGRATION_9 },
     { version: 10, sql: MIGRATION_10 },
     { version: 11, sql: MIGRATION_11 },
+    { version: 12, sql: MIGRATION_12 },
+    { version: 13, sql: MIGRATION_13 },
+    { version: 14, sql: MIGRATION_14 },
+    { version: 15, sql: MIGRATION_15 },
+    { version: 16, sql: MIGRATION_16 },
   ];
 
   for (const migration of migrations) {
@@ -358,6 +364,45 @@ const MIGRATION_10 = `
   );
 `;
 
+// ─── Migration 12: anon_content on messages ──────────────────────────────────
+// Stores the anonymized text of each message for conversation traceability.
+// Raw content is never stored — only the regex+LLM anonymized version.
+const MIGRATION_12 = `
+  ALTER TABLE messages ADD COLUMN anon_content TEXT;
+`;
+
+// ─── Migration 13: encrypted_content on messages ─────────────────────────────
+// AES-256-GCM encrypted raw content, opt-in via privacy.encryptMessages: true.
+// Key lives at ~/.argos/message.key — never in DB or config.
+const MIGRATION_13 = `
+  ALTER TABLE messages ADD COLUMN encrypted_content TEXT;
+`;
+
+// ─── Migration 14: message_url on tasks ──────────────────────────────────────
+// Stores the permalink to the original Telegram/Slack/etc message that triggered the task.
+// Lets the owner jump back to the original request directly from the task list.
+const MIGRATION_14 = `
+  ALTER TABLE tasks ADD COLUMN message_url TEXT;
+`;
+
+// ─── Migration 15: execution_count on proposals ───────────────────────────────
+// Tracks how many times a proposal has been executed.
+// Acts as an idempotency guard: executor checks this is 0 before starting,
+// then increments atomically. Prevents double-execution even if the ephemeral
+// token check were somehow bypassed or the proposal manually reset.
+const MIGRATION_15 = `
+  ALTER TABLE proposals ADD COLUMN execution_count INTEGER NOT NULL DEFAULT 0;
+`;
+
+// ─── Migration 16: tamper-evident audit log ───────────────────────────────────
+// Adds prev_hash to audit_log for hash-chain integrity verification.
+// Each entry stores SHA-256(id||event_type||entity_id||data||created_at||prev_hash).
+// A break in the chain reveals tampering. Verify with: npm run verify-audit
+const MIGRATION_16 = `
+  ALTER TABLE audit_log ADD COLUMN prev_hash TEXT;
+  ALTER TABLE audit_log ADD COLUMN entry_hash TEXT;
+`;
+
 // ─── Migration 11: knowledge graph ───────────────────────────────────────────
 const MIGRATION_11 = `
   CREATE TABLE IF NOT EXISTS entities (
@@ -395,10 +440,24 @@ function makeId(): string {
   if (_ulid) return _ulid();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
+
+// Tamper-evident chain: each entry hashes its own content + previous entry hash.
+// Seeded from DB at init. Breaks in the chain reveal post-hoc tampering.
+let _lastAuditHash = '0000000000000000000000000000000000000000000000000000000000000000'; // genesis
+
+function seedAuditChain(db: Database.Database): void {
+  const row = db.prepare(
+    'SELECT entry_hash FROM audit_log WHERE entry_hash IS NOT NULL ORDER BY created_at DESC LIMIT 1'
+  ).get() as { entry_hash: string } | undefined;
+  if (row?.entry_hash) _lastAuditHash = row.entry_hash;
+}
+
 // Async init — called from initDb
 export async function loadUlid(): Promise<void> {
   const mod = await import('ulid');
   _ulid = mod.monotonicFactory();
+  // Seed hash chain from existing audit log
+  try { seedAuditChain(getDb()); } catch { /* DB not ready yet — will be seeded on first audit() call */ }
 }
 
 export function audit(
@@ -408,17 +467,27 @@ export function audit(
   data?: unknown,
 ): void {
   const db = getDb();
+  const id        = makeId();
+  const dataStr   = data ? JSON.stringify(data) : null;
+  const createdAt = Date.now();
+
+  // Hash chain: SHA-256 over canonical entry content + previous hash
+  const entryHash = createHash('sha256')
+    .update(id)
+    .update(eventType)
+    .update(entityId ?? '')
+    .update(entityType ?? '')
+    .update(dataStr ?? '')
+    .update(String(createdAt))
+    .update(_lastAuditHash)
+    .digest('hex');
+
   db.prepare(`
-    INSERT INTO audit_log (id, event_type, entity_id, entity_type, data, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
-    makeId(),
-    eventType,
-    entityId ?? null,
-    entityType ?? null,
-    data ? JSON.stringify(data) : null,
-    Date.now(),
-  );
+    INSERT INTO audit_log (id, event_type, entity_id, entity_type, data, created_at, prev_hash, entry_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, eventType, entityId ?? null, entityType ?? null, dataStr, createdAt, _lastAuditHash, entryHash);
+
+  _lastAuditHash = entryHash;
 }
 
 // ─── Typed query helpers ──────────────────────────────────────────────────────

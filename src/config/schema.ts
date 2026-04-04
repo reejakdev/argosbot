@@ -43,6 +43,13 @@ const PrivacySchema = z.object({
    * Désactivé par défaut — opt-in explicite requis.
    */
   storeRaw: z.boolean().default(false),
+  /**
+   * Chiffre le contenu brut de chaque message avec AES-256-GCM avant stockage.
+   * La clé est lue depuis ~/.argos/message.key (32 octets, générée automatiquement au premier démarrage).
+   * Déchiffrement via : npm run decrypt -- <message_id>
+   * Désactivé par défaut — opt-in explicite requis.
+   */
+  encryptMessages: z.boolean().default(false),
 }).default({});
 
 // ─── Triage ───────────────────────────────────────────────────────────────────
@@ -102,6 +109,12 @@ const TelegramListenerSchema = z.object({
   })).default([]),
   /** Chats ignorés (supprime les notifications de découverte) */
   ignoredChats:  z.array(z.string()).default([]),
+  /**
+   * Notifie quand un nouveau chat inconnu envoie un message.
+   * Crée une proposition pour l'ajouter aux chats monitorés.
+   * Désactivé par défaut — opt-in si tu veux la découverte automatique.
+   */
+  discoverUnknownChats: z.boolean().default(false),
   /** Paramètres de la fenêtre de contexte */
   contextWindow: ContextWindowSchema.default({}),
 }).default({});
@@ -689,6 +702,18 @@ const ShellExecSchema = z.object({
   workingDir:      z.string().optional(),
 }).optional();
 
+// ─── Security ────────────────────────────────────────────────────────────────
+
+const SecuritySchema = z.object({
+  /**
+   * Cloud mode — force YubiKey (FIDO2) for ALL risk levels, including low.
+   * Enable this when Argos runs on a remote server (VPS, cloud).
+   * In local mode (default), low-risk proposals can be approved via Telegram.
+   * In cloud mode, Telegram approval is fully disabled — web app + YubiKey only.
+   */
+  cloudMode: z.boolean().default(false),
+}).default({});
+
 // ─── Root config ──────────────────────────────────────────────────────────────
 
 export const ConfigSchema = z.object({
@@ -735,6 +760,7 @@ export const ConfigSchema = z.object({
   // Voice I/O — Whisper transcription + optional TTS reply (opt-in)
   voice:      VoiceSchema,
   knowledgeGraph: KnowledgeGraphSchema,
+  security:   SecuritySchema,
   logLevel:   z.enum(['debug', 'info', 'warn', 'error']).default('debug'),
   dataDir:    z.string().default('~/.argos'),
   readOnly:   z.boolean().default(true),
@@ -768,6 +794,7 @@ export const ConfigSchema = z.object({
 // ─── Types exportés ───────────────────────────────────────────────────────────
 
 export type Config          = z.infer<typeof ConfigSchema>;
+export type SecurityConfig  = z.infer<typeof SecuritySchema>;
 export type PrivacyConfig   = z.infer<typeof PrivacySchema>;
 export type PrivacyRole     = z.infer<typeof PrivacyRoleSchema>;
 export type TriageConfig    = z.infer<typeof TriageSchema>;

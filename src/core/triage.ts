@@ -41,15 +41,16 @@ export type TriageRoute =
   | 'skip';        // nothing actionable
 
 export interface TriageResult {
-  route:     TriageRoute;
-  title:     string;
-  body:      string;
-  assignee?: string;   // team name or 'me'
-  urgency:   'low' | 'medium' | 'high';
-  partner:   string;
-  chatId:    string;
-  channel:   string;   // source channel (telegram, whatsapp, email…)
-  rawRef:    string;   // source message ID for traceability
+  route:       TriageRoute;
+  title:       string;
+  body:        string;
+  assignee?:   string;   // team name or 'me'
+  urgency:     'low' | 'medium' | 'high';
+  partner:     string;
+  chatId:      string;
+  channel:     string;   // source channel (telegram, whatsapp, email…)
+  rawRef:      string;   // source message ID for traceability
+  messageUrl?: string;   // permalink to the original message (Telegram, Slack…)
 }
 
 // ─── Pre-screen ────────────────────────────────────────────────────────────────
@@ -246,8 +247,9 @@ export async function triage(
     assignee: pre.mentionedTeams[0] ?? (pre.mentionsMe ? 'me' : undefined),
     partner:  msg.partnerName ?? msg.chatId,
     chatId:   msg.chatId,
-    channel:  msg.channel ?? msg.source ?? 'unknown',
-    rawRef:   msg.id,
+    channel:    msg.channel ?? msg.source ?? 'unknown',
+    rawRef:     msg.id,
+    messageUrl: msg.messageUrl,
   };
 
   audit('triage_matched', msg.id, 'triage', {

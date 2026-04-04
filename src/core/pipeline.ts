@@ -160,9 +160,20 @@ export async function ingestMessage(
   // then persisted in memories.raw_content (accessible to privacy LLM only).
   const rawForWindow = config.privacy.storeRaw ? msg.content : undefined;
   windowManager.add(msg, anon.text, anon.lookup, rawForWindow);
-  // Persist lookup so it survives restarts — used to de-anonymize approved replies
-  db.prepare(`UPDATE messages SET status = 'windowed', anon_lookup = ? WHERE id = ?`)
-    .run(JSON.stringify(anon.lookup), msg.id);
+  // Persist lookup + anonymized text — lookup for de-anonymization at execution time,
+  // anon_content for conversation traceability (raw content is never stored).
+  let encryptedContent: string | null = null;
+  if (config.privacy.encryptMessages) {
+    try {
+      const { loadEncryptionKey, encryptMessage } = await import('../privacy/encryption.js');
+      encryptedContent = encryptMessage(msg.content, loadEncryptionKey());
+    } catch (e) {
+      log.warn('Message encryption failed — encrypted_content not stored:', e);
+    }
+  }
+
+  db.prepare(`UPDATE messages SET status = 'windowed', anon_lookup = ?, anon_content = ?, encrypted_content = ? WHERE id = ?`)
+    .run(JSON.stringify(anon.lookup), anon.text, encryptedContent, msg.id);
 
   // Plugin hooks — non-blocking, after sanitize+anonymize
   // msg.content = raw (injection-safe), msg.anonText = anonymized
@@ -191,6 +202,57 @@ export async function ingestMessage(
   // Completion detection — non-blocking, checks if new message resolves open tasks
   checkTaskCompletion(msg, anon.text, llmConfig, privacyConfig, config)
     .catch(e => log.warn('Completion detection error (non-blocking):', e));
+
+  // Proactive whitelist verification — if partner has an open tx_request task and
+  // replies with a URL, auto-run verification and notify owner immediately.
+  checkWhitelistUrl(msg, llmConfig)
+    .catch(e => log.warn('Whitelist URL check error (non-blocking):', e));
+}
+
+// ─── Proactive whitelist URL detection ───────────────────────────────────────
+// If a message arrives from a partner who has an open tx_request task, and the
+// message contains a URL (typically "here are the docs"), automatically run the
+// whitelist verifier and push the result to the owner — no manual trigger needed.
+
+async function checkWhitelistUrl(
+  msg: RawMessage,
+  llmConfig: LLMConfig,
+): Promise<void> {
+  // Quick URL scan on raw content — skip if no HTTP link present
+  const urlRegex = /https?:\/\/[^\s<>"]+/g;
+  const urls = msg.content.match(urlRegex);
+  if (!urls?.length) return;
+
+  // Check for open tx_request task from this chat
+  const db = getDb();
+  const openTask = db.prepare(`
+    SELECT id, title FROM tasks
+    WHERE chat_id = ? AND category = 'tx_request' AND status IN ('open', 'in_progress')
+    ORDER BY detected_at DESC
+    LIMIT 1
+  `).get(msg.chatId) as { id: string; title: string } | undefined;
+
+  if (!openTask) return;
+
+  log.info(`Proactive whitelist check triggered — partner sent URL in active tx_request chat`, {
+    taskId:  openTask.id,
+    partner: msg.partnerName ?? msg.chatId,
+    urls:    urls.slice(0, 3),
+  });
+
+  const { verifyWhitelistDocs, formatVerificationNotif } = await import('./whitelist-verifier.js');
+
+  const verif = await verifyWhitelistDocs(msg.content, llmConfig);
+
+  const header = `🔍 *Vérification auto — ${msg.partnerName ?? msg.chatId}*\n_Réponse avec doc détectée pour la tâche \`${openTask.id.slice(-8)}\`_\n\n`;
+  await _sendToApprovalChat(header + formatVerificationNotif(verif));
+
+  audit('whitelist_auto_verify', openTask.id, 'task', {
+    partner:  msg.partnerName ?? msg.chatId,
+    decision: verif.decision,
+    score:    verif.score,
+    urls:     urls.slice(0, 3),
+  });
 }
 
 // ─── Task completion detection ────────────────────────────────────────────────
@@ -336,11 +398,28 @@ export async function processWindow(
   const { vectorizeConversationAsync } = await import('../memory/store.js');
   vectorizeConversationAsync(window, result).catch(e => log.warn('Conversation vectorization failed:', e));
 
-  // Save task if detected
-  if (result.category === 'task' || result.category === 'tx_request' || result.category === 'client_request') {
+  // Save task only when the owner is directly addressed.
+  // Hard gate: if none of the owner's handles/name appear in the raw message text,
+  // only create a task if isMyTask is explicitly true (LLM is very confident).
+  // This prevents tasks from conversations between other people where the owner is just CC'd.
+  const myHandles  = config.triage?.myHandles ?? [];
+  const ownerName  = config.owner?.name ?? '';
+  const rawText    = window.messages.map(m => m.content).join(' ').toLowerCase();
+  const ownerMentioned = result.isMyTask
+    || myHandles.some(h => rawText.includes(h.toLowerCase().replace(/^@/, '')))
+    || (ownerName && rawText.includes(ownerName.toLowerCase()));
+
+  const ownerInvolved = ownerMentioned
+    || (result.taskScope === 'my_task' && result.ownerConfidence >= 0.8)
+    || (result.category === 'client_request' && result.isMyTask && result.ownerConfidence >= 0.7);
+
+  if (ownerInvolved && (result.category === 'task' || result.category === 'tx_request' || result.category === 'client_request')) {
     const taskId = saveTask(result.summary.slice(0, 120), result, window);
     broadcastEvent('task_created', { id: taskId, summary: result.summary, partner: window.partnerName });
   }
+
+  // Keyword suggestion — fire-and-forget, non-blocking
+  suggestKeyword(result, config).catch(() => {});
 
   // Completion events for chained triggers
   for (const taskId of result.completedTaskIds ?? []) {
@@ -395,7 +474,20 @@ export async function processWindow(
   }
 
   const proposal = await plan(window, result, config);
-  if (!proposal || proposal.actions.length === 0) return;
+
+  // Fallback: if planner produced no actions but the request needs attention,
+  // notify the owner directly so the partner's request is never silently dropped.
+  if (!proposal || proposal.actions.length === 0) {
+    if (result.requiresAction && result.importance >= 3 && result.category !== 'ignore') {
+      const partner = window.partnerName ?? window.chatId;
+      const summary = result.summary?.slice(0, 200) ?? 'New message requiring attention';
+      const preview = window.messages[0]?.content?.slice(0, 120) ?? '';
+      await _sendToApprovalChat(
+        `📬 *${partner}* — ${result.category} (imp: ${result.importance}/10, ${result.urgency})\n${summary}\n\n_"${preview}${preview.length >= 120 ? '…' : ''}"_\n\n⚠️ No action was proposed — check /tasks or reply manually.`,
+      ).catch(e => log.warn('Fallback notify failed:', e));
+    }
+    return;
+  }
 
   // Auto-execute owner workspace actions (Notion, tasks, reminders)
   const autoActions     = proposal.actions.filter(a => !a.requiresApproval);
@@ -411,6 +503,18 @@ export async function processWindow(
     audit('auto_executed', proposal.id, 'proposal', {
       actions: autoActions.map(a => a.description),
     });
+
+    // Notify owner immediately for task/reminder creations
+    const taskActions = autoActions.filter(a => ['create_task', 'set_reminder'].includes(
+      (a.payload as { tool?: string })?.tool ?? ''
+    ));
+    for (const a of taskActions) {
+      const input = (a.payload as { input?: Record<string, unknown> })?.input ?? {};
+      const title = String(input.title ?? input.message ?? a.description).slice(0, 120);
+      const partner = window.partnerName ?? window.chatId;
+      const icon = (a.payload as { tool?: string })?.tool === 'set_reminder' ? '⏰' : '📋';
+      await _sendToApprovalChat(`${icon} *${title}*\n_${partner}_`).catch(() => {});
+    }
   }
 
   if (approvalActions.length > 0) {
@@ -419,6 +523,41 @@ export async function processWindow(
     emitEvent(`proposal_created:${proposal.id}`, { proposalId: proposal.id });
     broadcastEvent('proposal_created', { id: proposal.id, summary: proposal.contextSummary });
   }
+}
+
+// ─── Keyword suggestion ───────────────────────────────────────────────────────
+// When a relevant message is processed but its tags don't match any existing
+// keyword, suggest 1 new keyword to the owner so they can expand their triage rules.
+
+async function suggestKeyword(
+  result: ClassificationResult,
+  config: Config,
+): Promise<void> {
+  // Only suggest when the message was relevant enough
+  if ((result.importance ?? 0) < 5 || result.category === 'ignore' || result.category === 'info') return;
+  if (!result.tags?.length) return;
+
+  // Collect all known keywords (teams + whitelist + myHandles)
+  const known = new Set<string>();
+  for (const team of config.triage?.watchedTeams ?? []) {
+    for (const kw of team.keywords ?? []) known.add(kw.toLowerCase());
+    for (const h of team.handles ?? []) known.add(h.toLowerCase());
+  }
+  for (const kw of config.triage?.whitelistKeywords ?? []) known.add(kw.toLowerCase());
+  for (const h of config.triage?.myHandles ?? []) known.add(h.toLowerCase());
+
+  // Tags that aren't in the known set
+  const newTags = result.tags.filter(t => !known.has(t.toLowerCase()) && t.length > 2 && t.length < 30);
+  if (!newTags.length) return;
+
+  // Pick one at random — variety > determinism here
+  const pick = newTags[Math.floor(Math.random() * newTags.length)];
+
+  await _sendToApprovalChat(
+    `💡 *Keyword suggéré:* \`${pick}\`\n` +
+    `_Ajouté via: "${result.summary.slice(0, 80)}"_\n` +
+    `→ /add_keyword pour l'ajouter à une équipe`,
+  ).catch(() => {});
 }
 
 // ─── Daily briefing ───────────────────────────────────────────────────────────

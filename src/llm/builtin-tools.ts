@@ -88,8 +88,131 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
     description: 'Get the current date and time.',
     input_schema: { type: 'object', properties: {} },
   },
-  // Notion tools are provided by MCP server (notion-mcp).
-  // api_call is available for when MCP endpoints fail or for custom API calls.
+  // ── Notion tools (direct SDK — full API coverage) ──────────────────────────
+  {
+    name: 'notion_create',
+    description: 'Create a page in a Notion database. Supports tasks, todos, notes, deals, projects with checkboxes, tags, priority, due date, and custom properties.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title:         { type: 'string', description: 'Page title' },
+        database_type: { type: 'string', enum: ['task', 'todo', 'note', 'partner', 'deal', 'tx_review', 'project', 'meeting', 'doc'], description: 'Type of entry' },
+        database_id:   { type: 'string', description: 'Explicit Notion database ID (overrides database_type routing)' },
+        content:       { type: 'string', description: 'Page body / description' },
+        tags:          { type: 'array', items: { type: 'string' }, description: 'Tags (multi-select)' },
+        priority:      { type: 'string', enum: ['Low', 'Medium', 'High'], description: 'Priority' },
+        due_date:      { type: 'string', description: 'Due date (ISO 8601, e.g. 2026-04-10)' },
+        status:        { type: 'string', description: 'Status value (e.g. "In progress", "Done")' },
+        assignee:      { type: 'string', description: 'Assignee name' },
+        blocks:        { type: 'array', description: 'Custom Notion block objects to append as page body' },
+        properties:    { type: 'object', description: 'Additional raw Notion properties to merge' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'notion_update',
+    description: 'Update a Notion page: change properties, archive/unarchive, or update the icon.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id:    { type: 'string', description: 'Notion page ID' },
+        properties: { type: 'object', description: 'Properties to update (raw Notion format)' },
+        archived:   { type: 'boolean', description: 'Archive (true) or unarchive (false) the page' },
+        icon:       { type: 'string', description: 'Emoji icon' },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'notion_get',
+    description: 'Retrieve a Notion page properties or a database schema.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        id:   { type: 'string', description: 'Page ID or database ID' },
+        type: { type: 'string', enum: ['page', 'database'], description: 'What to retrieve (default: page)' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'notion_get_content',
+    description: 'Read the full text content (blocks) of a Notion page.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string', description: 'Notion page ID' },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'notion_append',
+    description: 'Append blocks to an existing Notion page. Supports paragraphs, headings, to_do checkboxes, bulleted lists, code blocks.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string', description: 'Notion page ID' },
+        blocks:  { type: 'array', description: 'Notion block objects to append' },
+      },
+      required: ['page_id', 'blocks'],
+    },
+  },
+  {
+    name: 'notion_query',
+    description: 'Query a Notion database with optional filters and sorts. Returns matching pages.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        database_id: { type: 'string', description: 'Database ID (optional if db_type set)' },
+        db_type:     { type: 'string', description: 'agent or owner (fallback if no database_id)' },
+        query:       { type: 'string', description: 'Title contains filter (convenience)' },
+        filter:      { type: 'object', description: 'Raw Notion filter object' },
+        sorts:       { type: 'array', description: 'Sort array' },
+        limit:       { type: 'number', description: 'Max results (default 20)' },
+      },
+    },
+  },
+  {
+    name: 'notion_search',
+    description: 'Full-text search across the entire Notion workspace.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query:       { type: 'string', description: 'Search query' },
+        filter_type: { type: 'string', enum: ['page', 'database'], description: 'Limit to pages or databases' },
+        limit:       { type: 'number', description: 'Max results (default 10)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'notion_create_db',
+    description: 'Create a new Notion database inside a parent page.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        parent_page_id: { type: 'string', description: 'Parent page ID' },
+        title:          { type: 'string', description: 'Database title' },
+        icon:           { type: 'string', description: 'Emoji icon' },
+        properties:     { type: 'object', description: 'Custom schema (default: Name + Done + Priority + Tags + Due)' },
+      },
+      required: ['parent_page_id', 'title'],
+    },
+  },
+  {
+    name: 'notion_comment',
+    description: 'Add a comment to a Notion page.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string', description: 'Notion page ID' },
+        content: { type: 'string', description: 'Comment text' },
+      },
+      required: ['page_id', 'content'],
+    },
+  },
   {
     name: 'api_call',
     description: 'Make an HTTP API call. Use this when MCP tools fail or for direct API access. Secrets (API keys) from config are auto-injected via {{SECRET_NAME}} placeholders in headers.',
@@ -192,6 +315,22 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
       required: ['agents'],
     },
   },
+  {
+    name: 'get_tasks',
+    description: 'Query open and in-progress tasks from the Argos task database. Returns task list with titles, status, urgency, partner, and a link to the original message.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['open', 'in_progress', 'all', 'completed'],
+          description: 'Filter by status. Default: open+in_progress',
+        },
+        partner: { type: 'string', description: 'Filter by partner name (optional)' },
+        limit:   { type: 'number', description: 'Max results (default 20)' },
+      },
+    },
+  },
 ];
 
 /**
@@ -239,6 +378,22 @@ export const executeBuiltinTool: ToolExecutor = async (name, input) => {
       return await toolApiCall(input);
     case 'spawn_agent':
       return await toolSpawnAgent(input);
+    case 'get_tasks':
+      return await toolGetTasks(
+        input.status as string | undefined,
+        input.partner as string | undefined,
+        input.limit as number | undefined,
+      );
+    case 'notion_create':
+    case 'notion_update':
+    case 'notion_get':
+    case 'notion_get_content':
+    case 'notion_append':
+    case 'notion_query':
+    case 'notion_search':
+    case 'notion_create_db':
+    case 'notion_comment':
+      return await toolNotion(name, input);
     default:
       return { output: `Unknown tool: ${name}`, error: true };
   }
@@ -833,6 +988,100 @@ async function toolWriteFileProposal(relPath: string, content: string, reason?: 
     };
   } catch (e) {
     return { output: `Proposal creation failed: ${e instanceof Error ? e.message : String(e)}`, error: true };
+  }
+}
+
+async function toolNotion(tool: string, input: Record<string, unknown>): Promise<{ output: string; error?: boolean }> {
+  try {
+    const { loadConfig } = await import('../config/index.js');
+    const { NotionWorker } = await import('../workers/notion.js');
+    const config = loadConfig();
+    // Notion tools called from executor are always on approved proposals — bypass readOnly
+    const worker = new NotionWorker({ ...config, readOnly: false });
+
+    let result;
+    switch (tool) {
+      case 'notion_create':
+        result = await worker.createEntry(input);
+        break;
+      case 'notion_update':
+        result = await worker.updatePage(input as Parameters<NotionWorker['updatePage']>[0]);
+        break;
+      case 'notion_get':
+        result = input.type === 'database'
+          ? await worker.getDatabase(input.id as string)
+          : await worker.getPage(input.id as string);
+        break;
+      case 'notion_get_content':
+        result = await worker.getPageContent(input.page_id as string);
+        break;
+      case 'notion_append':
+        result = await worker.appendBlocks(input as Parameters<NotionWorker['appendBlocks']>[0]);
+        break;
+      case 'notion_query':
+        result = await worker.queryDatabase(input as Parameters<NotionWorker['queryDatabase']>[0]);
+        break;
+      case 'notion_search':
+        result = await worker.searchWorkspace(input as Parameters<NotionWorker['searchWorkspace']>[0]);
+        break;
+      case 'notion_create_db':
+        result = await worker.createDatabase(input as Parameters<NotionWorker['createDatabase']>[0]);
+        break;
+      case 'notion_comment':
+        result = await worker.createComment(input as Parameters<NotionWorker['createComment']>[0]);
+        break;
+      default:
+        return { output: `Unknown notion tool: ${tool}`, error: true };
+    }
+
+    return { output: result.output, error: !result.success || undefined };
+  } catch (e) {
+    return { output: `Notion error: ${e instanceof Error ? e.message : String(e)}`, error: true };
+  }
+}
+
+async function toolGetTasks(status?: string, partner?: string, limit?: number): Promise<{ output: string; error?: boolean }> {
+  try {
+    const { getDb } = await import('../db/index.js');
+    const db = getDb();
+
+    let where = '';
+    const params: (string | number)[] = [];
+
+    if (status === 'completed') {
+      where = "WHERE status = 'completed'";
+    } else if (status === 'all') {
+      where = '';
+    } else {
+      where = "WHERE status IN ('open','in_progress','done_inferred')";
+    }
+
+    if (partner) {
+      where += (where ? ' AND' : ' WHERE') + ' partner_name LIKE ?';
+      params.push(`%${partner}%`);
+    }
+
+    params.push(limit ?? 20);
+
+    const rows = db.prepare(
+      `SELECT id, title, status, partner_name, chat_id, message_url, detected_at FROM tasks ${where} ORDER BY detected_at DESC LIMIT ?`
+    ).all(...params) as Array<{
+      id: string; title: string; status: string; partner_name: string | null;
+      chat_id: string | null; message_url: string | null; detected_at: number;
+    }>;
+
+    if (!rows.length) return { output: 'No tasks found.' };
+
+    const lines = rows.map(r => {
+      const date = new Date(r.detected_at).toLocaleDateString('fr-FR');
+      const partner = r.partner_name ?? r.chat_id ?? '?';
+      const link = r.message_url ? ` — [source](${r.message_url})` : '';
+      return `[${r.status}] ${r.title} — ${partner} (${date})${link} [id:${r.id.slice(-6)}]`;
+    });
+
+    return { output: `${rows.length} task(s):\n${lines.join('\n')}` };
+  } catch (e) {
+    return { output: `get_tasks failed: ${e instanceof Error ? e.message : String(e)}`, error: true };
   }
 }
 

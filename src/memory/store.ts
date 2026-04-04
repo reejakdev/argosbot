@@ -395,11 +395,12 @@ export function saveTask(
   }
 
   const id = ulid();
+  const messageUrl = window.messages[0]?.messageUrl ?? null;
 
   db.prepare(`
     INSERT INTO tasks (id, title, category, source_ref, partner_name, chat_id,
-                       assigned_team, is_my_task, status, detected_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+                       assigned_team, is_my_task, status, detected_at, message_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
   `).run(
     id,
     title,
@@ -410,6 +411,7 @@ export function saveTask(
     result.assignedTeam ?? null,
     result.isMyTask ? 1 : 0,
     now,
+    messageUrl,
   );
 
   log.info(`Task saved: ${id} — ${title}`, {
