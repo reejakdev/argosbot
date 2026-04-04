@@ -39,6 +39,7 @@ import { getDb } from '../db/index.js';
 import { getChannelStatuses } from '../ingestion/channels/registry.js';
 import { getAllSecretsSync, setSecretSync, deleteSecretSync } from '../secrets/store.js';
 import { patchConfig } from '../config/index.js';
+import { ConfigSchema } from '../config/schema.js';
 import { redactSecretsForDisk } from '../secrets/migrate.js';
 import {
   hasRegisteredKeys,
@@ -50,6 +51,7 @@ import {
   beginElevatedAuth,
   completeElevatedAuth,
   listCredentials,
+  deleteCredential,
   revokeSession,
   pruneExpiredChallenges,
   pruneExpiredSessions,
@@ -864,28 +866,37 @@ function buildApi(
     res.json(redacted);
   });
 
-  // PATCH /api/configure/config — deep-merge a partial patch, persist to disk
+  // PATCH /api/configure/config — deep-merge a partial patch, validate with Zod, persist to disk
   router.patch('/configure/config', (req, res) => {
-    const patch = req.body as Record<string, unknown>;
-    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    const patchData = req.body as Record<string, unknown>;
+    if (!patchData || typeof patchData !== 'object' || Array.isArray(patchData)) {
       res.status(400).json({ error: 'body must be a plain object' });
       return;
     }
-    try {
-      patchConfig(cfg => {
-        function deepMerge(target: Record<string, unknown>, src: Record<string, unknown>): void {
-          for (const [k, v] of Object.entries(src)) {
-            if (v !== null && typeof v === 'object' && !Array.isArray(v) &&
-                target[k] !== null && typeof target[k] === 'object' && !Array.isArray(target[k])) {
-              deepMerge(target[k] as Record<string, unknown>, v as Record<string, unknown>);
-            } else {
-              target[k] = v;
-            }
-          }
+    function deepMerge(target: Record<string, unknown>, src: Record<string, unknown>): void {
+      for (const [k, v] of Object.entries(src)) {
+        if (v !== null && typeof v === 'object' && !Array.isArray(v) &&
+            target[k] !== null && typeof target[k] === 'object' && !Array.isArray(target[k])) {
+          deepMerge(target[k] as Record<string, unknown>, v as Record<string, unknown>);
+        } else {
+          target[k] = v;
         }
-        deepMerge(cfg as unknown as Record<string, unknown>, patch);
-      });
-      res.json({ ok: true });
+      }
+    }
+    try {
+      // Clone current config, apply patch, validate with Zod before committing
+      const current = getConfig() as unknown as Record<string, unknown>;
+      const preview = JSON.parse(JSON.stringify(current)) as Record<string, unknown>;
+      deepMerge(preview, patchData);
+      const validation = ConfigSchema.safeParse(preview);
+      if (!validation.success) {
+        res.status(400).json({ error: 'Validation failed', issues: validation.error.issues });
+        return;
+      }
+      patchConfig(cfg => { deepMerge(cfg as unknown as Record<string, unknown>, patchData); });
+      const RESTART_KEYS = new Set(['channels', 'webapp', 'mcpServers', 'skills', 'embeddings', 'voice', 'agents', 'cloudflare', 'smtp', 'notifications']);
+      const requiresRestart = Object.keys(patchData).some(k => RESTART_KEYS.has(k));
+      res.json({ ok: true, requiresRestart });
     } catch (e) {
       res.status(500).json({ error: String(e) });
     }
@@ -927,6 +938,167 @@ function buildApi(
     }
     deleteSecretSync(key);
     res.json({ ok: true });
+  });
+
+  // ── Doctor diagnostics ────────────────────────────────────────────────────
+
+  router.get('/configure/doctor', (_req, res) => {
+    const cfg = getConfig() as unknown as import('../config/schema.js').Config;
+    const secrets = getAllSecretsSync();
+    const db = getDb();
+
+    function resolve(val?: string): string | undefined {
+      if (!val) return undefined;
+      return val.startsWith('$') ? secrets[val.slice(1)] : val;
+    }
+
+    interface Check { id: string; label: string; status: 'ok' | 'warn' | 'error'; detail: string; fix?: string; }
+    const checks: Check[] = [];
+
+    // 1. Primary LLM
+    const activeProv = cfg.llm?.providers?.[cfg.llm.activeProvider];
+    const hasLlmKey = !!resolve(activeProv?.apiKey) || cfg.llm.activeProvider === 'anthropic-oauth';
+    checks.push({
+      id: 'llm', label: 'Primary LLM',
+      status: hasLlmKey ? 'ok' : 'warn',
+      detail: hasLlmKey ? `${cfg.llm.activeProvider} / ${cfg.llm.activeModel}` : `Provider "${cfg.llm.activeProvider}" — API key not found in secrets store`,
+      fix: !hasLlmKey ? 'Add API key in Configure → Secrets' : undefined,
+    });
+
+    // 2. Fallback LLM
+    if (cfg.llm.fallbackProvider) {
+      const fbProv = cfg.llm.providers?.[cfg.llm.fallbackProvider];
+      const hasFbKey = !!resolve(fbProv?.apiKey);
+      checks.push({
+        id: 'llm_fallback', label: 'Fallback LLM',
+        status: hasFbKey ? 'ok' : 'warn',
+        detail: hasFbKey ? `${cfg.llm.fallbackProvider} / ${cfg.llm.fallbackModel ?? 'default'}` : `Fallback "${cfg.llm.fallbackProvider}" — API key not found`,
+        fix: !hasFbKey ? 'Add fallback API key in Configure → Secrets' : undefined,
+      });
+    }
+
+    // 3. Authentication
+    const credCount = (db.prepare('SELECT COUNT(*) as c FROM webauthn_credentials').get() as { c: number }).c;
+    const totpRow = (() => { try { return db.prepare('SELECT 1 FROM totp_credentials LIMIT 1').get(); } catch { return null; } })();
+    checks.push({
+      id: 'auth', label: 'Authentication',
+      status: credCount > 0 ? 'ok' : totpRow ? 'warn' : 'error',
+      detail: credCount > 0 ? `${credCount} YubiKey${credCount > 1 ? 's' : ''} registered${totpRow ? ' + TOTP backup' : ''}` : totpRow ? 'TOTP only — no YubiKey registered' : 'No auth configured',
+      fix: credCount === 0 ? 'Register a YubiKey at the Setup page' : undefined,
+    });
+
+    // 4. Approval channel
+    const tgBotToken = resolve(cfg.channels?.telegram?.personal?.botToken);
+    const slackBotToken = resolve(cfg.channels?.slack?.personal?.botToken);
+    const hasChannel = !!tgBotToken || !!slackBotToken || !!cfg.notifications?.preferredChannel;
+    checks.push({
+      id: 'channel', label: 'Approval channel',
+      status: hasChannel ? 'ok' : 'warn',
+      detail: hasChannel
+        ? (cfg.notifications?.preferredChannel ?? (tgBotToken ? 'telegram_bot' : 'slack'))
+        : 'No notification channel — approvals will only be visible in the web app',
+      fix: !hasChannel ? 'Configure a channel in Configure → Channels' : undefined,
+    });
+
+    // 5. Privacy model
+    const privProvider = cfg.privacy?.provider;
+    const hasPrivModel = !!privProvider && !!cfg.llm.providers?.[privProvider];
+    const allCloud = Object.values(cfg.privacy?.roles ?? {}).every(r => r === 'primary');
+    checks.push({
+      id: 'privacy', label: 'Privacy model',
+      status: hasPrivModel ? 'ok' : allCloud ? 'warn' : 'warn',
+      detail: hasPrivModel
+        ? `${privProvider} / ${cfg.privacy?.model ?? 'default'}`
+        : allCloud ? 'All roles use cloud — raw content reaches primary model' : 'No local model — privacy roles fall back to primary',
+      fix: !hasPrivModel ? 'Configure Ollama or LM Studio in Configure → Privacy' : undefined,
+    });
+
+    // 6. Security posture
+    checks.push({
+      id: 'security', label: 'Security mode',
+      status: cfg.security?.cloudMode ? 'ok' : 'warn',
+      detail: cfg.security?.cloudMode
+        ? 'Cloud mode ON — all approvals require YubiKey'
+        : 'Local mode — low-risk actions can be approved via Telegram',
+    });
+
+    // 7. Read-only mode
+    checks.push({
+      id: 'readonly', label: 'Execution mode',
+      status: cfg.readOnly ? 'ok' : 'warn',
+      detail: cfg.readOnly ? 'Read-only — Argos observes and proposes, never executes' : 'Read-write — Argos can execute approved actions',
+    });
+
+    // 8. MCP servers
+    const mcpEnabled = (cfg.mcpServers ?? []).filter(s => s.enabled).length;
+    if (mcpEnabled > 0) {
+      checks.push({ id: 'mcp', label: 'MCP servers', status: 'ok', detail: `${mcpEnabled} server${mcpEnabled > 1 ? 's' : ''} enabled` });
+    }
+
+    // 9. Audit chain
+    try {
+      const total = (db.prepare('SELECT COUNT(*) as c FROM audit_log').get() as { c: number }).c;
+      const withHash = (db.prepare("SELECT COUNT(*) as c FROM audit_log WHERE entry_hash IS NOT NULL AND entry_hash != ''").get() as { c: number }).c;
+      const coverage = total > 0 ? Math.round((withHash / total) * 100) : 100;
+      checks.push({
+        id: 'audit', label: 'Audit chain',
+        status: coverage >= 99 ? 'ok' : coverage > 90 ? 'warn' : 'error',
+        detail: `${total} events · ${coverage}% hash coverage`,
+        fix: coverage < 99 ? 'Run: npm run verify-audit' : undefined,
+      });
+    } catch { /* table may not exist yet */ }
+
+    const summary = {
+      ok:    checks.filter(c => c.status === 'ok').length,
+      warn:  checks.filter(c => c.status === 'warn').length,
+      error: checks.filter(c => c.status === 'error').length,
+    };
+    res.json({ checks, summary });
+  });
+
+  // ── Audit log ─────────────────────────────────────────────────────────────
+
+  router.get('/audit-log', (_req, res) => {
+    const db = getDb();
+    const total = (db.prepare('SELECT COUNT(*) as c FROM audit_log').get() as { c: number }).c;
+    const rows = db.prepare(`
+      SELECT id, event, entity_id, entity_type, data, entry_hash, created_at
+      FROM audit_log ORDER BY created_at DESC LIMIT 200
+    `).all() as Array<{ id: string; event: string; entity_id?: string; entity_type?: string; data: string; entry_hash?: string; created_at: number }>;
+    res.json({
+      rows: rows.map(r => ({ ...r, data: (() => { try { return JSON.parse(r.data ?? '{}'); } catch { return {}; } })() })),
+      total,
+    });
+  });
+
+  // ── Credential management ─────────────────────────────────────────────────
+
+  router.get('/auth/credentials', (_req, res) => {
+    res.json(listCredentials());
+  });
+
+  router.delete('/auth/credentials/:deviceName', (req, res) => {
+    const deviceName = decodeURIComponent(req.params.deviceName);
+    if (!deviceName || deviceName.length > 64) {
+      res.status(400).json({ error: 'Invalid device name' });
+      return;
+    }
+    const ok = deleteCredential(deviceName);
+    if (!ok) {
+      res.status(404).json({ error: 'Credential not found' });
+      return;
+    }
+    res.json({ ok: true });
+  });
+
+  // ── Config export ─────────────────────────────────────────────────────────
+
+  router.get('/configure/export', (_req, res) => {
+    const cfg = getConfig() as unknown as import('../config/schema.js').Config;
+    const redacted = redactSecretsForDisk(cfg);
+    res.setHeader('Content-Disposition', `attachment; filename="argos-config-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.setHeader('Content-Type', 'application/json');
+    res.json(redacted);
   });
 
   router.get('/memories', (_req, res) => {

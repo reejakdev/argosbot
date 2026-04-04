@@ -505,6 +505,17 @@ export function listCredentials(): Array<{
   }));
 }
 
+export function deleteCredential(deviceName: string): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM webauthn_credentials WHERE device_name = ?').run(deviceName);
+  if (result.changes > 0) {
+    audit('yubikey_revoked', deviceName, 'webauthn', { device: deviceName });
+    log.warn(`Credential revoked: "${deviceName}"`);
+    return true;
+  }
+  return false;
+}
+
 // ─── Revoke all sessions (panic button) ──────────────────────────────────────
 
 export function revokeAll(): void {
