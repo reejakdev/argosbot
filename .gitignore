@@ -55,3 +55,4 @@ src/scripts/index-doc.ts
 
 # Test coverage
 coverage/
+site/
