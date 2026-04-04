@@ -16,10 +16,10 @@ function EyeIcon({ size = 48 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M2 16 C6 8, 26 8, 30 16 C26 24, 6 24, 2 16 Z" stroke="#4f6eff" strokeWidth="1.2" fill="none" />
-      <circle cx="16" cy="16" r="6.5" stroke="#4f6eff" strokeWidth="1" fill="none" opacity="0.9" />
-      <circle cx="16" cy="16" r="4" stroke="#7b96ff" strokeWidth="0.8" fill="none" opacity="0.7" />
-      <circle cx="16" cy="16" r="2" fill="#4f6eff" />
-      <circle cx="16" cy="16" r="1" fill="white" opacity="0.9" />
+      <circle cx="16" cy="16" r="5" stroke="#4f6eff" strokeWidth="1.2" fill="none" opacity="0.9" />
+      <circle cx="16" cy="16" r="3" stroke="#7b96ff" strokeWidth="0.9" fill="none" opacity="0.7" />
+      <circle cx="16" cy="16" r="1.6" fill="#4f6eff" />
+      <circle cx="16" cy="16" r="0.7" fill="white" opacity="0.9" />
       <line x1="2" y1="16" x2="4.5" y2="16" stroke="#4f6eff" strokeWidth="0.8" opacity="0.5" />
       <line x1="27.5" y1="16" x2="30" y2="16" stroke="#4f6eff" strokeWidth="0.8" opacity="0.5" />
     </svg>
