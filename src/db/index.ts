@@ -24,7 +24,9 @@ export function initDb(dataDir: string): Database.Database {
   fs.mkdirSync(resolved, { recursive: true, mode: 0o700 });
 
   // Harden directory permissions in case it already existed with looser perms
-  try { fs.chmodSync(resolved, 0o700); } catch {}
+  try {
+    fs.chmodSync(resolved, 0o700);
+  } catch {}
 
   const dbPath = path.join(resolved, 'argos.db');
   log.info(`Opening database at ${dbPath}`);
@@ -35,7 +37,9 @@ export function initDb(dataDir: string): Database.Database {
   _db.pragma('synchronous = NORMAL');
 
   // Harden DB file permissions — should only be readable by the owner
-  try { fs.chmodSync(dbPath, 0o600); } catch {}
+  try {
+    fs.chmodSync(dbPath, 0o600);
+  } catch {}
 
   runMigrations(_db);
   log.info('Database ready');
@@ -51,7 +55,9 @@ function runMigrations(db: Database.Database): void {
     )
   `);
 
-  const row = db.prepare('SELECT MAX(version) as v FROM schema_version').get() as { v: number | null };
+  const row = db.prepare('SELECT MAX(version) as v FROM schema_version').get() as {
+    v: number | null;
+  };
   const current = row.v ?? 0;
 
   const migrations: Array<{ version: number; sql: string }> = [
@@ -71,6 +77,7 @@ function runMigrations(db: Database.Database): void {
     { version: 14, sql: MIGRATION_14 },
     { version: 15, sql: MIGRATION_15 },
     { version: 16, sql: MIGRATION_16 },
+    { version: 17, sql: MIGRATION_17 },
   ];
 
   for (const migration of migrations) {
@@ -403,6 +410,13 @@ const MIGRATION_16 = `
   ALTER TABLE audit_log ADD COLUMN entry_hash TEXT;
 `;
 
+// ─── Migration 17: context window crash recovery ─────────────────────────────
+// Store full sanitized messages JSON so windows can be replayed after a crash.
+// Image data is excluded (ephemeral by design).
+const MIGRATION_17 = `
+  ALTER TABLE context_windows ADD COLUMN messages_json TEXT;
+`;
+
 // ─── Migration 11: knowledge graph ───────────────────────────────────────────
 const MIGRATION_11 = `
   CREATE TABLE IF NOT EXISTS entities (
@@ -446,9 +460,11 @@ function makeId(): string {
 let _lastAuditHash = '0000000000000000000000000000000000000000000000000000000000000000'; // genesis
 
 function seedAuditChain(db: Database.Database): void {
-  const row = db.prepare(
-    'SELECT entry_hash FROM audit_log WHERE entry_hash IS NOT NULL ORDER BY created_at DESC LIMIT 1'
-  ).get() as { entry_hash: string } | undefined;
+  const row = db
+    .prepare(
+      'SELECT entry_hash FROM audit_log WHERE entry_hash IS NOT NULL ORDER BY created_at DESC LIMIT 1',
+    )
+    .get() as { entry_hash: string } | undefined;
   if (row?.entry_hash) _lastAuditHash = row.entry_hash;
 }
 
@@ -457,7 +473,11 @@ export async function loadUlid(): Promise<void> {
   const mod = await import('ulid');
   _ulid = mod.monotonicFactory();
   // Seed hash chain from existing audit log
-  try { seedAuditChain(getDb()); } catch { /* DB not ready yet — will be seeded on first audit() call */ }
+  try {
+    seedAuditChain(getDb());
+  } catch {
+    /* DB not ready yet — will be seeded on first audit() call */
+  }
 }
 
 export function audit(
@@ -467,8 +487,8 @@ export function audit(
   data?: unknown,
 ): void {
   const db = getDb();
-  const id        = makeId();
-  const dataStr   = data ? JSON.stringify(data) : null;
+  const id = makeId();
+  const dataStr = data ? JSON.stringify(data) : null;
   const createdAt = Date.now();
 
   // Hash chain: SHA-256 over canonical entry content + previous hash
@@ -482,10 +502,21 @@ export function audit(
     .update(_lastAuditHash)
     .digest('hex');
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO audit_log (id, event_type, entity_id, entity_type, data, created_at, prev_hash, entry_hash)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, eventType, entityId ?? null, entityType ?? null, dataStr, createdAt, _lastAuditHash, entryHash);
+  `,
+  ).run(
+    id,
+    eventType,
+    entityId ?? null,
+    entityType ?? null,
+    dataStr,
+    createdAt,
+    _lastAuditHash,
+    entryHash,
+  );
 
   _lastAuditHash = entryHash;
 }
@@ -493,5 +524,9 @@ export function audit(
 // ─── Typed query helpers ──────────────────────────────────────────────────────
 export function jsonParse<T>(value: string | null): T | null {
   if (!value) return null;
-  try { return JSON.parse(value) as T; } catch { return null; }
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
 }

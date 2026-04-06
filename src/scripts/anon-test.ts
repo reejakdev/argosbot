@@ -36,40 +36,60 @@ import type { LLMConfig } from '../llm/index.js';
 // ─── CLI args ─────────────────────────────────────────────────────────────────
 
 interface CliArgs {
-  file?:           string;
-  llm:             boolean;
-  provider:        string;
-  model:           string;
-  baseUrl?:        string;
-  apiKey?:         string;
-  minConfidence:   'high' | 'medium' | 'low';
+  file?: string;
+  llm: boolean;
+  provider: string;
+  model: string;
+  baseUrl?: string;
+  apiKey?: string;
+  minConfidence: 'high' | 'medium' | 'low';
   exportPatterns?: string;
-  json:            boolean;
-  noColor:         boolean;
+  json: boolean;
+  noColor: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
-    llm:           false,
-    provider:      'compatible',
-    model:         'mistral',
+    llm: false,
+    provider: 'compatible',
+    model: 'mistral',
     minConfidence: 'medium',
-    json:          false,
-    noColor:       !process.stdout.isTTY,
+    json: false,
+    noColor: !process.stdout.isTTY,
   };
 
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
-      case '--file':            args.file            = argv[++i]; break;
-      case '--llm':             args.llm             = true; break;
-      case '--provider':        args.provider        = argv[++i]; break;
-      case '--model':           args.model           = argv[++i]; break;
-      case '--base-url':        args.baseUrl         = argv[++i]; break;
-      case '--api-key':         args.apiKey          = argv[++i]; break;
-      case '--min-confidence':  args.minConfidence   = argv[++i] as CliArgs['minConfidence']; break;
-      case '--export-patterns': args.exportPatterns  = argv[++i]; break;
-      case '--json':            args.json            = true; break;
-      case '--no-color':        args.noColor         = true; break;
+      case '--file':
+        args.file = argv[++i];
+        break;
+      case '--llm':
+        args.llm = true;
+        break;
+      case '--provider':
+        args.provider = argv[++i];
+        break;
+      case '--model':
+        args.model = argv[++i];
+        break;
+      case '--base-url':
+        args.baseUrl = argv[++i];
+        break;
+      case '--api-key':
+        args.apiKey = argv[++i];
+        break;
+      case '--min-confidence':
+        args.minConfidence = argv[++i] as CliArgs['minConfidence'];
+        break;
+      case '--export-patterns':
+        args.exportPatterns = argv[++i];
+        break;
+      case '--json':
+        args.json = true;
+        break;
+      case '--no-color':
+        args.noColor = true;
+        break;
     }
   }
 
@@ -79,14 +99,14 @@ function parseArgs(argv: string[]): CliArgs {
 // ─── Console helpers ──────────────────────────────────────────────────────────
 
 const c = {
-  reset:  (s: string, noColor: boolean) => noColor ? s : `\x1b[0m${s}\x1b[0m`,
-  bold:   (s: string, noColor: boolean) => noColor ? s : `\x1b[1m${s}\x1b[0m`,
-  dim:    (s: string, noColor: boolean) => noColor ? s : `\x1b[2m${s}\x1b[0m`,
-  green:  (s: string, noColor: boolean) => noColor ? s : `\x1b[32m${s}\x1b[0m`,
-  yellow: (s: string, noColor: boolean) => noColor ? s : `\x1b[33m${s}\x1b[0m`,
-  red:    (s: string, noColor: boolean) => noColor ? s : `\x1b[31m${s}\x1b[0m`,
-  cyan:   (s: string, noColor: boolean) => noColor ? s : `\x1b[36m${s}\x1b[0m`,
-  magenta:(s: string, noColor: boolean) => noColor ? s : `\x1b[35m${s}\x1b[0m`,
+  reset: (s: string, noColor: boolean) => (noColor ? s : `\x1b[0m${s}\x1b[0m`),
+  bold: (s: string, noColor: boolean) => (noColor ? s : `\x1b[1m${s}\x1b[0m`),
+  dim: (s: string, noColor: boolean) => (noColor ? s : `\x1b[2m${s}\x1b[0m`),
+  green: (s: string, noColor: boolean) => (noColor ? s : `\x1b[32m${s}\x1b[0m`),
+  yellow: (s: string, noColor: boolean) => (noColor ? s : `\x1b[33m${s}\x1b[0m`),
+  red: (s: string, noColor: boolean) => (noColor ? s : `\x1b[31m${s}\x1b[0m`),
+  cyan: (s: string, noColor: boolean) => (noColor ? s : `\x1b[36m${s}\x1b[0m`),
+  magenta: (s: string, noColor: boolean) => (noColor ? s : `\x1b[35m${s}\x1b[0m`),
 };
 
 // ─── Read input ───────────────────────────────────────────────────────────────
@@ -101,10 +121,10 @@ async function readInput(file?: string): Promise<string> {
     process.stderr.write('Paste text to anonymize (Ctrl+D when done):\n');
   }
 
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const rl = createInterface({ input: process.stdin });
     const lines: string[] = [];
-    rl.on('line', line => lines.push(line));
+    rl.on('line', (line) => lines.push(line));
     rl.on('close', () => resolve(lines.join('\n')));
   });
 }
@@ -113,7 +133,8 @@ async function readInput(file?: string): Promise<string> {
 
 async function buildAnonymizer(): Promise<Anonymizer> {
   try {
-    const { loadConfig } = await import('../config/index.js') as typeof import('../config/index.js');
+    const { loadConfig } =
+      (await import('../config/index.js')) as typeof import('../config/index.js');
     const config = loadConfig();
     return new Anonymizer(config.anonymizer);
   } catch {
@@ -152,15 +173,11 @@ function showDiff(
 
 // ─── Pattern export ───────────────────────────────────────────────────────────
 
-function exportPatterns(
-  findings: LlmFinding[],
-  outputPath: string,
-  noColor: boolean,
-): void {
+function exportPatterns(findings: LlmFinding[], outputPath: string, noColor: boolean): void {
   // Convert LLM findings to custom pattern entries (literal string match)
   const patterns = findings
-    .filter(f => f.confidence !== 'low')
-    .map(f => ({
+    .filter((f) => f.confidence !== 'low')
+    .map((f) => ({
       pattern: f.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
       replacement: `[${f.type.toUpperCase()}_CUSTOM]`,
       _comment: `LLM detected: ${f.reason ?? f.type}`,
@@ -168,15 +185,15 @@ function exportPatterns(
 
   writeFileSync(outputPath, JSON.stringify(patterns, null, 2), 'utf-8');
   console.log(c.green(`\n✅ Exported ${patterns.length} pattern(s) to ${outputPath}`, noColor));
-  console.log(c.dim('Add these to anonymizer.customPatterns in your config.json', noColor));
+  console.log(c.dim('Add these to anonymizer.customPatterns in your .config.json', noColor));
 }
 
 // ─── Summary table ────────────────────────────────────────────────────────────
 
 function showSummary(
-  regexLookup:  Record<string, string>,
+  regexLookup: Record<string, string>,
   llmFindings?: LlmFinding[],
-  tokensUsed?:  number,
+  tokensUsed?: number,
   noColor: boolean = false,
 ): void {
   console.log(c.bold('\n── REGEX REPLACEMENTS ───────────────────────────', noColor));
@@ -196,7 +213,7 @@ function showSummary(
       console.log(c.dim('  (none — regex caught everything)', noColor));
     } else {
       const confColor = (conf: string) => {
-        if (conf === 'high')   return (s: string) => c.red(s, noColor);
+        if (conf === 'high') return (s: string) => c.red(s, noColor);
         if (conf === 'medium') return (s: string) => c.yellow(s, noColor);
         return (s: string) => c.dim(s, noColor);
       };
@@ -239,9 +256,10 @@ async function main() {
   if (args.llm) {
     const llmConfig: LLMConfig = {
       provider: args.provider as LLMConfig['provider'],
-      model:    args.model,
-      apiKey:   args.apiKey ?? process.env.ANTHROPIC_API_KEY ?? process.env.OPENAI_API_KEY ?? '',
-      baseUrl:  args.baseUrl ?? (args.provider === 'compatible' ? 'http://localhost:11434/v1' : undefined),
+      model: args.model,
+      apiKey: args.apiKey ?? process.env.ANTHROPIC_API_KEY ?? process.env.OPENAI_API_KEY ?? '',
+      baseUrl:
+        args.baseUrl ?? (args.provider === 'compatible' ? 'http://localhost:11434/v1' : undefined),
       maxTokens: 1024,
       temperature: 0,
     };
@@ -258,35 +276,27 @@ async function main() {
   // JSON output mode (for scripting / CI)
   if (args.json) {
     const output = {
-      original:          input,
-      regexText:         regexResult.text,
-      regexLookup:       regexResult.lookup,
+      original: input,
+      regexText: regexResult.text,
+      regexLookup: regexResult.lookup,
       regexReplacements: Object.keys(regexResult.lookup).length,
-      ...(llmResult ? {
-        llmText:         llmResult.text,
-        llmFindings:     llmResult.llmFindings,
-        llmApplied:      llmResult.llmApplied,
-        tokensUsed:      llmResult.tokensUsed,
-      } : {}),
+      ...(llmResult
+        ? {
+            llmText: llmResult.text,
+            llmFindings: llmResult.llmFindings,
+            llmApplied: llmResult.llmApplied,
+            tokensUsed: llmResult.tokensUsed,
+          }
+        : {}),
     };
     process.stdout.write(JSON.stringify(output, null, 2) + '\n');
     return;
   }
 
   // Human-readable output
-  showDiff(
-    input,
-    regexResult.text,
-    llmResult?.text ?? null,
-    noColor,
-  );
+  showDiff(input, regexResult.text, llmResult?.text ?? null, noColor);
 
-  showSummary(
-    regexResult.lookup,
-    llmResult?.llmFindings,
-    llmResult?.tokensUsed,
-    noColor,
-  );
+  showSummary(regexResult.lookup, llmResult?.llmFindings, llmResult?.tokensUsed, noColor);
 
   // Export patterns if requested
   if (args.exportPatterns && llmResult) {
@@ -295,9 +305,9 @@ async function main() {
 }
 
 // Suppress "config not loaded" errors when running standalone
-process.env.CONFIG_PATH = process.env.CONFIG_PATH ?? '~/.argos/config.json';
+process.env.CONFIG_PATH = process.env.CONFIG_PATH ?? '~/.argos/.config.json';
 
-main().catch(e => {
+main().catch((e) => {
   process.stderr.write(`Error: ${e.message ?? e}\n`);
   process.exit(1);
 });

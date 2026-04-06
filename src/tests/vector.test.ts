@@ -24,30 +24,47 @@ describe('chunkText', () => {
   });
 
   it('splits long content into overlapping chunks', () => {
-    const lines = Array.from({ length: 60 }, (_, i) => `This is line number ${i + 1} with enough content.`);
+    const lines = Array.from(
+      { length: 60 },
+      (_, i) => `This is line number ${i + 1} with enough content.`,
+    );
     const chunks = chunkText(lines.join('\n'), 'test:long', 'Long');
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.at(-1)!.content).toContain('line number 60');
   });
 
   it('includes all provided tags', () => {
-    const chunks = chunkText('Content with enough length to pass the filter.', 'test:tagged', 'Tagged', ['a', 'b']);
+    const chunks = chunkText(
+      'Content with enough length to pass the filter.',
+      'test:tagged',
+      'Tagged',
+      ['a', 'b'],
+    );
     expect(chunks[0].tags).toEqual(['a', 'b']);
   });
 
   it('propagates field metadata', () => {
-    const chunks = chunkText('Enough content to be indexed properly here.', 'test:fields', 'Fields', [], {
-      field1: 'chat123',
-      field2: 'Alice',
-    });
+    const chunks = chunkText(
+      'Enough content to be indexed properly here.',
+      'test:fields',
+      'Fields',
+      [],
+      {
+        field1: 'chat123',
+        field2: 'Alice',
+      },
+    );
     expect(chunks[0].field1).toBe('chat123');
     expect(chunks[0].field2).toBe('Alice');
   });
 
   it('generates unique sequential IDs', () => {
-    const lines = Array.from({ length: 80 }, (_, i) => `This is line number ${i} with some padding content.`);
+    const lines = Array.from(
+      { length: 80 },
+      (_, i) => `This is line number ${i} with some padding content.`,
+    );
     const chunks = chunkText(lines.join('\n'), 'test:ids', 'IDs');
-    const ids = chunks.map(c => c.id);
+    const ids = chunks.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
@@ -108,8 +125,8 @@ describe('chunkCode', () => {
   it('TokenB and its depositVault are in the SAME chunk — the original bug', () => {
     const chunks = chunkCode(MOCK_ADDRESSES_TS, 'github:test/repo', 'Test Repo');
     // Every chunk containing TokenB must also contain the mainnet depositVault address
-    const tokenBChunks = chunks.filter(c => c.content.includes('TokenB'));
-    const anyHasVault  = tokenBChunks.some(c =>
+    const tokenBChunks = chunks.filter((c) => c.content.includes('TokenB'));
+    const anyHasVault = tokenBChunks.some((c) =>
       c.content.includes('0x5555555555555555555555555555555555555555'),
     );
     expect(anyHasVault).toBe(true);
@@ -117,7 +134,7 @@ describe('chunkCode', () => {
 
   it('all addresses are retrievable across chunks', () => {
     const chunks = chunkCode(MOCK_ADDRESSES_TS, 'github:test/repo', 'Test Repo');
-    const allContent = chunks.map(c => c.content).join('\n');
+    const allContent = chunks.map((c) => c.content).join('\n');
     expect(allContent).toContain('0x5555555555555555555555555555555555555555'); // TokenB mainnet deposit
     expect(allContent).toContain('0x9999999999999999999999999999999999999999'); // TokenC base
     expect(allContent).toContain('0x1111111111111111111111111111111111111111'); // TokenA token
@@ -125,20 +142,21 @@ describe('chunkCode', () => {
 
   it('prepends a breadcrumb header with // network > ...', () => {
     const chunks = chunkCode(MOCK_ADDRESSES_TS, 'github:test/repo', 'Test Repo');
-    const hasBreadcrumb = chunks.some(c => c.content.startsWith('//'));
+    const hasBreadcrumb = chunks.some((c) => c.content.startsWith('//'));
     expect(hasBreadcrumb).toBe(true);
   });
 
   it('polygon network is retrievable', () => {
     const chunks = chunkCode(MOCK_ADDRESSES_TS, 'github:test/repo', 'Test Repo');
-    const allContent = chunks.map(c => c.content).join('\n');
+    const allContent = chunks.map((c) => c.content).join('\n');
     expect(allContent).toContain('polygon');
     expect(allContent).toContain('0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
   });
 
   it('falls back to chunkText for prose (not structured)', () => {
-    const prose = Array.from({ length: 50 }, (_, i) =>
-      `This is sentence number ${i + 1} in a plain prose document without braces.`
+    const prose = Array.from(
+      { length: 50 },
+      (_, i) => `This is sentence number ${i + 1} in a plain prose document without braces.`,
     ).join('\n');
     const codeChunks = chunkCode(prose, 'doc:prose', 'Prose');
     const textChunks = chunkText(prose, 'doc:prose', 'Prose');
@@ -155,7 +173,7 @@ describe('chunkCode', () => {
 
   it('chunk IDs are unique', () => {
     const chunks = chunkCode(MOCK_ADDRESSES_TS, 'github:test/repo', 'Test Repo');
-    const ids = chunks.map(c => c.id);
+    const ids = chunks.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 });

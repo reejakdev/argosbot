@@ -26,7 +26,8 @@ const CALLBACK_HOST = '127.0.0.1';
 const CALLBACK_PORT = 53692;
 const CALLBACK_PATH = '/callback';
 const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`;
-const SCOPES = 'org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload';
+const SCOPES =
+  'org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload';
 
 // ─── PKCE ─────────────────────────────────────────────────────────────────────
 
@@ -43,7 +44,7 @@ async function generatePKCE(): Promise<{ verifier: string; challenge: string }> 
 export interface OAuthTokens {
   access: string;
   refresh: string;
-  expires: number;   // epoch ms — when access_token expires
+  expires: number; // epoch ms — when access_token expires
 }
 
 // ─── Login flow ───────────────────────────────────────────────────────────────
@@ -130,13 +131,13 @@ export async function loginAnthropic(options: {
     // Wait for callback or manual input
     const waitForCallback = async (): Promise<void> => {
       while (!resolvedCode) {
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, 200));
       }
     };
 
     if (options.onManualInput) {
       // Race: callback server vs manual paste
-      const manualPromise = options.onManualInput().then(input => {
+      const manualPromise = options.onManualInput().then((input) => {
         if (!resolvedCode && input) {
           const parsed = parseAuthInput(input);
           if (parsed.code) {
@@ -195,7 +196,7 @@ async function exchangeCode(
     throw new Error(`Token exchange failed: ${res.status} — ${body.slice(0, 200)}`);
   }
 
-  const data = await res.json() as {
+  const data = (await res.json()) as {
     access_token: string;
     refresh_token: string;
     expires_in: number;
@@ -232,7 +233,7 @@ export async function refreshAnthropicToken(refreshToken: string): Promise<OAuth
     throw new Error(`Token refresh failed: ${res.status} — ${body.slice(0, 200)}`);
   }
 
-  const data = await res.json() as {
+  const data = (await res.json()) as {
     access_token: string;
     refresh_token: string;
     expires_in: number;
@@ -265,7 +266,7 @@ export async function getValidAccessToken(
   const refreshed = await refreshAnthropicToken(tokens.refresh);
 
   // Update in-place
-  tokens.access  = refreshed.access;
+  tokens.access = refreshed.access;
   tokens.refresh = refreshed.refresh;
   tokens.expires = refreshed.expires;
 
@@ -282,10 +283,12 @@ function parseAuthInput(input: string): { code?: string; state?: string } {
   try {
     const url = new URL(value);
     return {
-      code:  url.searchParams.get('code') ?? undefined,
+      code: url.searchParams.get('code') ?? undefined,
       state: url.searchParams.get('state') ?? undefined,
     };
-  } catch { /* not a URL */ }
+  } catch {
+    /* not a URL */
+  }
 
   if (value.includes('#')) {
     const [code, state] = value.split('#', 2);
@@ -295,7 +298,7 @@ function parseAuthInput(input: string): { code?: string; state?: string } {
   if (value.includes('code=')) {
     const params = new URLSearchParams(value);
     return {
-      code:  params.get('code') ?? undefined,
+      code: params.get('code') ?? undefined,
       state: params.get('state') ?? undefined,
     };
   }

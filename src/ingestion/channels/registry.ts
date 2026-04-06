@@ -56,7 +56,7 @@ export async function startAllChannels(
 }
 
 export function getChannelStatuses(): Array<{ name: string; status: ChannelHealth }> {
-  return Array.from(channels.keys()).map(name => ({
+  return Array.from(channels.keys()).map((name) => ({
     name,
     status: channelHealth.get(name) ?? 'registered',
   }));

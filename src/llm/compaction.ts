@@ -11,11 +11,11 @@ import { createLogger } from '../logger.js';
 const log = createLogger('compaction');
 
 const MAX_HISTORY_MESSAGES = 20;
-const COMPACT_KEEP_RECENT = 6;  // keep last N messages verbatim
+const COMPACT_KEEP_RECENT = 6; // keep last N messages verbatim
 
 export interface CompactableHistory {
   messages: LLMMessage[];
-  compactedSummary?: string;  // previous compaction summary
+  compactedSummary?: string; // previous compaction summary
 }
 
 /**
@@ -40,7 +40,9 @@ export async function compactHistory(
   const toSummarize = msgs.slice(0, msgs.length - COMPACT_KEEP_RECENT);
   const toKeep = msgs.slice(msgs.length - COMPACT_KEEP_RECENT);
 
-  log.info(`Compacting ${toSummarize.length} messages into summary, keeping ${toKeep.length} recent`);
+  log.info(
+    `Compacting ${toSummarize.length} messages into summary, keeping ${toKeep.length} recent`,
+  );
 
   // Build the previous context
   const previousContext = history.compactedSummary
@@ -50,7 +52,8 @@ export async function compactHistory(
   const summaryPrompt: LLMMessage[] = [
     {
       role: 'system',
-      content: `You are a conversation summarizer. Produce a concise summary of the conversation below.
+      content: `You are a conversation summarizer. Produce a single, unified summary that merges any prior summary with the new messages below.
+Do NOT simply append — deduplicate facts and update outdated info.
 Preserve:
 - Key facts, decisions, and action items
 - User preferences and profile info shared
@@ -61,7 +64,7 @@ Format: bullet points, max 500 words. Write in the same language as the conversa
     },
     {
       role: 'user',
-      content: `${previousContext}Messages to summarize:\n\n${toSummarize.map(m => `[${m.role}]: ${m.content}`).join('\n\n')}`,
+      content: `${previousContext}New messages to merge into the summary:\n\n${toSummarize.map((m) => `[${m.role}]: ${m.content}`).join('\n\n')}`,
     },
   ];
 

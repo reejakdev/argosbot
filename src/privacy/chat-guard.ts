@@ -29,19 +29,55 @@ export interface GuardResult {
 
 const AUTO_REDACT: Array<{ pattern: RegExp; label: string; replacement: string }> = [
   // Ethereum private keys (64 hex chars, optionally 0x prefixed)
-  { pattern: /\b(0x)?[0-9a-fA-F]{64}\b/g, label: 'private key', replacement: '[PRIVATE_KEY_REDACTED]' },
+  {
+    pattern: /\b(0x)?[0-9a-fA-F]{64}\b/g,
+    label: 'private key',
+    replacement: '[PRIVATE_KEY_REDACTED]',
+  },
   // Bitcoin WIF private keys
-  { pattern: /\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b/g, label: 'BTC private key', replacement: '[PRIVATE_KEY_REDACTED]' },
+  {
+    pattern: /\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b/g,
+    label: 'BTC private key',
+    replacement: '[PRIVATE_KEY_REDACTED]',
+  },
   // Solana private keys (base58, 87-88 chars)
-  { pattern: /\b[1-9A-HJ-NP-Za-km-z]{87,88}\b/g, label: 'SOL private key', replacement: '[PRIVATE_KEY_REDACTED]' },
+  {
+    pattern: /\b[1-9A-HJ-NP-Za-km-z]{87,88}\b/g,
+    label: 'SOL private key',
+    replacement: '[PRIVATE_KEY_REDACTED]',
+  },
   // BIP39 seed phrases (12 or 24 lowercase words)
-  { pattern: /\b(?:[a-z]{3,8}\s){11}[a-z]{3,8}\b/g, label: 'seed phrase (12 words)', replacement: '[SEED_PHRASE_REDACTED]' },
-  { pattern: /\b(?:[a-z]{3,8}\s){23}[a-z]{3,8}\b/g, label: 'seed phrase (24 words)', replacement: '[SEED_PHRASE_REDACTED]' },
+  {
+    pattern: /\b(?:[a-z]{3,8}\s){11}[a-z]{3,8}\b/g,
+    label: 'seed phrase (12 words)',
+    replacement: '[SEED_PHRASE_REDACTED]',
+  },
+  {
+    pattern: /\b(?:[a-z]{3,8}\s){23}[a-z]{3,8}\b/g,
+    label: 'seed phrase (24 words)',
+    replacement: '[SEED_PHRASE_REDACTED]',
+  },
   // API keys (common patterns)
-  { pattern: /\b(sk-[a-zA-Z0-9_-]{20,})\b/g, label: 'API key (sk-)', replacement: '[API_KEY_REDACTED]' },
-  { pattern: /\b(ghp_[a-zA-Z0-9]{36,})\b/g, label: 'GitHub token', replacement: '[API_KEY_REDACTED]' },
-  { pattern: /\b(xox[bpas]-[a-zA-Z0-9-]{10,})\b/g, label: 'Slack token', replacement: '[API_KEY_REDACTED]' },
-  { pattern: /\b(AKIA[0-9A-Z]{16})\b/g, label: 'AWS access key', replacement: '[API_KEY_REDACTED]' },
+  {
+    pattern: /\b(sk-[a-zA-Z0-9_-]{20,})\b/g,
+    label: 'API key (sk-)',
+    replacement: '[API_KEY_REDACTED]',
+  },
+  {
+    pattern: /\b(ghp_[a-zA-Z0-9]{36,})\b/g,
+    label: 'GitHub token',
+    replacement: '[API_KEY_REDACTED]',
+  },
+  {
+    pattern: /\b(xox[bpas]-[a-zA-Z0-9-]{10,})\b/g,
+    label: 'Slack token',
+    replacement: '[API_KEY_REDACTED]',
+  },
+  {
+    pattern: /\b(AKIA[0-9A-Z]{16})\b/g,
+    label: 'AWS access key',
+    replacement: '[API_KEY_REDACTED]',
+  },
   // Generic long hex secrets (>40 chars, likely a key)
   { pattern: /\b[0-9a-fA-F]{40,}\b/g, label: 'hex secret', replacement: '[HEX_SECRET_REDACTED]' },
 ];
@@ -60,8 +96,15 @@ const WARN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g, label: 'email address' },
   // Large amounts ($10k+ or 10k+ with any currency/token)
   { pattern: /\$\s*[1-9]\d{4,}(?:[.,]\d+)?/g, label: 'large amount' },
-  { pattern: /\b[1-9]\d{4,}(?:[.,]\d+)?\s*(?:USDC|USDT|ETH|BTC|SOL|DAI|EUR|USD|GBP|CHF|BUSD|WETH|WBTC|stETH|AAVE|UNI|LINK|MATIC|ARB|OP)\b/gi, label: 'large amount' },
-  { pattern: /\b(?:USDC|USDT|ETH|BTC|SOL|DAI|EUR|USD)\s*[1-9]\d{4,}(?:[.,]\d+)?\b/gi, label: 'large amount' },
+  {
+    pattern:
+      /\b[1-9]\d{4,}(?:[.,]\d+)?\s*(?:USDC|USDT|ETH|BTC|SOL|DAI|EUR|USD|GBP|CHF|BUSD|WETH|WBTC|stETH|AAVE|UNI|LINK|MATIC|ARB|OP)\b/gi,
+    label: 'large amount',
+  },
+  {
+    pattern: /\b(?:USDC|USDT|ETH|BTC|SOL|DAI|EUR|USD)\s*[1-9]\d{4,}(?:[.,]\d+)?\b/gi,
+    label: 'large amount',
+  },
 ];
 
 /**
@@ -101,7 +144,7 @@ export function guardMessage(text: string): GuardResult {
 
   const needsConfirmation = warnings.length > 0;
   const warningMessage = needsConfirmation
-    ? `⚠️ Sensitive data detected:\n${warnings.map(w => `• ${w}`).join('\n')}\n\nThis will be sent to the LLM. Continue? (reply "yes" to send, anything else to cancel)`
+    ? `⚠️ Sensitive data detected:\n${warnings.map((w) => `• ${w}`).join('\n')}\n\nThis will be sent to the LLM. Continue? (reply "yes" to send, anything else to cancel)`
     : undefined;
 
   return {

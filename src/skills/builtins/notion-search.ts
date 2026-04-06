@@ -10,7 +10,8 @@ registerSkill({
   description: 'Search Notion workspace for pages and databases',
   tool: {
     name: 'notion_search',
-    description: 'Search your Notion workspace for pages, tasks, notes, or database entries matching a query.',
+    description:
+      'Search your Notion workspace for pages, tasks, notes, or database entries matching a query.',
     input_schema: {
       type: 'object',
       properties: {
@@ -49,7 +50,7 @@ registerSkill({
     const res = await fetch('https://api.notion.com/v1/search', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         'Notion-Version': '2022-06-28',
       },
@@ -62,14 +63,14 @@ registerSkill({
       return { success: false, output: `Notion API error ${res.status}: ${err}` };
     }
 
-    const data = await res.json() as NotionSearchResponse;
+    const data = (await res.json()) as NotionSearchResponse;
     const results = data.results ?? [];
 
     if (results.length === 0) {
       return { success: true, output: `No Notion pages found for: "${query}"` };
     }
 
-    const lines = results.map(r => {
+    const lines = results.map((r) => {
       const title = extractTitle(r);
       const type = r.object === 'database' ? '[DB]' : '[Page]';
       const url = r.url ?? '';
@@ -95,13 +96,19 @@ function extractTitle(obj: NotionObject): string {
     for (const key of ['title', 'Name', 'Title']) {
       const prop = obj.properties[key];
       if (prop?.type === 'title' && Array.isArray(prop.title)) {
-        return (prop.title as Array<{ plain_text?: string }>).map(t => t.plain_text ?? '').join('') || 'Untitled';
+        return (
+          (prop.title as Array<{ plain_text?: string }>).map((t) => t.plain_text ?? '').join('') ||
+          'Untitled'
+        );
       }
     }
   }
   // Database
   if (obj.object === 'database' && obj.title) {
-    return (obj.title as Array<{ plain_text?: string }>).map(t => t.plain_text ?? '').join('') || 'Untitled DB';
+    return (
+      (obj.title as Array<{ plain_text?: string }>).map((t) => t.plain_text ?? '').join('') ||
+      'Untitled DB'
+    );
   }
   return 'Untitled';
 }

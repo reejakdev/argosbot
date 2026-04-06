@@ -26,7 +26,7 @@ const ISSUES_QUERY = `
       issues(
         filter: { state: { type: { in: ["unstarted", "started"] } } }
         orderBy: updatedAt
-        first: 50
+        first: 200
       ) {
         nodes {
           id
@@ -74,12 +74,13 @@ export async function fetchLinear(
   let data: Record<string, unknown>;
   try {
     const res = await fetch(LINEAR_API, {
-      method:  'POST',
+      method: 'POST',
       headers: {
-        'Content-Type':  'application/json',
-        'Authorization': apiKey,   // Linear accepts raw key or "Bearer <key>"
+        'Content-Type': 'application/json',
+        Authorization: apiKey, // Linear accepts raw key or "Bearer <key>"
       },
       body: JSON.stringify({ query: ISSUES_QUERY, variables: { teamId: opts.teamId } }),
+      signal: AbortSignal.timeout(15_000),
     });
 
     if (!res.ok) {
@@ -87,7 +88,7 @@ export async function fetchLinear(
       return null;
     }
 
-    const json = await res.json() as { data?: { team?: unknown }; errors?: unknown[] };
+    const json = (await res.json()) as { data?: { team?: unknown }; errors?: unknown[] };
     if (json.errors?.length) {
       log.warn('Linear GraphQL errors', json.errors);
       return null;
@@ -100,14 +101,28 @@ export async function fetchLinear(
 
   const team = data.team as {
     name: string;
-    issues: { nodes: Array<{
-      id: string; identifier: string; title: string; description?: string;
-      priority: number; state: { name: string; type: string };
-      assignee?: { name: string }; createdAt: string; updatedAt: string;
-    }> };
-    projects: { nodes: Array<{
-      id: string; name: string; description?: string; state: string; progress: number;
-    }> };
+    issues: {
+      nodes: Array<{
+        id: string;
+        identifier: string;
+        title: string;
+        description?: string;
+        priority: number;
+        state: { name: string; type: string };
+        assignee?: { name: string };
+        createdAt: string;
+        updatedAt: string;
+      }>;
+    };
+    projects: {
+      nodes: Array<{
+        id: string;
+        name: string;
+        description?: string;
+        state: string;
+        progress: number;
+      }>;
+    };
   } | null;
 
   if (!team) {
@@ -119,12 +134,16 @@ export async function fetchLinear(
   const lines: string[] = [`# Linear — ${team.name}\n`];
 
   // Active projects
-  const activeProjects = team.projects.nodes.filter(p => p.state !== 'completed' && p.state !== 'cancelled');
+  const activeProjects = team.projects.nodes.filter(
+    (p) => p.state !== 'completed' && p.state !== 'cancelled',
+  );
   if (activeProjects.length) {
     lines.push('## Active Projects\n');
     for (const p of activeProjects) {
       const pct = Math.round(p.progress * 100);
-      lines.push(`- **${p.name}** [${p.state}, ${pct}%]${p.description ? ` — ${p.description.slice(0, 120)}` : ''}`);
+      lines.push(
+        `- **${p.name}** [${p.state}, ${pct}%]${p.description ? ` — ${p.description.slice(0, 120)}` : ''}`,
+      );
     }
     lines.push('');
   }
@@ -133,10 +152,12 @@ export async function fetchLinear(
   if (team.issues.nodes.length) {
     lines.push('## Open Issues\n');
     for (const issue of team.issues.nodes) {
-      const assignee  = issue.assignee?.name ?? 'unassigned';
-      const priority  = priorityLabel(issue.priority);
+      const assignee = issue.assignee?.name ?? 'unassigned';
+      const priority = priorityLabel(issue.priority);
       const updatedAt = new Date(issue.updatedAt).toLocaleDateString();
-      lines.push(`- [${issue.identifier}] **${issue.title}** — ${issue.state.name} | ${priority} | ${assignee} | updated ${updatedAt}`);
+      lines.push(
+        `- [${issue.identifier}] **${issue.title}** — ${issue.state.name} | ${priority} | ${assignee} | updated ${updatedAt}`,
+      );
       if (issue.description) {
         lines.push(`  ${issue.description.slice(0, 200).replace(/\n/g, ' ')}`);
       }
@@ -148,12 +169,14 @@ export async function fetchLinear(
 
   const content = lines.join('\n').slice(0, 8000);
 
-  log.info(`Linear: fetched ${team.issues.nodes.length} issues + ${activeProjects.length} projects for ${team.name}`);
+  log.info(
+    `Linear: fetched ${team.issues.nodes.length} issues + ${activeProjects.length} projects for ${team.name}`,
+  );
 
   return {
-    key:     `linear:${opts.teamId}`,
-    name:    opts.name,
+    key: `linear:${opts.teamId}`,
+    name: opts.name,
     content,
-    tags:    ['linear', 'issues', team.name.toLowerCase()],
+    tags: ['linear', 'issues', team.name.toLowerCase()],
   };
 }

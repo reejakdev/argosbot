@@ -10,10 +10,12 @@ import { queryGraph } from '../../knowledge-graph/store.js';
 
 registerSkill({
   name: 'graph_search',
-  description: 'Search the knowledge graph for everything known about a person, company, or entity. Returns related entities and relationships.',
+  description:
+    'Search the knowledge graph for everything known about a person, company, or entity. Returns related entities and relationships.',
   tool: {
     name: 'graph_search',
-    description: 'Search the knowledge graph for everything known about a person, company, or entity. Returns related entities and relationships.',
+    description:
+      'Search the knowledge graph for everything known about a person, company, or entity. Returns related entities and relationships.',
     input_schema: {
       type: 'object',
       properties: {
@@ -38,10 +40,7 @@ registerSkill({
       };
     }
 
-    const lines: string[] = [
-      `## Entity: ${result.entity.name}`,
-      `Type: ${result.entity.type}`,
-    ];
+    const lines: string[] = [`## Entity: ${result.entity.name}`, `Type: ${result.entity.type}`];
 
     const props = result.entity.properties;
     if (props && Object.keys(props).length > 0) {
@@ -55,7 +54,9 @@ registerSkill({
       for (const rel of result.related) {
         const arrow = rel.direction === 'outbound' ? '-->' : '<--';
         const ctx = rel.context ? ` (context: "${rel.context}")` : '';
-        lines.push(`• ${result.entity.name} ${arrow}[${rel.relation}]${arrow} ${rel.entity.name} [${rel.entity.type}]${ctx}`);
+        lines.push(
+          `• ${result.entity.name} ${arrow}[${rel.relation}]${arrow} ${rel.entity.name} [${rel.entity.type}]${ctx}`,
+        );
       }
     }
 

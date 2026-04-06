@@ -52,9 +52,9 @@ function getRpConfig(): { rpID: string; rpName: string; origin: string } {
   return { rpID, rpName: 'Argos', origin };
 }
 
-const SESSION_TTL_MS = 30 * 60 * 1000;        // 30min standard session
-const CHALLENGE_TTL_MS = 5 * 60 * 1000;       // 5min challenge window
-const ELEVATED_TTL_MS = 10 * 60 * 1000;       // 10min elevated session
+const SESSION_TTL_MS = 30 * 60 * 1000; // 30min standard session
+const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5min challenge window
+const ELEVATED_TTL_MS = 10 * 60 * 1000; // 10min elevated session
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
@@ -73,9 +73,9 @@ function getCredentials(): StoredCredential[] {
 }
 
 function getCredentialById(credId: string): StoredCredential | null {
-  return getDb().prepare(
-    `SELECT * FROM webauthn_credentials WHERE id = ?`
-  ).get(credId) as StoredCredential | null;
+  return getDb()
+    .prepare(`SELECT * FROM webauthn_credentials WHERE id = ?`)
+    .get(credId) as StoredCredential | null;
 }
 
 function saveCredential(cred: {
@@ -85,24 +85,32 @@ function saveCredential(cred: {
   deviceName: string;
   transports?: string[];
 }): void {
-  getDb().prepare(`
+  getDb()
+    .prepare(
+      `
     INSERT OR REPLACE INTO webauthn_credentials
     (id, public_key, counter, device_name, transports, registered_at)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
-    cred.id,
-    isoBase64URL.fromBuffer(cred.publicKey as Uint8Array<ArrayBuffer>),
-    cred.counter,
-    cred.deviceName,
-    cred.transports ? JSON.stringify(cred.transports) : null,
-    Date.now(),
-  );
+  `,
+    )
+    .run(
+      cred.id,
+      isoBase64URL.fromBuffer(cred.publicKey as Uint8Array<ArrayBuffer>),
+      cred.counter,
+      cred.deviceName,
+      cred.transports ? JSON.stringify(cred.transports) : null,
+      Date.now(),
+    );
 }
 
-function updateCounter(credId: string, counter: number): void {
-  getDb().prepare(
-    `UPDATE webauthn_credentials SET counter = ?, last_used_at = ? WHERE id = ?`
-  ).run(counter, Date.now(), credId);
+/** Atomically update counter — rejects if counter hasn't advanced (replay/race). */
+function updateCounter(credId: string, newCounter: number): boolean {
+  const result = getDb()
+    .prepare(
+      `UPDATE webauthn_credentials SET counter = ?, last_used_at = ? WHERE id = ? AND counter < ?`,
+    )
+    .run(newCounter, Date.now(), credId, newCounter);
+  return result.changes > 0;
 }
 
 // ─── Challenge management ──────────────────────────────────────────────────────
@@ -114,10 +122,21 @@ function storeChallenge(
 ): string {
   const id = crypto.randomUUID();
   const now = Date.now();
-  getDb().prepare(`
+  getDb()
+    .prepare(
+      `
     INSERT INTO webauthn_challenges (id, challenge, type, context, created_at, expires_at, used)
     VALUES (?, ?, ?, ?, ?, ?, 0)
-  `).run(id, challenge, type, context ? JSON.stringify(context) : null, now, now + CHALLENGE_TTL_MS);
+  `,
+    )
+    .run(
+      id,
+      challenge,
+      type,
+      context ? JSON.stringify(context) : null,
+      now,
+      now + CHALLENGE_TTL_MS,
+    );
   return id;
 }
 
@@ -127,11 +146,17 @@ function consumeChallenge(challengeId: string): {
   context: Record<string, unknown> | null;
 } | null {
   const db = getDb();
-  const row = db.prepare(`
+  const row = db
+    .prepare(
+      `
     SELECT * FROM webauthn_challenges
     WHERE id = ? AND used = 0 AND expires_at > ?
-  `).get(challengeId, Date.now()) as {
-    challenge: string; type: string; context: string | null
+  `,
+    )
+    .get(challengeId, Date.now()) as {
+    challenge: string;
+    type: string;
+    context: string | null;
   } | null;
 
   if (!row) return null;
@@ -146,9 +171,9 @@ function consumeChallenge(challengeId: string): {
 
 // Cleanup expired challenges (run periodically)
 export function pruneExpiredChallenges(): void {
-  const result = getDb().prepare(
-    `DELETE FROM webauthn_challenges WHERE expires_at < ?`
-  ).run(Date.now());
+  const result = getDb()
+    .prepare(`DELETE FROM webauthn_challenges WHERE expires_at < ?`)
+    .run(Date.now());
   if (result.changes > 0) log.debug(`Pruned ${result.changes} expired challenges`);
 }
 
@@ -159,10 +184,14 @@ function issueSession(credentialId: string, clearance: 'standard' | 'elevated'):
   const now = Date.now();
   const ttl = clearance === 'elevated' ? ELEVATED_TTL_MS : SESSION_TTL_MS;
 
-  getDb().prepare(`
+  getDb()
+    .prepare(
+      `
     INSERT INTO webauthn_sessions (token, credential_id, created_at, expires_at, clearance)
     VALUES (?, ?, ?, ?, ?)
-  `).run(token, credentialId, now, now + ttl, clearance);
+  `,
+    )
+    .run(token, credentialId, now, now + ttl, clearance);
 
   return token;
 }
@@ -172,10 +201,16 @@ function getSession(token: string): {
   clearance: 'standard' | 'elevated';
   expiresAt: number;
 } | null {
-  const row = getDb().prepare(`
+  const row = getDb()
+    .prepare(
+      `
     SELECT * FROM webauthn_sessions WHERE token = ? AND expires_at > ?
-  `).get(token, Date.now()) as {
-    credential_id: string; clearance: string; expires_at: number
+  `,
+    )
+    .get(token, Date.now()) as {
+    credential_id: string;
+    clearance: string;
+    expires_at: number;
   } | null;
 
   if (!row) return null;
@@ -201,9 +236,7 @@ export function pruneExpiredSessions(): void {
 
 // ─── Express middleware ───────────────────────────────────────────────────────
 
-export function requireAuth(
-  clearance: 'standard' | 'elevated' = 'standard',
-) {
+export function requireAuth(clearance: 'standard' | 'elevated' = 'standard') {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const token = extractToken(req);
     if (!token) {
@@ -215,7 +248,10 @@ export function requireAuth(
     const session = getSession(token);
     if (session) {
       if (clearance === 'elevated' && session.clearance !== 'elevated') {
-        res.status(403).json({ error: 'Elevated authentication required — tap your YubiKey to confirm this action', code: 'ELEVATION_REQUIRED' });
+        res.status(403).json({
+          error: 'Elevated authentication required — tap your YubiKey to confirm this action',
+          code: 'ELEVATION_REQUIRED',
+        });
         return;
       }
       (req as Request & { argosSession: typeof session }).argosSession = session;
@@ -229,14 +265,21 @@ export function requireAuth(
       if (validateSession(token)) {
         // TOTP sessions are always 'standard' clearance
         if (clearance === 'elevated') {
-          res.status(403).json({ error: 'Elevated auth required — use YubiKey or re-enter TOTP code', code: 'ELEVATION_REQUIRED' });
+          res.status(403).json({
+            error: 'Elevated auth required — use YubiKey or re-enter TOTP code',
+            code: 'ELEVATION_REQUIRED',
+          });
           return;
         }
-        (req as Request & { argosSession: { clearance: string } }).argosSession = { clearance: 'standard' };
+        (req as Request & { argosSession: { clearance: string } }).argosSession = {
+          clearance: 'standard',
+        };
         next();
         return;
       }
-    } catch { /* totp module not available */ }
+    } catch {
+      /* totp module not available */
+    }
 
     res.status(401).json({ error: 'Session expired — re-authenticate', code: 'SESSION_EXPIRED' });
   };
@@ -256,7 +299,9 @@ function extractToken(req: Request): string | null {
 // ─── Check if any key is registered ──────────────────────────────────────────
 
 export function hasRegisteredKeys(): boolean {
-  const count = (getDb().prepare(`SELECT COUNT(*) as c FROM webauthn_credentials`).get() as { c: number }).c;
+  const count = (
+    getDb().prepare(`SELECT COUNT(*) as c FROM webauthn_credentials`).get() as { c: number }
+  ).c;
   return count > 0;
 }
 
@@ -276,11 +321,9 @@ export async function beginRegistration(deviceName: string): Promise<{
     userDisplayName: 'Argos Owner',
     attestationType: 'none',
     // Prevent re-registering the same key
-    excludeCredentials: existingCredentials.map(c => ({
+    excludeCredentials: existingCredentials.map((c) => ({
       id: c.id,
-      transports: c.transports
-        ? (JSON.parse(c.transports) as AuthenticatorTransport[])
-        : undefined,
+      transports: c.transports ? (JSON.parse(c.transports) as AuthenticatorTransport[]) : undefined,
     })),
     authenticatorSelection: {
       // Prefer cross-platform (YubiKey) over platform (Touch ID)
@@ -354,11 +397,9 @@ export async function beginAuthentication(): Promise<{
 
   const options = await generateAuthenticationOptions({
     rpID,
-    allowCredentials: credentials.map(c => ({
+    allowCredentials: credentials.map((c) => ({
       id: c.id,
-      transports: c.transports
-        ? (JSON.parse(c.transports) as AuthenticatorTransport[])
-        : undefined,
+      transports: c.transports ? (JSON.parse(c.transports) as AuthenticatorTransport[]) : undefined,
     })),
     userVerification: 'preferred',
   });
@@ -403,8 +444,11 @@ export async function completeAuthentication(
       return { success: false, message: 'Verification failed' };
     }
 
-    // Update counter (replay attack prevention)
-    updateCounter(credential.id, verification.authenticationInfo.newCounter);
+    // Update counter atomically (replay attack prevention — rejects stale counter)
+    if (!updateCounter(credential.id, verification.authenticationInfo.newCounter)) {
+      log.warn(`Counter race detected for credential ${credential.id} — rejecting`);
+      return { success: false, message: 'Authentication rejected (counter race)' };
+    }
 
     const sessionToken = issueSession(credential.id, 'standard');
     audit('yubikey_authenticated', credential.id, 'webauthn', { device: credential.device_name });
@@ -434,7 +478,7 @@ export async function beginElevatedAuth(proposalId: string): Promise<{
 
   const options = await generateAuthenticationOptions({
     rpID,
-    allowCredentials: credentials.map(c => ({ id: c.id })),
+    allowCredentials: credentials.map((c) => ({ id: c.id })),
     userVerification: 'required', // PIN or biometric required for elevated
   });
 
@@ -473,14 +517,19 @@ export async function completeElevatedAuth(
 
     if (!verification.verified) return { success: false, message: 'Verification failed' };
 
-    updateCounter(credential.id, verification.authenticationInfo.newCounter);
+    if (!updateCounter(credential.id, verification.authenticationInfo.newCounter)) {
+      log.warn(`Counter race detected on elevated auth for credential ${credential.id}`);
+      return { success: false, message: 'Authentication rejected (counter race)' };
+    }
 
     const sessionToken = issueSession(credential.id, 'elevated');
     audit('yubikey_elevated_auth', credential.id, 'webauthn', {
       device: credential.device_name,
       proposalId,
     });
-    log.info(`Elevated auth granted for proposal ${proposalId?.slice(-8)} by "${credential.device_name}"`);
+    log.info(
+      `Elevated auth granted for proposal ${proposalId?.slice(-8)} by "${credential.device_name}"`,
+    );
 
     return { success: true, sessionToken, proposalId, message: 'Elevated access granted' };
   } catch (e) {
@@ -497,7 +546,7 @@ export function listCredentials(): Array<{
   registeredAt: number;
   lastUsedAt: number | null;
 }> {
-  return getCredentials().map(c => ({
+  return getCredentials().map((c) => ({
     id: c.id.slice(0, 16) + '…',
     deviceName: c.device_name,
     registeredAt: c.registered_at,
@@ -507,7 +556,9 @@ export function listCredentials(): Array<{
 
 export function deleteCredential(deviceName: string): boolean {
   const db = getDb();
-  const result = db.prepare('DELETE FROM webauthn_credentials WHERE device_name = ?').run(deviceName);
+  const result = db
+    .prepare('DELETE FROM webauthn_credentials WHERE device_name = ?')
+    .run(deviceName);
   if (result.changes > 0) {
     audit('yubikey_revoked', deviceName, 'webauthn', { device: deviceName });
     log.warn(`Credential revoked: "${deviceName}"`);

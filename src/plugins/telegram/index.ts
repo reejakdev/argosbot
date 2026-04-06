@@ -35,10 +35,13 @@ export const TELEGRAM_TOOLS = [
     input_schema: {
       type: 'object' as const,
       properties: {
-        chatId:  { type: 'string', description: 'Telegram chat ID (numeric string, negative for groups)' },
-        name:    { type: 'string', description: 'Display name for this chat' },
+        chatId: {
+          type: 'string',
+          description: 'Telegram chat ID (numeric string, negative for groups)',
+        },
+        name: { type: 'string', description: 'Display name for this chat' },
         isGroup: { type: 'boolean', description: 'Whether this is a group / channel (vs a DM)' },
-        tags:    {
+        tags: {
           type: 'array',
           items: { type: 'string' },
           description: 'Optional topic tags (e.g. ["#ops", "#deposits"])',
@@ -49,7 +52,8 @@ export const TELEGRAM_TOOLS = [
   },
   {
     name: 'telegram_ignore_chat',
-    description: 'Permanently ignore a Telegram chat — suppresses all future discovery notifications',
+    description:
+      'Permanently ignore a Telegram chat — suppresses all future discovery notifications',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -71,14 +75,14 @@ export const TELEGRAM_TOOLS = [
 // ─── Worker dispatch ──────────────────────────────────────────────────────────
 
 /** Route a telegram_* tool call to its worker. Called after owner approval. */
-export function executeTelegramTool(
-  tool: string,
-  input: Record<string, unknown>,
-): WorkerResult {
+export function executeTelegramTool(tool: string, input: Record<string, unknown>): WorkerResult {
   switch (tool) {
-    case 'telegram_add_chat':    return executeAddChat(input);
-    case 'telegram_ignore_chat': return executeIgnoreChat(input);
-    case 'telegram_list_chats':  return executeListChats();
+    case 'telegram_add_chat':
+      return executeAddChat(input);
+    case 'telegram_ignore_chat':
+      return executeIgnoreChat(input);
+    case 'telegram_list_chats':
+      return executeListChats();
     default:
       return { success: false, output: `Unknown telegram tool: ${tool}`, dryRun: false };
   }
@@ -87,10 +91,10 @@ export function executeTelegramTool(
 // ─── Workers ──────────────────────────────────────────────────────────────────
 
 function executeAddChat(input: Record<string, unknown>): WorkerResult {
-  const chatId  = String(input.chatId ?? '');
-  const name    = String(input.name ?? chatId);
+  const chatId = String(input.chatId ?? '');
+  const name = String(input.name ?? chatId);
   const isGroup = Boolean(input.isGroup ?? chatId.startsWith('-'));
-  const tags    = Array.isArray(input.tags) ? (input.tags as string[]) : [];
+  const tags = Array.isArray(input.tags) ? (input.tags as string[]) : [];
 
   if (!chatId) {
     return { success: false, output: 'telegram_add_chat: chatId is required', dryRun: false };
@@ -129,9 +133,12 @@ function executeListChats(): WorkerResult {
     return { success: true, dryRun: false, output: 'No monitored chats configured', data: [] };
   }
 
-  const list = monitoredChats.map((c: { name: string; chatId: string; isGroup: boolean; tags: string[] }) =>
-    `${c.name} (${c.chatId})${c.isGroup ? ' [group]' : ''}${c.tags.length ? ' ' + c.tags.join(' ') : ''}`,
-  ).join('\n');
+  const list = monitoredChats
+    .map(
+      (c: { name: string; chatId: string; isGroup: boolean; tags: string[] }) =>
+        `${c.name} (${c.chatId})${c.isGroup ? ' [group]' : ''}${c.tags.length ? ' ' + c.tags.join(' ') : ''}`,
+    )
+    .join('\n');
 
   return {
     success: true,

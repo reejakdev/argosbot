@@ -27,13 +27,13 @@ const log = createLogger('email');
 // ─── Email channel ────────────────────────────────────────────────────────────
 
 export interface EmailConfig {
-  host:     string;    // imap.gmail.com
-  port:     number;    // 993
-  user:     string;    // you@gmail.com
-  password: string;    // App Password or regular password
-  mailbox:  string;    // INBOX
-  tls:      boolean;   // true for port 993
-  pollMs:   number;    // polling interval (default: 60000)
+  host: string; // imap.gmail.com
+  port: number; // 993
+  user: string; // you@gmail.com
+  password: string; // App Password or regular password
+  mailbox: string; // INBOX
+  tls: boolean; // true for port 993
+  pollMs: number; // polling interval (default: 60000)
 }
 
 export class EmailChannel implements Channel {
@@ -58,7 +58,7 @@ export class EmailChannel implements Channel {
   async start(): Promise<void> {
     this.running = true;
     await this.connect();
-    await this.poll();    // immediate first fetch
+    await this.poll(); // immediate first fetch
     this.schedulePoll();
   }
 
@@ -88,8 +88,8 @@ export class EmailChannel implements Channel {
       }
 
       this.client = new ImapFlow({
-        host:   this.config.host,
-        port:   this.config.port,
+        host: this.config.host,
+        port: this.config.port,
         secure: this.config.tls,
         auth: {
           user: this.config.user,
@@ -153,7 +153,7 @@ export class EmailChannel implements Channel {
         }
 
         for (const msg of messages) {
-          const m = msg as typeof messages[0] & {
+          const m = msg as (typeof messages)[0] & {
             flags: Set<string>;
             envelope: {
               from?: Array<{ name?: string; address?: string }>;
@@ -201,7 +201,12 @@ export class EmailChannel implements Channel {
   }
 
   private async processEmail(msg: {
-    envelope: { from?: Array<{ name?: string; address?: string }>; subject?: string; date?: Date; messageId?: string };
+    envelope: {
+      from?: Array<{ name?: string; address?: string }>;
+      subject?: string;
+      date?: Date;
+      messageId?: string;
+    };
     bodyParts?: Map<string, Buffer>;
     uid: number;
   }): Promise<void> {
@@ -209,37 +214,37 @@ export class EmailChannel implements Channel {
 
     const from = msg.envelope.from?.[0];
     const senderName = from?.name ?? from?.address ?? 'Unknown';
-    const subject    = msg.envelope.subject ?? '(no subject)';
-    const date       = msg.envelope.date ?? new Date();
-    const msgId      = msg.envelope.messageId ?? `email_${msg.uid}`;
+    const subject = msg.envelope.subject ?? '(no subject)';
+    const date = msg.envelope.date ?? new Date();
+    const msgId = msg.envelope.messageId ?? `email_${msg.uid}`;
 
     // Extract plain text body
     const bodyBuffer = msg.bodyParts?.get('text/plain') ?? msg.bodyParts?.get('text');
-    const rawBody    = bodyBuffer?.toString('utf8') ?? '';
-    const body       = stripHtml(rawBody).trim();
+    const rawBody = bodyBuffer?.toString('utf8') ?? '';
+    const body = stripHtml(rawBody).trim();
 
     if (!body && !subject) return;
 
     const content = `Subject: ${subject}\nFrom: ${senderName}\n\n${body}`.slice(0, 4000);
 
     const raw: RawMessage = {
-      id:          `email_${msg.uid}`,
-      channel:     'email',
-      source:      'email' as const,
-      chatId:      from?.address ?? 'unknown',
-      chatName:    senderName,    // sender name as "chat" label
-      chatType:    'dm',          // email is always 1:1 by nature
+      id: `email_${msg.uid}`,
+      channel: 'email',
+      source: 'email' as const,
+      chatId: from?.address ?? 'unknown',
+      chatName: senderName, // sender name as "chat" label
+      chatType: 'dm', // email is always 1:1 by nature
       partnerName: from?.address ?? undefined,
       senderName,
-      senderId:    from?.address,
+      senderId: from?.address,
       content,
-      links:       extractLinks(content),
-      receivedAt:  Date.now(),
-      timestamp:   date.getTime(),
+      links: extractLinks(content),
+      receivedAt: Date.now(),
+      timestamp: date.getTime(),
       meta: {
-        email_uid:        msg.uid,
+        email_uid: msg.uid,
         email_message_id: msgId,
-        email_subject:    subject,
+        email_subject: subject,
       },
     };
 
@@ -280,23 +285,25 @@ function stripHtml(html: string): string {
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 export function createEmailChannel(): EmailChannel | null {
-  const host     = process.env.EMAIL_IMAP_HOST;
-  const portStr  = process.env.EMAIL_IMAP_PORT;
-  const user     = process.env.EMAIL_IMAP_USER;
+  const host = process.env.EMAIL_IMAP_HOST;
+  const portStr = process.env.EMAIL_IMAP_PORT;
+  const user = process.env.EMAIL_IMAP_USER;
   const password = process.env.EMAIL_IMAP_PASSWORD;
 
   if (!host || !user || !password) {
-    log.warn('Email channel not configured — set EMAIL_IMAP_HOST, EMAIL_IMAP_USER, EMAIL_IMAP_PASSWORD in .env');
+    log.warn(
+      'Email channel not configured — set EMAIL_IMAP_HOST, EMAIL_IMAP_USER, EMAIL_IMAP_PASSWORD in .env',
+    );
     return null;
   }
 
   return new EmailChannel({
     host,
-    port:    parseInt(portStr ?? '993', 10),
+    port: parseInt(portStr ?? '993', 10),
     user,
     password,
     mailbox: process.env.EMAIL_MAILBOX ?? 'INBOX',
-    tls:     (portStr ?? '993') === '993',
-    pollMs:  60_000,
+    tls: (portStr ?? '993') === '993',
+    pollMs: 60_000,
   });
 }

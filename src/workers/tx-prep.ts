@@ -98,22 +98,27 @@ const RISK_CHECKERS: Array<{
 }> = [
   {
     name: 'approve_unlimited',
-    check: i => i.operation === 'approve',
-    message: '⚠️ Approval operation — verify allowance amount (never approve unlimited to unknown contracts)',
+    check: (i) => i.operation === 'approve',
+    message:
+      '⚠️ Approval operation — verify allowance amount (never approve unlimited to unknown contracts)',
   },
   {
     name: 'bridge_op',
-    check: i => i.operation === 'bridge',
+    check: (i) => i.operation === 'bridge',
     message: '⚠️ Bridge operation — verify destination chain and allow for processing delays',
   },
   {
     name: 'large_amount',
-    check: i => String(i.amount_ref ?? '').includes('>1M') || String(i.amount_ref ?? '').includes('100K-1M'),
+    check: (i) =>
+      String(i.amount_ref ?? '').includes('>1M') || String(i.amount_ref ?? '').includes('100K-1M'),
     message: '🔴 Large amount detected — ensure multi-sig quorum and compliance sign-off',
   },
   {
     name: 'unknown_chain',
-    check: i => !['ethereum', 'arbitrum', 'base', 'optimism', 'polygon', 'solana', 'bitcoin'].includes(String(i.chain ?? '').toLowerCase()),
+    check: (i) =>
+      !['ethereum', 'arbitrum', 'base', 'optimism', 'polygon', 'solana', 'bitcoin'].includes(
+        String(i.chain ?? '').toLowerCase(),
+      ),
     message: '⚠️ Non-standard chain — verify RPC endpoints and confirm chain support',
   },
 ];
@@ -131,7 +136,7 @@ export class TxPrepWorker {
     const baseItems = OPERATION_CHECKLISTS[operation] ?? OPERATION_CHECKLISTS.other;
     const userItems = (input.checklist as string[] | undefined) ?? [];
     const allItems = [...baseItems, ...userItems];
-    const checklist: ChecklistItem[] = allItems.map(item => ({ item, checked: false }));
+    const checklist: ChecklistItem[] = allItems.map((item) => ({ item, checked: false }));
 
     // Auto-detect risks
     const risks: string[] = [];
@@ -192,7 +197,7 @@ export class TxPrepWorker {
 
     if (pack.risks.length > 0) {
       lines.push(``, `🚨 *Risk Flags*`);
-      lines.push(...pack.risks.map(r => `• ${r}`));
+      lines.push(...pack.risks.map((r) => `• ${r}`));
     }
 
     lines.push(
@@ -205,6 +210,6 @@ export class TxPrepWorker {
       `⚠️ _This pack is for review only. Execute manually in your custody solution after all items are checked._`,
     );
 
-    return lines.filter(l => l !== null).join('\n');
+    return lines.filter((l) => l !== null).join('\n');
   }
 }

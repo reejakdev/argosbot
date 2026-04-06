@@ -7,19 +7,19 @@
 
 export interface KnowledgeDocument {
   /** Unique stable key — used to upsert in the memory store */
-  key:      string;
+  key: string;
   /** Human-readable name (shown in logs, memory tags) */
-  name:     string;
+  name: string;
   /** Extracted text, truncated if large (safe for direct LLM injection) */
-  content:  string;
+  content: string;
   /** Categorisation tags */
-  tags:     string[];
+  tags: string[];
   /** Full text — only set when content was truncated; used for vector indexing */
   fullText?: string;
 }
 
 export interface KnowledgeConnector {
-  name:    string;
+  name: string;
   enabled: boolean;
   fetch(): Promise<KnowledgeDocument[]>;
 }

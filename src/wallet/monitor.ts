@@ -25,13 +25,13 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
-import os   from 'node:os';
+import os from 'node:os';
 import { createLogger } from '../logger.js';
 import { audit } from '../db/index.js';
 import { monotonicFactory } from 'ulid';
 import type { RawMessage } from '../types.js';
 
-const log  = createLogger('wallet-monitor');
+const log = createLogger('wallet-monitor');
 const ulid = monotonicFactory();
 
 // ERC-20 Transfer(address indexed from, address indexed to, uint256 value)
@@ -39,16 +39,16 @@ const ERC20_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a116
 
 export interface WalletMonitorConfig {
   pollIntervalSeconds: number;
-  watchNative:         boolean;
+  watchNative: boolean;
   watchTokens: Array<{
-    address:  string;
-    symbol:   string;
+    address: string;
+    symbol: string;
     decimals: number;
   }>;
 }
 
 interface MonitorState {
-  evm:    Record<string, { lastBlock: number; nativeBalance: string }>;
+  evm: Record<string, { lastBlock: number; nativeBalance: string }>;
   solana: { lastSignature: string | null };
 }
 
@@ -64,7 +64,9 @@ function loadState(): MonitorState {
     if (existsSync(statePath())) {
       return JSON.parse(readFileSync(statePath(), 'utf8')) as MonitorState;
     }
-  } catch { /* start fresh */ }
+  } catch {
+    /* start fresh */
+  }
   return { evm: {}, solana: { lastSignature: null } };
 }
 
@@ -80,13 +82,13 @@ function saveState(state: MonitorState): void {
 
 async function rpc(url: string, method: string, params: unknown[]): Promise<unknown> {
   const res = await fetch(url, {
-    method:  'POST',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    signal:  AbortSignal.timeout(10_000),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
-  const data = await res.json() as { result?: unknown; error?: { message: string } };
+  const data = (await res.json()) as { result?: unknown; error?: { message: string } };
   if (data.error) throw new Error(`RPC error: ${data.error.message}`);
   return data.result;
 }
@@ -97,26 +99,26 @@ function padAddress(addr: string): string {
 
 function formatAmount(raw: bigint, decimals: number): string {
   const divisor = BigInt(10 ** decimals);
-  const whole   = raw / divisor;
-  const frac    = raw % divisor;
+  const whole = raw / divisor;
+  const frac = raw % divisor;
   if (frac === 0n) return whole.toLocaleString();
   const fracStr = frac.toString().padStart(decimals, '0').replace(/0+$/, '');
   return `${whole.toLocaleString()}.${fracStr.slice(0, 4)}`;
 }
 
 async function pollEvmChain(
-  chainName:   string,
-  rpcUrl:      string,
-  walletAddr:  string,
-  cfg:         WalletMonitorConfig,
-  state:       MonitorState,
-  onTx:        (msg: RawMessage) => Promise<void>,
+  chainName: string,
+  rpcUrl: string,
+  walletAddr: string,
+  cfg: WalletMonitorConfig,
+  state: MonitorState,
+  onTx: (msg: RawMessage) => Promise<void>,
 ): Promise<void> {
   const chainState = state.evm[chainName] ?? { lastBlock: 0, nativeBalance: '0' };
 
   // Get current block
-  const latestHex = await rpc(rpcUrl, 'eth_blockNumber', []) as string;
-  const latest    = parseInt(latestHex, 16);
+  const latestHex = (await rpc(rpcUrl, 'eth_blockNumber', [])) as string;
+  const latest = parseInt(latestHex, 16);
 
   if (chainState.lastBlock === 0) {
     // First run — set cursor to latest, start watching from now
@@ -129,26 +131,39 @@ async function pollEvmChain(
   if (latest <= chainState.lastBlock) return;
 
   const fromBlock = '0x' + (chainState.lastBlock + 1).toString(16);
-  const toBlock   = latestHex;
+  const toBlock = latestHex;
 
   // ── ERC-20 incoming transfers ──────────────────────────────────────────────
   for (const token of cfg.watchTokens) {
     try {
-      const logs = await rpc(rpcUrl, 'eth_getLogs', [{
-        fromBlock,
-        toBlock,
-        topics: [ERC20_TRANSFER_TOPIC, null, padAddress(walletAddr)],
-        address: token.address,
-      }]) as Array<{ data: string; topics: string[]; transactionHash: string; blockNumber: string }>;
+      const logs = (await rpc(rpcUrl, 'eth_getLogs', [
+        {
+          fromBlock,
+          toBlock,
+          topics: [ERC20_TRANSFER_TOPIC, null, padAddress(walletAddr)],
+          address: token.address,
+        },
+      ])) as Array<{
+        data: string;
+        topics: string[];
+        transactionHash: string;
+        blockNumber: string;
+      }>;
 
       for (const log_ of logs) {
-        const raw  = BigInt(log_.data);
+        const raw = BigInt(log_.data);
         const from = '0x' + log_.topics[1].slice(26);
-        const amt  = formatAmount(raw, token.decimals);
+        const amt = formatAmount(raw, token.decimals);
         const content = `Incoming ${token.symbol} transfer detected on ${chainName}: received ${amt} ${token.symbol} from ${from}. Tx: ${log_.transactionHash}`;
 
         log.info(`Wallet monitor [${chainName}]: +${amt} ${token.symbol} from ${from}`);
-        audit('wallet_incoming_tx', undefined, 'wallet', { chain: chainName, symbol: token.symbol, amount: amt, from, tx: log_.transactionHash });
+        audit('wallet_incoming_tx', undefined, 'wallet', {
+          chain: chainName,
+          symbol: token.symbol,
+          amount: amt,
+          from,
+          tx: log_.transactionHash,
+        });
 
         await onTx(buildWalletMessage(chainName, walletAddr, content));
       }
@@ -160,12 +175,12 @@ async function pollEvmChain(
   // ── Native coin balance check ──────────────────────────────────────────────
   if (cfg.watchNative) {
     try {
-      const balHex  = await rpc(rpcUrl, 'eth_getBalance', [walletAddr, 'latest']) as string;
+      const balHex = (await rpc(rpcUrl, 'eth_getBalance', [walletAddr, 'latest'])) as string;
       const current = BigInt(balHex);
-      const prev    = BigInt(chainState.nativeBalance ?? '0');
+      const prev = BigInt(chainState.nativeBalance ?? '0');
 
       if (current > prev && prev > 0n) {
-        const diff    = current - prev;
+        const diff = current - prev;
         const diffEth = formatAmount(diff, 18);
         const content = `Incoming native coin on ${chainName}: received ${diffEth} (balance change detected on wallet ${walletAddr})`;
 
@@ -188,17 +203,17 @@ async function pollEvmChain(
 // ─── Solana polling ───────────────────────────────────────────────────────────
 
 async function pollSolana(
-  rpcUrl:     string,
+  rpcUrl: string,
   walletAddr: string,
-  state:      MonitorState,
-  onTx:       (msg: RawMessage) => Promise<void>,
+  state: MonitorState,
+  onTx: (msg: RawMessage) => Promise<void>,
 ): Promise<void> {
   type SolSig = { signature: string; err: null | unknown };
   try {
     const params: Record<string, unknown> = { limit: 20 };
     if (state.solana.lastSignature) params.until = state.solana.lastSignature;
 
-    const sigs = await rpc(rpcUrl, 'getSignaturesForAddress', [walletAddr, params]) as SolSig[];
+    const sigs = (await rpc(rpcUrl, 'getSignaturesForAddress', [walletAddr, params])) as SolSig[];
 
     if (!sigs.length) return;
 
@@ -206,7 +221,7 @@ async function pollSolana(
     state.solana.lastSignature = sigs[0].signature;
 
     // Skip error transactions
-    const incoming = sigs.filter(s => s.err === null);
+    const incoming = sigs.filter((s) => s.err === null);
     if (!incoming.length) return;
 
     // On first run, just set the cursor without alerting
@@ -227,19 +242,19 @@ async function pollSolana(
 
 function buildWalletMessage(chain: string, walletAddr: string, content: string): RawMessage {
   return {
-    id:          ulid(),
-    channel:     'wallet',
-    source:      'wallet' as const,
-    chatId:      `wallet:${chain}:${walletAddr.slice(0, 10)}`,
-    chatName:    `Wallet [${chain}]`,
-    chatType:    'dm' as const,
-    senderId:    `wallet:${chain}`,
-    senderName:  `On-chain [${chain}]`,
+    id: ulid(),
+    channel: 'wallet',
+    source: 'wallet' as const,
+    chatId: `wallet:${chain}:${walletAddr.slice(0, 10)}`,
+    chatName: `Wallet [${chain}]`,
+    chatType: 'dm' as const,
+    senderId: `wallet:${chain}`,
+    senderName: `On-chain [${chain}]`,
     partnerName: `On-chain [${chain}]`,
     content,
-    links:       [],
-    receivedAt:  Date.now(),
-    meta:        { source: 'wallet_monitor', chain },
+    links: [],
+    receivedAt: Date.now(),
+    meta: { source: 'wallet_monitor', chain },
   };
 }
 
@@ -247,11 +262,11 @@ function buildWalletMessage(chain: string, walletAddr: string, content: string):
 
 export function createWalletMonitor(
   walletAddresses: { evm?: string; solana?: string },
-  chainConfigs:    Record<string, { rpc: string; chainId?: number; symbol?: string }>,
-  cfg:             WalletMonitorConfig,
-  onTx:            (msg: RawMessage) => Promise<void>,
+  chainConfigs: Record<string, { rpc: string; chainId?: number; symbol?: string }>,
+  cfg: WalletMonitorConfig,
+  onTx: (msg: RawMessage) => Promise<void>,
 ): { start: () => void; stop: () => void } {
-  let running  = false;
+  let running = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const poll = async () => {
@@ -276,7 +291,7 @@ export function createWalletMonitor(
 
     // Solana
     if (walletAddresses.solana) {
-      for (const [chainName, chain] of Object.entries(chainConfigs)) {
+      for (const [_chainName, chain] of Object.entries(chainConfigs)) {
         if ('chainId' in chain) continue; // skip EVM
         const before = state.solana.lastSignature;
         await pollSolana(chain.rpc, walletAddresses.solana, state, onTx);
@@ -295,9 +310,9 @@ export function createWalletMonitor(
     start: () => {
       running = true;
       log.info(`Wallet monitor started — polling every ${cfg.pollIntervalSeconds}s`);
-      if (walletAddresses.evm)    log.info(`  EVM:    ${walletAddresses.evm}`);
+      if (walletAddresses.evm) log.info(`  EVM:    ${walletAddresses.evm}`);
       if (walletAddresses.solana) log.info(`  Solana: ${walletAddresses.solana}`);
-      poll().catch(e => log.warn('Wallet monitor initial poll failed:', e));
+      poll().catch((e) => log.warn('Wallet monitor initial poll failed:', e));
     },
     stop: () => {
       running = false;

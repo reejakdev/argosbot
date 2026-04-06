@@ -29,10 +29,10 @@ export class EmailSendWorker {
   constructor(private config: Config) {}
 
   async send(input: Record<string, unknown>): Promise<WorkerResult> {
-    const to      = this.parseRecipients(input.to);
-    const cc      = this.parseRecipients(input.cc);
+    const to = this.parseRecipients(input.to);
+    const cc = this.parseRecipients(input.cc);
     const subject = String(input.subject ?? '(no subject)').trim();
-    const body    = String(input.body ?? '').trim();
+    const body = String(input.body ?? '').trim();
     const replyTo = input.reply_to as string | undefined;
 
     if (!to.length) {
@@ -53,7 +53,9 @@ export class EmailSendWorker {
         ``,
         body.slice(0, 500),
         body.length > 500 ? `…(${body.length} chars total)` : null,
-      ].filter(Boolean).join('\n');
+      ]
+        .filter(Boolean)
+        .join('\n');
 
       return { success: true, dryRun: true, output: preview, data: { to, cc, subject, body } };
     }
@@ -62,28 +64,32 @@ export class EmailSendWorker {
     try {
       const nodemailer = await import('nodemailer').catch(() => null);
       if (!nodemailer) {
-        return { success: false, dryRun: false, output: 'nodemailer not installed. Run: npm install nodemailer' };
+        return {
+          success: false,
+          dryRun: false,
+          output: 'nodemailer not installed. Run: npm install nodemailer',
+        };
       }
 
       const smtp = this.config.smtp;
       const transporter = nodemailer.createTransport({
-        host:   smtp.host,
-        port:   smtp.port,
+        host: smtp.host,
+        port: smtp.port,
         secure: smtp.secure,
         auth: { user: smtp.user, pass: smtp.password },
       });
 
       const fromAddress = smtp.from ?? smtp.user;
-      const fromHeader  = smtp.fromName ? `${smtp.fromName} <${fromAddress}>` : fromAddress;
+      const fromHeader = smtp.fromName ? `${smtp.fromName} <${fromAddress}>` : fromAddress;
 
       const info = await transporter.sendMail({
-        from:    fromHeader,
-        to:      to.join(', '),
-        cc:      cc.length ? cc.join(', ') : undefined,
+        from: fromHeader,
+        to: to.join(', '),
+        cc: cc.length ? cc.join(', ') : undefined,
         subject,
-        text:    body,
+        text: body,
         // Basic HTML — line breaks preserved
-        html:    `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(body)}</pre>`,
+        html: `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(body)}</pre>`,
         ...(replyTo ? { inReplyTo: replyTo, references: replyTo } : {}),
       });
 
@@ -91,13 +97,17 @@ export class EmailSendWorker {
 
       return {
         success: true,
-        dryRun:  false,
-        output:  `✅ Email sent to ${to.join(', ')} — subject: "${subject}"`,
-        data:    { messageId: info.messageId, to, cc, subject },
+        dryRun: false,
+        output: `✅ Email sent to ${to.join(', ')} — subject: "${subject}"`,
+        data: { messageId: info.messageId, to, cc, subject },
       };
     } catch (e) {
       log.error('Email send failed', e);
-      return { success: false, dryRun: false, output: `❌ Email send failed: ${(e as Error).message}` };
+      return {
+        success: false,
+        dryRun: false,
+        output: `❌ Email send failed: ${(e as Error).message}`,
+      };
     }
   }
 
@@ -106,7 +116,11 @@ export class EmailSendWorker {
   private parseRecipients(value: unknown): string[] {
     if (!value) return [];
     if (Array.isArray(value)) return value.map(String).filter(Boolean);
-    if (typeof value === 'string') return value.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+    if (typeof value === 'string')
+      return value
+        .split(/[,;]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
     return [];
   }
 }

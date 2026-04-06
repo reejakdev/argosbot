@@ -13,14 +13,14 @@
 
 import { createLogger } from '../logger.js';
 import type { Config, KnowledgeSource } from '../config/schema.js';
-import { fetchUrl }    from './connectors/url.js';
+import { fetchUrl } from './connectors/url.js';
 import { fetchGitHub } from './connectors/github.js';
 import { fetchNotion } from './connectors/notion.js';
-import { fetchFile }   from './connectors/file.js';
+import { fetchFile } from './connectors/file.js';
 import { fetchLinear } from './connectors/linear.js';
-import { fetchLocal }        from './connectors/local.js';
+import { fetchLocal } from './connectors/local.js';
 import { fetchGitHubIssues } from './connectors/github-issues.js';
-import { fetchGoogleDrive }  from './connectors/drive.js';
+import { fetchGoogleDrive } from './connectors/drive.js';
 import { indexDocument, isStale } from './indexer.js';
 import type { KnowledgeDocument } from './types.js';
 
@@ -30,81 +30,101 @@ const log = createLogger('knowledge');
 
 // ─── Dispatch par type de source ─────────────────────────────────────────────
 
-async function fetchSource(source: KnowledgeSource, config: Config): Promise<KnowledgeDocument | null> {
+async function fetchSource(
+  source: KnowledgeSource,
+  config: Config,
+): Promise<KnowledgeDocument | null> {
   switch (source.type) {
     case 'url':
       return fetchUrl({
-        url:         source.url,
-        name:        source.name,
+        url: source.url,
+        name: source.name,
         refreshDays: source.refreshHours / 24,
       });
 
     case 'github':
       return fetchGitHub({
-        owner:       source.owner,
-        repo:        source.repo,
-        paths:       source.paths,
-        name:        source.name,
+        owner: source.owner,
+        repo: source.repo,
+        paths: source.paths,
+        name: source.name,
         refreshDays: source.refreshHours / 24,
       });
 
     case 'notion':
-      return fetchNotion({
-        pageId:      source.pageId,
-        name:        source.name,
-        type:        source.sourceType,
-        refreshDays: source.refreshHours / 24,
-      }, config);
+      return fetchNotion(
+        {
+          pageId: source.pageId,
+          name: source.name,
+          type: source.sourceType,
+          refreshDays: source.refreshHours / 24,
+        },
+        config,
+      );
 
     case 'file':
       return fetchFile({
-        filePath:    source.filePath,
-        name:        source.name,
+        filePath: source.filePath,
+        name: source.name,
         refreshDays: source.refreshHours / 24,
       });
 
     case 'linear':
-      return fetchLinear({
-        teamId:      source.teamId,
-        name:        source.name,
-        refreshDays: source.refreshHours / 24,
-      }, config);
+      return fetchLinear(
+        {
+          teamId: source.teamId,
+          name: source.name,
+          refreshDays: source.refreshHours / 24,
+        },
+        config,
+      );
 
     case 'local':
       return fetchLocal({
-        paths:       source.paths,
-        name:        source.name,
+        paths: source.paths,
+        name: source.name,
         refreshDays: source.refreshHours / 24,
       });
 
     case 'github-issues':
       return fetchGitHubIssues({
-        owner:       source.owner,
-        repo:        source.repo,
-        name:        source.name,
+        owner: source.owner,
+        repo: source.repo,
+        name: source.name,
         refreshDays: source.refreshHours / 24,
       });
 
     case 'google-drive':
-      return fetchGoogleDrive({
-        folderId:    source.folderId,
-        fileIds:     source.fileIds,
-        name:        source.name,
-        refreshDays: source.refreshHours / 24,
-      }, config);
+      return fetchGoogleDrive(
+        {
+          folderId: source.folderId,
+          fileIds: source.fileIds,
+          name: source.name,
+          refreshDays: source.refreshHours / 24,
+        },
+        config,
+      );
   }
 }
 
 function sourceKey(source: KnowledgeSource): string {
   switch (source.type) {
-    case 'url':          return `url:${source.url}`;
-    case 'github':       return `github:${source.owner}/${source.repo}`;
-    case 'notion':       return `notion:${source.pageId}`;
-    case 'file':         return `file:${source.filePath}`;
-    case 'local':         return `local:${source.name.toLowerCase().replace(/\s+/g, '_')}`;
-    case 'github-issues': return `github-issues:${source.owner ?? 'me'}${source.repo ? '/' + source.repo : ''}`;
-    case 'linear':        return `linear:${source.teamId}`;
-    case 'google-drive': return `gdrive:${source.folderId}`;
+    case 'url':
+      return `url:${source.url}`;
+    case 'github':
+      return `github:${source.owner}/${source.repo}`;
+    case 'notion':
+      return `notion:${source.pageId}`;
+    case 'file':
+      return `file:${source.filePath}`;
+    case 'local':
+      return `local:${source.name.toLowerCase().replace(/\s+/g, '_')}`;
+    case 'github-issues':
+      return `github-issues:${source.owner ?? 'me'}${source.repo ? '/' + source.repo : ''}`;
+    case 'linear':
+      return `linear:${source.teamId}`;
+    case 'google-drive':
+      return `gdrive:${source.folderId}`;
   }
 }
 
@@ -119,7 +139,7 @@ export async function loadKnowledge(config: Config): Promise<void> {
 
   log.info(`Loading ${sources.length} knowledge source(s)…`);
 
-  const results = await Promise.allSettled(sources.map(s => fetchSource(s, config)));
+  const results = await Promise.allSettled(sources.map((s) => fetchSource(s, config)));
 
   let loaded = 0;
   for (const result of results) {
@@ -137,15 +157,15 @@ export async function loadKnowledge(config: Config): Promise<void> {
 // ─── Refresh des sources périmées ────────────────────────────────────────────
 
 export async function refreshStaleKnowledge(config: Config): Promise<void> {
-  const now     = Date.now();
+  const now = Date.now();
   const sources = config.knowledge.sources;
 
-  const stale = sources.filter(s => isStale(sourceKey(s), s.refreshHours / 24, now));
+  const stale = sources.filter((s) => isStale(sourceKey(s), s.refreshHours / 24, now));
   if (!stale.length) return;
 
   log.info(`Refreshing ${stale.length} stale knowledge source(s)…`);
 
-  const results = await Promise.allSettled(stale.map(s => fetchSource(s, config)));
+  const results = await Promise.allSettled(stale.map((s) => fetchSource(s, config)));
   for (const r of results) {
     if (r.status === 'fulfilled' && r.value) await indexDocument(r.value, config);
   }
@@ -166,9 +186,11 @@ export async function reindexKnowledgeToVector(config: Config): Promise<void> {
     const { chunkText, chunkCode, indexChunks } = await import('../vector/store.js');
     const db = getDb();
 
-    const rows = db.prepare(
-      `SELECT source_ref, content FROM memories WHERE category = 'context' AND archived = 1`,
-    ).all() as Array<{ source_ref: string; content: string }>;
+    const rows = db
+      .prepare(
+        `SELECT source_ref, content FROM memories WHERE category = 'context' AND archived = 1`,
+      )
+      .all() as Array<{ source_ref: string; content: string }>;
 
     if (!rows.length) return;
     log.info(`Re-indexing ${rows.length} knowledge doc(s) to vector store…`);

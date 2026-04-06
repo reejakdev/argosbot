@@ -38,7 +38,9 @@ export function ensureTotpTable(): void {
 
 export function hasTotpConfigured(): boolean {
   const db = getDb();
-  const row = db.prepare('SELECT COUNT(*) as n FROM totp_secrets WHERE verified = 1').get() as { n: number };
+  const row = db.prepare('SELECT COUNT(*) as n FROM totp_secrets WHERE verified = 1').get() as {
+    n: number;
+  };
   return row.n > 0;
 }
 
@@ -60,18 +62,26 @@ export function generateTotpSecret(label = 'Argos'): { secret: string; uri: stri
 }
 
 export async function generateQRCode(uri: string): Promise<string> {
-  return QRCode.toDataURL(uri, { width: 256, margin: 2, color: { dark: '#e2e2f0', light: '#0a0a0f' } });
+  return QRCode.toDataURL(uri, {
+    width: 256,
+    margin: 2,
+    color: { dark: '#e2e2f0', light: '#0a0a0f' },
+  });
 }
 
 export function storeTotpSecret(secretBase32: string, label = 'default'): number {
   const db = getDb();
-  const result = db.prepare('INSERT INTO totp_secrets (label, secret) VALUES (?, ?)').run(label, secretBase32);
+  const result = db
+    .prepare('INSERT INTO totp_secrets (label, secret) VALUES (?, ?)')
+    .run(label, secretBase32);
   return result.lastInsertRowid as number;
 }
 
 export function verifyAndActivateTotp(secretId: number, code: string): boolean {
   const db = getDb();
-  const row = db.prepare('SELECT secret FROM totp_secrets WHERE id = ?').get(secretId) as { secret: string } | undefined;
+  const row = db.prepare('SELECT secret FROM totp_secrets WHERE id = ?').get(secretId) as
+    | { secret: string }
+    | undefined;
   if (!row) return false;
 
   const totp = new TOTP({
@@ -93,7 +103,9 @@ export function verifyAndActivateTotp(secretId: number, code: string): boolean {
 
 export function validateTotpCode(code: string): boolean {
   const db = getDb();
-  const rows = db.prepare('SELECT secret FROM totp_secrets WHERE verified = 1').all() as Array<{ secret: string }>;
+  const rows = db.prepare('SELECT secret FROM totp_secrets WHERE verified = 1').all() as Array<{
+    secret: string;
+  }>;
 
   for (const row of rows) {
     const totp = new TOTP({
@@ -120,14 +132,20 @@ export function createSession(method = 'totp'): string {
   const token = crypto.randomBytes(32).toString('hex');
   const db = getDb();
   const expires = new Date(Date.now() + SESSION_TTL_HOURS * 60 * 60 * 1000).toISOString();
-  db.prepare('INSERT INTO auth_sessions (token, expires_at, method) VALUES (?, ?, ?)').run(token, expires, method);
+  db.prepare('INSERT INTO auth_sessions (token, expires_at, method) VALUES (?, ?, ?)').run(
+    token,
+    expires,
+    method,
+  );
   return token;
 }
 
 export function validateSession(token: string): boolean {
   if (!token) return false;
   const db = getDb();
-  const row = db.prepare('SELECT expires_at FROM auth_sessions WHERE token = ?').get(token) as { expires_at: string } | undefined;
+  const row = db.prepare('SELECT expires_at FROM auth_sessions WHERE token = ?').get(token) as
+    | { expires_at: string }
+    | undefined;
   if (!row) return false;
   if (new Date(row.expires_at) < new Date()) {
     db.prepare('DELETE FROM auth_sessions WHERE token = ?').run(token);

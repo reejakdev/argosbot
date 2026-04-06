@@ -30,13 +30,13 @@ const log = createLogger('credentials');
 export interface ResolvedCredential {
   username?: string;
   password?: string;
-  token?:    string;
+  token?: string;
   /** Raw field value — for op:// references or config: references */
-  value?:    string;
+  value?: string;
   /** Card number for payment credentials */
   cardNumber?: string;
   cardExpiry?: string;
-  cardCvv?:    string;
+  cardCvv?: string;
 }
 
 // ─── Resolver ─────────────────────────────────────────────────────────────────
@@ -46,7 +46,10 @@ export interface ResolvedCredential {
  *   "config:" refs — only keys present in this object are accessible.
  *   Prevents arbitrary process.env leakage (e.g. ANTHROPIC_API_KEY, PATH, etc.)
  */
-export async function resolveCredential(ref: string, configSecrets: Record<string, string> = {}): Promise<ResolvedCredential> {
+export async function resolveCredential(
+  ref: string,
+  configSecrets: Record<string, string> = {},
+): Promise<ResolvedCredential> {
   if (!ref) throw new Error('credential_ref is required');
 
   // op:// secret reference — fetch a specific field
@@ -64,7 +67,9 @@ export async function resolveCredential(ref: string, configSecrets: Record<strin
     return resolveConfigSecret(ref.slice('config:'.length), configSecrets);
   }
 
-  throw new Error(`Unknown credential ref format: "${ref}". Use vault:ItemName, op://vault/item/field, or config:KEY`);
+  throw new Error(
+    `Unknown credential ref format: "${ref}". Use vault:ItemName, op://vault/item/field, or config:KEY`,
+  );
 }
 
 // ─── 1Password: fetch a full item ────────────────────────────────────────────
@@ -78,9 +83,13 @@ async function resolveVaultItem(itemRef: string): Promise<ResolvedCredential> {
     : [undefined, itemRef];
 
   const args = [
-    'item', 'get', itemName,
-    '--format', 'json',
-    '--fields', 'label=username,label=password,label=card number,label=expiry date,label=cvv,label=token,label=api key',
+    'item',
+    'get',
+    itemName,
+    '--format',
+    'json',
+    '--fields',
+    'label=username,label=password,label=card number,label=expiry date,label=cvv,label=token,label=api key',
   ];
   if (vaultOrItem) args.push('--vault', vaultOrItem);
 
@@ -92,19 +101,20 @@ async function resolveVaultItem(itemRef: string): Promise<ResolvedCredential> {
 
     // op returns an array of field objects
     const fields = JSON.parse(stdout) as Array<{ label: string; value: string }>;
-    const get = (label: string) => fields.find(f => f.label.toLowerCase() === label.toLowerCase())?.value;
+    const get = (label: string) =>
+      fields.find((f) => f.label.toLowerCase() === label.toLowerCase())?.value;
 
     const result: ResolvedCredential = {
-      username:   get('username'),
-      password:   get('password'),
-      token:      get('token') ?? get('api key'),
+      username: get('username'),
+      password: get('password'),
+      token: get('token') ?? get('api key'),
       cardNumber: get('card number'),
       cardExpiry: get('expiry date'),
-      cardCvv:    get('cvv'),
+      cardCvv: get('cvv'),
     };
 
     // Remove undefined keys
-    Object.keys(result).forEach(k => {
+    Object.keys(result).forEach((k) => {
       if (result[k as keyof ResolvedCredential] === undefined) {
         delete result[k as keyof ResolvedCredential];
       }
@@ -138,7 +148,10 @@ async function resolveOpRef(ref: string): Promise<ResolvedCredential> {
 
 // ─── Config / env secret ──────────────────────────────────────────────────────
 
-function resolveConfigSecret(key: string, configSecrets: Record<string, string>): ResolvedCredential {
+function resolveConfigSecret(
+  key: string,
+  configSecrets: Record<string, string>,
+): ResolvedCredential {
   // Only allow keys explicitly declared in config.secrets — never arbitrary process.env
   const value = configSecrets[key];
   if (!value) throw new Error(`config secret "${key}" not found in config.secrets`);
@@ -152,7 +165,7 @@ function ensureOpToken(): void {
   if (!process.env.OP_SERVICE_ACCOUNT_TOKEN) {
     throw new Error(
       '1Password service account token not set. Add OP_SERVICE_ACCOUNT_TOKEN to config.secrets. ' +
-      'Generate one at 1password.com/developer.'
+        'Generate one at 1password.com/developer.',
     );
   }
 }

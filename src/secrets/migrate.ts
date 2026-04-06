@@ -2,9 +2,9 @@
  * Secret migration + config ref-resolution.
  *
  * Migration (one-time, at first boot with new code):
- *   Old config.json had actual secret values in-line.
+ *   Old .config had actual secret values in-line.
  *   This module extracts them → secrets store, replaces with "$KEY" references.
- *   After migration, config.json contains no secret material.
+ *   After migration, .config contains no secret material.
  *
  * Resolution:
  *   "$KEY" strings anywhere in the config object are replaced with the
@@ -17,26 +17,31 @@ import { getAllSecretsSync, setManySecretsSync } from './store.js';
 // Extend this list as new integrations add apiKey fields.
 
 export const SECRET_FIELD_MAP: Record<string, string> = {
-  'notion.apiKey':                         'NOTION_API_KEY',
-  'linear.apiKey':                         'LINEAR_API_KEY',
-  'calendar.credentials.clientId':         'GOOGLE_CLIENT_ID',
-  'calendar.credentials.clientSecret':     'GOOGLE_CLIENT_SECRET',
-  'calendar.credentials.refreshToken':     'GOOGLE_REFRESH_TOKEN',
-  'voice.whisperApiKey':                   'WHISPER_API_KEY',
-  'voice.elevenLabsApiKey':                'ELEVENLABS_API_KEY',
-  'googleDrive.credentials.clientId':      'GOOGLE_DRIVE_CLIENT_ID',
-  'googleDrive.credentials.clientSecret':  'GOOGLE_DRIVE_CLIENT_SECRET',
-  'googleDrive.credentials.refreshToken':  'GOOGLE_DRIVE_REFRESH_TOKEN',
-  'channels.telegram.personal.botToken':   'TELEGRAM_BOT_TOKEN',
-  'channels.slack.personal.botToken':      'SLACK_BOT_TOKEN',
-  'cloudflare.tunnel.token':               'CLOUDFLARE_TUNNEL_TOKEN',
+  'notion.apiKey': 'NOTION_API_KEY',
+  'linear.apiKey': 'LINEAR_API_KEY',
+  'calendar.credentials.clientId': 'GOOGLE_CLIENT_ID',
+  'calendar.credentials.clientSecret': 'GOOGLE_CLIENT_SECRET',
+  'calendar.credentials.refreshToken': 'GOOGLE_REFRESH_TOKEN',
+  'voice.whisperApiKey': 'WHISPER_API_KEY',
+  'voice.elevenLabsApiKey': 'ELEVENLABS_API_KEY',
+  'googleDrive.credentials.clientId': 'GOOGLE_DRIVE_CLIENT_ID',
+  'googleDrive.credentials.clientSecret': 'GOOGLE_DRIVE_CLIENT_SECRET',
+  'googleDrive.credentials.refreshToken': 'GOOGLE_DRIVE_REFRESH_TOKEN',
+  'channels.telegram.personal.botToken': 'TELEGRAM_BOT_TOKEN',
+  'channels.slack.personal.botToken': 'SLACK_BOT_TOKEN',
+  'cloudflare.tunnel.token': 'CLOUDFLARE_TUNNEL_TOKEN',
 };
 
 // ── Dot-path helpers ────────────────────────────────────────────────────────────
 
 function getNestedValue(obj: Record<string, unknown>, dotPath: string): unknown {
-  return dotPath.split('.').reduce<unknown>((cur, key) =>
-    (cur && typeof cur === 'object' ? (cur as Record<string, unknown>)[key] : undefined), obj);
+  return dotPath
+    .split('.')
+    .reduce<unknown>(
+      (cur, key) =>
+        cur && typeof cur === 'object' ? (cur as Record<string, unknown>)[key] : undefined,
+      obj,
+    );
 }
 
 function setNestedValue(obj: Record<string, unknown>, dotPath: string, value: unknown): void {
@@ -105,7 +110,8 @@ export function migrateSecretsFromRaw(raw: Record<string, unknown>): {
     for (const srv of mcpServers as Record<string, unknown>[]) {
       if (!srv || typeof srv !== 'object') continue;
       const env = srv.env as Record<string, string> | undefined;
-      const name = typeof srv.name === 'string' ? srv.name.toUpperCase().replace(/[^A-Z0-9]/g, '_') : 'MCP';
+      const name =
+        typeof srv.name === 'string' ? srv.name.toUpperCase().replace(/[^A-Z0-9]/g, '_') : 'MCP';
       if (env && typeof env === 'object') {
         for (const [envKey, envVal] of Object.entries(env)) {
           if (typeof envVal === 'string' && envVal && !envVal.startsWith('$')) {
@@ -162,7 +168,7 @@ export function resolveSecretRefs(obj: unknown): unknown {
 
 /**
  * Reverse of resolveSecretRefs: replace actual secret values with "$KEY" refs.
- * Used before writing config.json to ensure no secrets leak to disk.
+ * Used before writing .config to ensure no secrets leak to disk.
  * Matches against the current secrets store — only known values are replaced.
  */
 export function redactSecretsForDisk(obj: unknown): unknown {

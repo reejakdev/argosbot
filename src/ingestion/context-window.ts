@@ -43,7 +43,12 @@ export class ContextWindowManager {
 
   // ─── Add a message to the appropriate window ────────────────────────────────
 
-  add(message: RawMessage, sanitizedContent: string, lookup: Record<string, string>, rawContent?: string): void {
+  add(
+    message: RawMessage,
+    sanitizedContent: string,
+    lookup: Record<string, string>,
+    rawContent?: string,
+  ): void {
     const existing = this.openWindows.get(message.chatId);
 
     if (existing) {
@@ -58,44 +63,52 @@ export class ContextWindowManager {
 
   async flushAll(): Promise<void> {
     const chatIds = [...this.openWindows.keys()];
-    await Promise.all(chatIds.map(chatId => this.closeWindow(chatId)));
+    await Promise.all(chatIds.map((chatId) => this.closeWindow(chatId)));
   }
 
   // ─── Internal ───────────────────────────────────────────────────────────────
 
-  private openNew(message: RawMessage, sanitizedContent: string, lookup: Record<string, string>, rawContent?: string): void {
+  private openNew(
+    message: RawMessage,
+    sanitizedContent: string,
+    lookup: Record<string, string>,
+    rawContent?: string,
+  ): void {
     const windowId = ulid();
 
     const window: ContextWindow = {
-      id:          windowId,
-      channel:     message.channel,
-      chatId:      message.chatId,
-      chatName:    message.chatName,
-      threadName:  message.threadName,
+      id: windowId,
+      channel: message.channel,
+      chatId: message.chatId,
+      chatName: message.chatName,
+      threadName: message.threadName,
       partnerName: message.partnerName,
-      messages: [{
-        id:           ulid(),
-        originalId:   message.id,
-        channel:      message.channel,
-        chatId:       message.chatId,
-        chatName:     message.chatName,
-        chatType:     message.chatType,
-        partnerName:  message.partnerName,
-        content:      sanitizedContent,
-        lookupTable:  lookup,
-        links:        message.links,
-        messageUrl:   message.messageUrl,
-        isForward:    message.isForward,
-        forwardFrom:  message.forwardFrom,
-        mediaType:    message.mediaType,
-        timestamp:    message.timestamp,
-        receivedAt:   message.receivedAt,
-        // Ephemeral image data — never persisted to DB
-        imageData:    message.meta?.imageData as string | undefined,
-        imageMimeType: message.meta?.imageMimeType as import('../types.js').SanitizedMessage['imageMimeType'],
-      }],
+      messages: [
+        {
+          id: ulid(),
+          originalId: message.id,
+          channel: message.channel,
+          chatId: message.chatId,
+          chatName: message.chatName,
+          chatType: message.chatType,
+          partnerName: message.partnerName,
+          content: sanitizedContent,
+          lookupTable: lookup,
+          links: message.links,
+          messageUrl: message.messageUrl,
+          isForward: message.isForward,
+          forwardFrom: message.forwardFrom,
+          mediaType: message.mediaType,
+          timestamp: message.timestamp,
+          receivedAt: message.receivedAt,
+          // Ephemeral image data — never persisted to DB
+          imageData: message.meta?.imageData as string | undefined,
+          imageMimeType: message.meta
+            ?.imageMimeType as import('../types.js').SanitizedMessage['imageMimeType'],
+        },
+      ],
       previousMessages: this.loadPreviousMessages(message.chatId, message.receivedAt),
-      rawContent:  rawContent,
+      rawContent: rawContent,
       openedAt: Date.now(),
       status: 'open',
     };
@@ -124,25 +137,26 @@ export class ContextWindowManager {
     const { window, timer } = state;
 
     window.messages.push({
-      id:           ulid(),
-      originalId:   message.id,
-      channel:      message.channel,
-      chatId:       message.chatId,
-      chatName:     message.chatName,
-      chatType:     message.chatType,
-      partnerName:  message.partnerName,
-      content:      sanitizedContent,
-      lookupTable:  lookup,
-      links:        message.links,
-      messageUrl:   message.messageUrl,
-      isForward:    message.isForward,
-      forwardFrom:  message.forwardFrom,
-      mediaType:    message.mediaType,
-      timestamp:    message.timestamp,
-      receivedAt:   message.receivedAt,
+      id: ulid(),
+      originalId: message.id,
+      channel: message.channel,
+      chatId: message.chatId,
+      chatName: message.chatName,
+      chatType: message.chatType,
+      partnerName: message.partnerName,
+      content: sanitizedContent,
+      lookupTable: lookup,
+      links: message.links,
+      messageUrl: message.messageUrl,
+      isForward: message.isForward,
+      forwardFrom: message.forwardFrom,
+      mediaType: message.mediaType,
+      timestamp: message.timestamp,
+      receivedAt: message.receivedAt,
       // Ephemeral image data — never persisted to DB
-      imageData:    message.meta?.imageData as string | undefined,
-      imageMimeType: message.meta?.imageMimeType as import('../types.js').SanitizedMessage['imageMimeType'],
+      imageData: message.meta?.imageData as string | undefined,
+      imageMimeType: message.meta
+        ?.imageMimeType as import('../types.js').SanitizedMessage['imageMimeType'],
     });
 
     if (rawContent) {
@@ -201,7 +215,9 @@ export class ContextWindowManager {
       this.updateWindowInDb(window);
     } catch (e) {
       const err = e as Error & { code?: string };
-      log.error(`Failed to process window ${window.id}: [${err.code ?? 'ERR'}] ${err.message ?? String(e)}`);
+      log.error(
+        `Failed to process window ${window.id}: [${err.code ?? 'ERR'}] ${err.message ?? String(e)}`,
+      );
       // Don't re-throw — window is logged, can be replayed from DB
     }
   }
@@ -211,25 +227,32 @@ export class ContextWindowManager {
   // Fetch up to 3 recent sanitized summaries from memory for the same chat.
   // These act as "previous messages" context — we use memory entries rather than
   // raw messages (raw content is never stored by design).
-  private loadPreviousMessages(chatId: string, before: number): import('../types.js').SanitizedMessage[] {
+  private loadPreviousMessages(
+    chatId: string,
+    before: number,
+  ): import('../types.js').SanitizedMessage[] {
     try {
       const db = getDb();
-      const rows = db.prepare(`
+      const rows = db
+        .prepare(
+          `
         SELECT content, created_at FROM memories
         WHERE chat_id = ? AND created_at < ? AND (expires_at IS NULL OR expires_at > ?)
         ORDER BY created_at DESC
         LIMIT 3
-      `).all(chatId, before, Date.now()) as Array<{ content: string; created_at: number }>;
+      `,
+        )
+        .all(chatId, before, Date.now()) as Array<{ content: string; created_at: number }>;
 
       // Return in chronological order so the classifier sees context naturally
-      return rows.reverse().map(r => ({
-        id:          ulid(),
-        originalId:  'prev',
+      return rows.reverse().map((r) => ({
+        id: ulid(),
+        originalId: 'prev',
         chatId,
-        content:     r.content,
+        content: r.content,
         lookupTable: {},
-        links:       [],
-        receivedAt:  r.created_at,
+        links: [],
+        receivedAt: r.created_at,
       }));
     } catch (e) {
       log.warn(`Failed to load previous messages for chat ${chatId}`, e);
@@ -237,16 +260,26 @@ export class ContextWindowManager {
     }
   }
 
+  /** Serialize messages for DB — strip ephemeral image data to avoid bloat. */
+  private serializeMessages(window: ContextWindow): string {
+    return JSON.stringify(
+      window.messages.map((m) => ({ ...m, imageData: undefined, imageMimeType: undefined })),
+    );
+  }
+
   private persistWindow(window: ContextWindow): void {
     const db = getDb();
-    db.prepare(`
-      INSERT INTO context_windows (id, chat_id, partner_name, message_ids, opened_at, status)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
+    db.prepare(
+      `
+      INSERT INTO context_windows (id, chat_id, partner_name, message_ids, messages_json, opened_at, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `,
+    ).run(
       window.id,
       window.chatId,
       window.partnerName ?? null,
-      JSON.stringify(window.messages.map(m => m.originalId)),
+      JSON.stringify(window.messages.map((m) => m.originalId)),
+      this.serializeMessages(window),
       window.openedAt,
       window.status,
     );
@@ -254,12 +287,15 @@ export class ContextWindowManager {
 
   private updateWindowInDb(window: ContextWindow): void {
     const db = getDb();
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE context_windows
-      SET message_ids = ?, closed_at = ?, status = ?
+      SET message_ids = ?, messages_json = ?, closed_at = ?, status = ?
       WHERE id = ?
-    `).run(
-      JSON.stringify(window.messages.map(m => m.originalId)),
+    `,
+    ).run(
+      JSON.stringify(window.messages.map((m) => m.originalId)),
+      this.serializeMessages(window),
       window.closedAt ?? null,
       window.status,
       window.id,
@@ -269,25 +305,62 @@ export class ContextWindowManager {
   // ─── Replay pending windows from DB on startup ───────────────────────────────
   // If the process crashed with open windows, re-queue them
 
-  static async replayPending(_onReady: WindowReadyCallback): Promise<void> {
+  static async replayPending(onReady: WindowReadyCallback): Promise<void> {
     const db = getDb();
-    const pending = db.prepare(`
+    const pending = db
+      .prepare(
+        `
       SELECT * FROM context_windows WHERE status = 'open' OR status = 'processing'
-    `).all() as Array<{
-      id: string; chat_id: string; partner_name: string | null;
-      message_ids: string; opened_at: number; closed_at: number | null; status: string;
+    `,
+      )
+      .all() as Array<{
+      id: string;
+      chat_id: string;
+      partner_name: string | null;
+      message_ids: string;
+      messages_json: string | null;
+      opened_at: number;
+      closed_at: number | null;
+      status: string;
     }>;
 
     if (pending.length === 0) return;
 
-    log.info(`Replaying ${pending.length} pending windows from DB`);
+    log.info(`Replaying ${pending.length} pending window(s) from DB`);
 
     for (const row of pending) {
-      // Mark as processing and emit — we don't have the full message content
-      // anymore (we only stored IDs), but we can reconstruct from audit log
-      // For now, log and skip — future: store full sanitized content in DB
-      log.warn(`Skipping pending window ${row.id} (content not stored — restart safe)`);
-      db.prepare(`UPDATE context_windows SET status = 'done' WHERE id = ?`).run(row.id);
+      if (!row.messages_json) {
+        // Legacy window without stored content — can't replay
+        log.warn(`Skipping window ${row.id} (no messages_json — pre-migration)`);
+        db.prepare(`UPDATE context_windows SET status = 'done' WHERE id = ?`).run(row.id);
+        continue;
+      }
+
+      try {
+        const messages = JSON.parse(row.messages_json) as ContextWindow['messages'];
+        const window: ContextWindow = {
+          id: row.id,
+          channel: messages[0]?.channel ?? 'unknown',
+          chatId: row.chat_id,
+          partnerName: row.partner_name ?? undefined,
+          messages,
+          previousMessages: [],
+          openedAt: row.opened_at,
+          status: 'processing',
+        };
+
+        log.info(
+          `Replaying window ${row.id} (${messages.length} message(s), chat: ${row.chat_id})`,
+        );
+        db.prepare(`UPDATE context_windows SET status = 'processing' WHERE id = ?`).run(row.id);
+
+        await onReady(window);
+        db.prepare(`UPDATE context_windows SET status = 'done' WHERE id = ?`).run(row.id);
+        log.info(`Window ${row.id} replayed successfully`);
+      } catch (e) {
+        log.error(`Window ${row.id} replay failed: ${e}`);
+        // Leave as 'processing' — admin can investigate via DB
+      }
     }
   }
 }

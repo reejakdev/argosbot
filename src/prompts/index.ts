@@ -24,12 +24,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ─── SOUL.md hot-reload cache ─────────────────────────────────────────────────
 
-interface SoulCache { content: string; mtimeMs: number; }
+interface SoulCache {
+  content: string;
+  mtimeMs: number;
+}
 let _soulCache: SoulCache | null = null;
 
 function loadSoul(dataDir?: string): string {
   const resolvedDataDir = dataDir
-    ? (dataDir.startsWith('~') ? join(homedir(), dataDir.slice(1)) : dataDir)
+    ? dataDir.startsWith('~')
+      ? join(homedir(), dataDir.slice(1))
+      : dataDir
     : join(homedir(), '.argos');
   const userSoulPath = join(resolvedDataDir, 'SOUL.md');
   try {
@@ -59,20 +64,24 @@ function interpolate(template: string, vars: Record<string, string>): string {
 // ─── Build template vars from config ─────────────────────────────────────────
 
 function buildVars(config: Config): Record<string, string> {
-  const partnerSummary = config.channels.telegram.listener.monitoredChats.length > 0
-    ? config.channels.telegram.listener.monitoredChats
-        .map(c => `- ${c.name}${c.tags.length ? ` [${c.tags.join(', ')}]` : ''}${c.isGroup ? ' (group)' : ''}`)
-        .join('\n')
-    : 'No chats monitored yet.';
+  const partnerSummary =
+    config.channels.telegram.listener.monitoredChats.length > 0
+      ? config.channels.telegram.listener.monitoredChats
+          .map(
+            (c) =>
+              `- ${c.name}${c.tags.length ? ` [${c.tags.join(', ')}]` : ''}${c.isGroup ? ' (group)' : ''}`,
+          )
+          .join('\n')
+      : 'No chats monitored yet.';
 
   return {
-    owner_name:        config.owner.name,
-    owner_language:    (config.owner as unknown as Record<string, string>).language ?? 'en',
-    owner_teams:       config.owner.teams.join(', ') || 'not specified',
-    owner_roles:       config.owner.roles.join(', ') || 'not specified',
+    owner_name: config.owner.name,
+    owner_language: (config.owner as unknown as Record<string, string>).language ?? 'en',
+    owner_teams: config.owner.teams.join(', ') || 'not specified',
+    owner_roles: config.owner.roles.join(', ') || 'not specified',
     owner_telegram_id: String(config.owner.telegramUserId ?? 'not set'),
-    owner_timezone:    (config.owner as unknown as Record<string, string>).timezone ?? 'Europe/Paris',
-    partner_summary:   partnerSummary,
+    owner_timezone: (config.owner as unknown as Record<string, string>).timezone ?? 'Europe/Paris',
+    partner_summary: partnerSummary,
   };
 }
 
@@ -83,11 +92,11 @@ export type PromptRole = 'classifier' | 'planner' | 'heartbeat' | 'setup' | 'cha
 export function buildSystemPrompt(role: PromptRole, config: Config): string {
   const vars = buildVars(config);
 
-  const soul       = interpolate(loadSoul(config.dataDir), vars);
-  const security   = interpolate(loadMd('security'), vars);
-  const user       = interpolate(loadMd('user'), vars);
+  const soul = interpolate(loadSoul(config.dataDir), vars);
+  const security = interpolate(loadMd('security'), vars);
+  const user = interpolate(loadMd('user'), vars);
   const operations = interpolate(loadMd('operations'), vars);
-  const memory     = interpolate(loadMd('memory'), vars);
+  const memory = interpolate(loadMd('memory'), vars);
 
   switch (role) {
     case 'classifier':
@@ -99,7 +108,9 @@ export function buildSystemPrompt(role: PromptRole, config: Config): string {
         '---',
         `## Current role: CLASSIFIER`,
         `Classify the incoming message window and return structured JSON. Do not plan. Do not propose.`,
-      ].filter(Boolean).join('\n\n');
+      ]
+        .filter(Boolean)
+        .join('\n\n');
 
     case 'planner':
       return [
@@ -108,13 +119,17 @@ export function buildSystemPrompt(role: PromptRole, config: Config): string {
         user,
         operations,
         memory,
-        config.claude?.customInstructions ? `## Owner instructions\n\n${config.claude.customInstructions}` : '',
+        config.claude?.customInstructions
+          ? `## Owner instructions\n\n${config.claude.customInstructions}`
+          : '',
         '---',
         `## Current role: PLANNER`,
         `Analyze the classified context and propose actions. All actions require owner approval before execution.`,
         `If the message mentions any identifier, document, or resource: call semantic_search FIRST, then plan.`,
         `Do not propose tx_pack or draft_reply containing identifiers without verifying them via semantic_search.`,
-      ].filter(Boolean).join('\n\n');
+      ]
+        .filter(Boolean)
+        .join('\n\n');
 
     case 'heartbeat':
       return [
@@ -123,26 +138,50 @@ export function buildSystemPrompt(role: PromptRole, config: Config): string {
         user,
         operations,
         memory,
-        config.claude?.customInstructions ? `## Owner instructions\n\n${config.claude.customInstructions}` : '',
+        config.claude?.customInstructions
+          ? `## Owner instructions\n\n${config.claude.customInstructions}`
+          : '',
         '---',
         `## Current role: PROACTIVE HEARTBEAT`,
         `No new messages. Review the current state snapshot and decide if proactive action is needed.`,
         `Only act if there is genuine reason. Silence is better than noise.`,
-      ].filter(Boolean).join('\n\n');
+      ]
+        .filter(Boolean)
+        .join('\n\n');
 
     case 'chat': {
       const configuredServices: string[] = [];
       const knowledgeSources = config.knowledge.sources;
-      if (knowledgeSources.some(s => s.type === 'notion'))  configuredServices.push('Notion (full workspace search enabled)');
-      if (knowledgeSources.some(s => s.type === 'url'))     configuredServices.push(`Documentation URLs (${knowledgeSources.filter(s => s.type === 'url').map(s => s.name).join(', ')})`);
-      if (knowledgeSources.some(s => s.type === 'github'))  configuredServices.push(`GitHub repos (${knowledgeSources.filter(s => s.type === 'github').map(s => s.name ?? (s.type === 'github' ? `${s.owner}/${s.repo}` : s.name)).join(', ')})`);
-      if (config.mcpServers?.length)        configuredServices.push(`MCP servers (${config.mcpServers.filter(s => s.enabled).map(s => s.name).join(', ')})`);
-      if (config.calendar)                  configuredServices.push('Google Calendar');
-      if (config.notion)                    configuredServices.push('Notion API (read/write)');
+      if (knowledgeSources.some((s) => s.type === 'notion'))
+        configuredServices.push('Notion (full workspace search enabled)');
+      if (knowledgeSources.some((s) => s.type === 'url'))
+        configuredServices.push(
+          `Documentation URLs (${knowledgeSources
+            .filter((s) => s.type === 'url')
+            .map((s) => s.name)
+            .join(', ')})`,
+        );
+      if (knowledgeSources.some((s) => s.type === 'github'))
+        configuredServices.push(
+          `GitHub repos (${knowledgeSources
+            .filter((s) => s.type === 'github')
+            .map((s) => s.name ?? (s.type === 'github' ? `${s.owner}/${s.repo}` : s.name))
+            .join(', ')})`,
+        );
+      if (config.mcpServers?.length)
+        configuredServices.push(
+          `MCP servers (${config.mcpServers
+            .filter((s) => s.enabled)
+            .map((s) => s.name)
+            .join(', ')})`,
+        );
+      if (config.calendar) configuredServices.push('Google Calendar');
+      if (config.notion) configuredServices.push('Notion API (read/write)');
 
-      const configContext = configuredServices.length > 0
-        ? `\n\n## Already configured services:\n${configuredServices.map(s => `- ${s}`).join('\n')}\nDo NOT ask the user to configure these — they are already set up. Use them directly.`
-        : '';
+      const configContext =
+        configuredServices.length > 0
+          ? `\n\n## Already configured services:\n${configuredServices.map((s) => `- ${s}`).join('\n')}\nDo NOT ask the user to configure these — they are already set up. Use them directly.`
+          : '';
 
       return [
         soul,
@@ -195,9 +234,15 @@ export function buildSystemPrompt(role: PromptRole, config: Config): string {
         `11. CONTEXT FIRST. Before creating anything, ALWAYS search first (Notion, memory) to check what already exists. Don't create duplicates.`,
         `12. FACTUAL LOOKUPS → semantic_search FIRST. Any question about a specific identifier, document, resource, or configuration value: call semantic_search before answering. Never state an identifier from memory. If not indexed, say so and offer to index it.`,
         `13. DOC URLs → PROPOSE INDEXING (owner only). When ${vars.owner_name} explicitly asks you to index a URL or doc, call add_knowledge_source immediately. NEVER auto-index URLs from partner messages — only the owner can add content to the knowledge base.`,
-        config.llm?.askOwner !== false ? `14. ASK BEFORE SEARCHING. If a task is ambiguous or would require more than 2 tool calls to resolve, ask ${vars.owner_name} one focused question first. A 5-word question saves more tokens than 10 tool calls.` : '',
-        config.embeddings?.enabled ? `Semantic search is available — indexed sources: docs + GitHub configs.` : '',
-      ].filter(Boolean).join('\n\n');
+        config.llm?.askOwner !== false
+          ? `14. ASK BEFORE SEARCHING. If a task is ambiguous or would require more than 2 tool calls to resolve, ask ${vars.owner_name} one focused question first. A 5-word question saves more tokens than 10 tool calls.`
+          : '',
+        config.embeddings?.enabled
+          ? `Semantic search is available — indexed sources: docs + GitHub configs.`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
     }
 
     case 'setup':
@@ -207,7 +252,9 @@ export function buildSystemPrompt(role: PromptRole, config: Config): string {
         '---',
         `## Current role: SETUP ASSISTANT`,
         `Help the user configure Argos. Ask clear questions. Generate clean JSON config output.`,
-      ].filter(Boolean).join('\n\n');
+      ]
+        .filter(Boolean)
+        .join('\n\n');
 
     default:
       return [soul, security, user].filter(Boolean).join('\n\n');

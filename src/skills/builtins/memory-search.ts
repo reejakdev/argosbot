@@ -14,10 +14,12 @@ import { search } from '../../memory/store.js';
 
 registerSkill({
   name: 'memory_search',
-  description: 'Search Argos memory and knowledge sources for past context, addresses, docs, and stored information',
+  description:
+    'Search Argos memory and knowledge sources for past context, addresses, docs, and stored information',
   tool: {
     name: 'memory_search',
-    description: 'Search Argos memory (FTS5) AND indexed knowledge docs (semantic vector search) for relevant context, addresses, partner interactions, or stored notes. Use this to find specific data like contract addresses, token names, past decisions.',
+    description:
+      'Search Argos memory (FTS5) AND indexed knowledge docs (semantic vector search) for relevant context, addresses, partner interactions, or stored notes. Use this to find specific data like contract addresses, token names, past decisions.',
     input_schema: {
       type: 'object',
       properties: {
@@ -53,10 +55,10 @@ registerSkill({
 
     const categoryFilter = input.category ? String(input.category) : null;
     const filtered = categoryFilter
-      ? memResults.filter(m => m.category === categoryFilter)
+      ? memResults.filter((m) => m.category === categoryFilter)
       : memResults;
 
-    const memLines = filtered.map(m => {
+    const memLines = filtered.map((m) => {
       const date = new Date(m.createdAt).toLocaleDateString('en-GB');
       const partner = m.partnerName ? ` | Partner: ${m.partnerName}` : '';
       const cat = m.category ? ` | [${m.category}]` : '';
@@ -66,30 +68,34 @@ registerSkill({
 
     // ── 2. Semantic vector search — knowledge docs + vectorized memories ────
     let knowledgeLines: string[] = [];
-    let vecMemLines:    string[] = [];
+    let vecMemLines: string[] = [];
     try {
       const { loadConfig } = await import('../../config/index.js');
       const fullConfig = loadConfig();
-      const embCfg = (fullConfig as unknown as { embeddings?: import('../../config/schema.js').EmbeddingsConfig }).embeddings;
+      const embCfg = (
+        fullConfig as unknown as { embeddings?: import('../../config/schema.js').EmbeddingsConfig }
+      ).embeddings;
       if (embCfg?.enabled) {
         const { hybridSearch } = await import('../../vector/store.js');
 
         // Search knowledge docs (github:, doc:, url:) — minSimilarity lowered so
         // keyword hits always surface even when semantic score is weak
         const knowledgeResults = await hybridSearch(query, embCfg, { topK: 5, minSimilarity: 0.2 });
-        const docResults  = knowledgeResults.filter(r => !r.chunk.sourceRef.startsWith('memory:'));
-        const memVecResults = knowledgeResults.filter(r => r.chunk.sourceRef.startsWith('memory:'));
+        const docResults = knowledgeResults.filter((r) => !r.chunk.sourceRef.startsWith('memory:'));
+        const memVecResults = knowledgeResults.filter((r) =>
+          r.chunk.sourceRef.startsWith('memory:'),
+        );
 
-        knowledgeLines = docResults.map(r => {
+        knowledgeLines = docResults.map((r) => {
           const src = r.chunk.sourceRef ?? 'unknown';
           const score = r.similarity.toFixed(2);
           return `**[${src} | score: ${score}]**\n${r.chunk.content}`;
         });
 
         // Semantic memories complement FTS5 (different ranking — semantic beats keyword here)
-        vecMemLines = memVecResults.map(r => {
+        vecMemLines = memVecResults.map((r) => {
           const partner = r.chunk.field2 ? ` | Partner: ${r.chunk.field2}` : '';
-          const cat     = r.chunk.field3 ? ` | [${r.chunk.field3}]` : '';
+          const cat = r.chunk.field3 ? ` | [${r.chunk.field3}]` : '';
           return `**[semantic memory${partner}${cat}]**\n${r.chunk.content}`;
         });
       }
@@ -98,7 +104,7 @@ registerSkill({
     }
 
     // ── Combine and return ────────────────────────────────────────────────────
-    const hasMem  = memLines.length > 0 || vecMemLines.length > 0;
+    const hasMem = memLines.length > 0 || vecMemLines.length > 0;
     const hasKnow = knowledgeLines.length > 0;
 
     if (!hasMem && !hasKnow) {
@@ -110,8 +116,12 @@ registerSkill({
 
     const allMemLines = [...memLines, ...vecMemLines];
     const sections: string[] = [];
-    if (allMemLines.length > 0) sections.push(`## Memory (${allMemLines.length} entry(ies))\n\n${allMemLines.join('\n\n')}`);
-    if (hasKnow)                sections.push(`## Knowledge docs (${knowledgeLines.length} chunk(s))\n\n${knowledgeLines.join('\n\n')}`);
+    if (allMemLines.length > 0)
+      sections.push(`## Memory (${allMemLines.length} entry(ies))\n\n${allMemLines.join('\n\n')}`);
+    if (hasKnow)
+      sections.push(
+        `## Knowledge docs (${knowledgeLines.length} chunk(s))\n\n${knowledgeLines.join('\n\n')}`,
+      );
 
     return {
       success: true,

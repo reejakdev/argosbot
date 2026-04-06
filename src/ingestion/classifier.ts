@@ -16,7 +16,7 @@
 
 import { llmCall, extractJson, type LLMConfig, type LLMContentBlock } from '../llm/index.js';
 import { createLogger } from '../logger.js';
-import { getDb } from '../db/index.js';
+import { getDb, audit } from '../db/index.js';
 import { buildSystemPrompt } from '../prompts/index.js';
 import type { ContextWindow, ClassificationResult, Task, CompletionSignal } from '../types.js';
 import type { Config } from '../config/schema.js';
@@ -27,13 +27,17 @@ const log = createLogger('classifier');
 
 function getOpenTasks(chatId: string, partnerName?: string): Task[] {
   const db = getDb();
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT * FROM tasks
     WHERE status IN ('open', 'in_progress', 'done_inferred')
     AND (chat_id = ? OR partner_name = ?)
     ORDER BY detected_at DESC
     LIMIT 20
-  `).all(chatId, partnerName ?? null) as Task[];
+  `,
+    )
+    .all(chatId, partnerName ?? null) as Task[];
   return rows;
 }
 
@@ -47,27 +51,34 @@ function buildPrompt(
   ownerName?: string,
   myHandles?: string[],
 ): string {
-  const prevContext = window.previousMessages.length > 0
-    ? window.previousMessages
-        .map(m => `[PREV ${new Date(m.receivedAt).toISOString()}] ${m.content}`)
-        .join('\n')
-    : null;
+  const prevContext =
+    window.previousMessages.length > 0
+      ? window.previousMessages
+          .map((m) => `[PREV ${new Date(m.receivedAt).toISOString()}] ${m.content}`)
+          .join('\n')
+      : null;
 
-  const messages = window.messages.map((m, i) =>
-    `[Message ${i + 1}] ${new Date(m.receivedAt).toISOString()}\n${m.content}`
-  ).join('\n\n');
+  const messages = window.messages
+    .map((m, i) => `[Message ${i + 1}] ${new Date(m.receivedAt).toISOString()}\n${m.content}`)
+    .join('\n\n');
 
-  const taskList = openTasks.length > 0
-    ? openTasks.map(t => `  - ID: ${t.id} | ${t.title} (${t.status})`).join('\n')
-    : '  (none)';
+  const taskList =
+    openTasks.length > 0
+      ? openTasks.map((t) => `  - ID: ${t.id} | ${t.title} (${t.status})`).join('\n')
+      : '  (none)';
 
-  const teamContext = ownerTeams.length > 0
-    ? `Owner teams: ${ownerTeams.join(', ')}\nOwner roles: ${ownerRoles.join(', ')}`
-    : 'Owner teams: not specified';
+  const teamContext =
+    ownerTeams.length > 0
+      ? `Owner teams: ${ownerTeams.join(', ')}\nOwner roles: ${ownerRoles.join(', ')}`
+      : 'Owner teams: not specified';
   const ownerCtx = [
     ownerName ? `Owner name: ${ownerName}` : '',
-    myHandles?.length ? `Owner handles (messages mentioning these are likely directed at the owner): ${myHandles.join(', ')}` : '',
-  ].filter(Boolean).join('\n');
+    myHandles?.length
+      ? `Owner handles (messages mentioning these are likely directed at the owner): ${myHandles.join(', ')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   return `You are a message classifier for an operations assistant.
 You receive anonymized messages (placeholders like [ADDR_1], [PERSON_1] are redacted — never guess them).
@@ -147,23 +158,30 @@ export async function classify(
   const systemPrompt = buildSystemPrompt('classifier', config);
 
   log.debug(`Classifying window ${window.id}`, {
-    messages:     window.messages.length,
+    messages: window.messages.length,
     prevMessages: window.previousMessages.length,
-    partner:      window.partnerName,
-    openTasks:    openTasks.length,
+    partner: window.partnerName,
+    openTasks: openTasks.length,
   });
 
   // Build multimodal user content if any message in the window carries image data
-  const imgMsg = window.messages.find(m => m.imageData);
+  const imgMsg = window.messages.find((m) => m.imageData);
   const userContent: LLMContentBlock[] | string = imgMsg?.imageData
     ? [
         { type: 'text' as const, text: prompt },
-        { type: 'image' as const, source: { type: 'base64' as const, media_type: imgMsg.imageMimeType ?? 'image/jpeg', data: imgMsg.imageData } },
+        {
+          type: 'image' as const,
+          source: {
+            type: 'base64' as const,
+            media_type: imgMsg.imageMimeType ?? 'image/jpeg',
+            data: imgMsg.imageData,
+          },
+        },
       ]
     : prompt;
 
   const response = await llmCall(
-    { ...llmConfig, temperature: llmConfig.temperature ?? 0 },  // default 0 — deterministic
+    { ...llmConfig, temperature: llmConfig.temperature ?? 0 }, // default 0 — deterministic
     [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userContent },
@@ -176,35 +194,39 @@ export async function classify(
 
     // Backfill defaults for new fields if the LLM omits them
     result = {
-      category:         raw.category ?? 'info',
-      taskScope:        raw.taskScope ?? (raw.isMyTask ? 'my_task' : 'info_only'),
-      ownerConfidence:  raw.ownerConfidence ?? (raw.isMyTask ? 0.7 : 0.3),
-      isMyTask:         raw.isMyTask ?? raw.taskScope === 'my_task',
-      assignedTeam:     raw.assignedTeam ?? null,
-      importance:       raw.importance ?? 3,
-      urgency:          raw.urgency ?? 'low',
-      tags:             raw.tags ?? [],
-      summary:          raw.summary ?? 'Classification failed — review manually',
-      requiresAction:   raw.requiresAction ?? false,
+      category: raw.category ?? 'info',
+      taskScope: raw.taskScope ?? (raw.isMyTask ? 'my_task' : 'info_only'),
+      ownerConfidence: raw.ownerConfidence ?? (raw.isMyTask ? 0.7 : 0.3),
+      isMyTask: raw.isMyTask ?? raw.taskScope === 'my_task',
+      assignedTeam: raw.assignedTeam ?? null,
+      importance: raw.importance ?? 3,
+      urgency: raw.urgency ?? 'low',
+      tags: raw.tags ?? [],
+      summary: raw.summary ?? 'Classification failed — review manually',
+      requiresAction: raw.requiresAction ?? false,
       completedTaskIds: raw.completedTaskIds ?? [],
       completionSignal: (raw.completionSignal as CompletionSignal) ?? 'none',
-      isDuplicate:      raw.isDuplicate ?? false,
+      isDuplicate: raw.isDuplicate ?? false,
       injectionDetected: raw.injectionDetected ?? false,
-      injectionReason:  raw.injectionReason,
+      injectionReason: raw.injectionReason,
     };
-  } catch {
+  } catch (e) {
     log.error(`Failed to parse classifier response for window ${window.id}`, response.content);
+    audit('classifier_parse_failed', window.id, 'window', {
+      error: String(e),
+      response: response.content.slice(0, 500),
+    });
     result = {
       category: 'info',
       taskScope: 'info_only',
       ownerConfidence: 0,
       isMyTask: false,
       assignedTeam: null,
-      importance: 3,
-      urgency: 'low',
-      tags: [],
-      summary: 'Classification failed — review manually',
-      requiresAction: false,
+      importance: 5, // elevated so it doesn't get silently dropped
+      urgency: 'medium',
+      tags: ['classifier_error'],
+      summary: `Classification failed for window ${window.id} — review manually`,
+      requiresAction: true, // flag for attention
       completedTaskIds: [],
       completionSignal: 'none',
       isDuplicate: false,
@@ -214,7 +236,9 @@ export async function classify(
 
   // Secondary injection check
   if (result.injectionDetected) {
-    log.warn(`Classifier detected injection in window ${window.id}`, { reason: result.injectionReason });
+    log.warn(`Classifier detected injection in window ${window.id}`, {
+      reason: result.injectionReason,
+    });
     result.category = 'ignore';
     result.requiresAction = false;
     result.importance = 0;
@@ -227,11 +251,17 @@ export async function classify(
     for (const taskId of result.completedTaskIds) {
       if (result.completionSignal === 'strong') {
         // High confidence — mark completed
-        db.prepare(`UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?`).run(now, taskId);
+        db.prepare(`UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?`).run(
+          now,
+          taskId,
+        );
         log.info(`Task ${taskId} marked completed (strong signal)`);
       } else if (result.completionSignal === 'medium') {
         // Moderate confidence — mark as done_inferred, human can confirm
-        db.prepare(`UPDATE tasks SET status = 'done_inferred', completed_at = ? WHERE id = ?`).run(now, taskId);
+        db.prepare(`UPDATE tasks SET status = 'done_inferred', completed_at = ? WHERE id = ?`).run(
+          now,
+          taskId,
+        );
         log.info(`Task ${taskId} marked done_inferred (medium signal)`);
       }
       // weak/none → don't change status, just log
@@ -242,15 +272,15 @@ export async function classify(
   }
 
   log.info(`Window ${window.id} classified`, {
-    category:         result.category,
-    taskScope:        result.taskScope,
-    ownerConfidence:  result.ownerConfidence,
+    category: result.category,
+    taskScope: result.taskScope,
+    ownerConfidence: result.ownerConfidence,
     completionSignal: result.completionSignal,
-    isDuplicate:      result.isDuplicate,
-    importance:       result.importance,
-    urgency:          result.urgency,
-    requiresAction:   result.requiresAction,
-    partner:          window.partnerName,
+    isDuplicate: result.isDuplicate,
+    importance: result.importance,
+    urgency: result.urgency,
+    requiresAction: result.requiresAction,
+    partner: window.partnerName,
   });
 
   return result;

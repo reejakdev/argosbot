@@ -53,16 +53,16 @@ export interface SlackBotOptions {
 // ─── Slack API types ──────────────────────────────────────────────────────────
 
 interface SlackMessage {
-  type:    string;
-  ts:      string;
-  user?:   string;
+  type: string;
+  ts: string;
+  user?: string;
   bot_id?: string;
-  text?:   string;
+  text?: string;
   subtype?: string;
 }
 
 interface SlackApiResponse {
-  ok:     boolean;
+  ok: boolean;
   error?: string;
   [key: string]: unknown;
 }
@@ -76,17 +76,18 @@ export class SlackBot {
   private llmConfig: LLMConfig;
   private argosConfig: Config | undefined;
 
-  private running  = false;
-  private lastTs   = String(Date.now() / 1000 - 5); // start 5 s ago
+  private running = false;
+  private lastTs = String(Date.now() / 1000 - 5); // start 5 s ago
   private botUserId: string | null = null;
   private conversations: Map<string, CompactableHistory> = new Map();
+  private static readonly MAX_CONVERSATIONS = 100;
 
   constructor(options: SlackBotOptions) {
-    this.token             = options.token;
+    this.token = options.token;
     this.approvalChannelId = options.approvalChannelId;
-    this.allowedUserIds    = new Set(options.allowedUserIds ?? []);
-    this.llmConfig         = options.llmConfig;
-    this.argosConfig       = options.config;
+    this.allowedUserIds = new Set(options.allowedUserIds ?? []);
+    this.llmConfig = options.llmConfig;
+    this.argosConfig = options.config;
   }
 
   // ─── Public API ─────────────────────────────────────────────────────────────
@@ -94,9 +95,11 @@ export class SlackBot {
   async start(): Promise<void> {
     // Resolve bot's own user ID (used to skip self-messages)
     try {
-      const me = await this.api('auth.test', {}) as { user_id?: string };
+      const me = (await this.api('auth.test', {})) as { user_id?: string };
       if (me.user_id) this.botUserId = me.user_id;
-    } catch { /* non-blocking */ }
+    } catch {
+      /* non-blocking */
+    }
 
     this.running = true;
     log.info(`Slack Bot started — polling #${this.approvalChannelId}`);
@@ -127,11 +130,11 @@ export class SlackBot {
   private async poll(): Promise<void> {
     while (this.running) {
       try {
-        const resp = await this.api('conversations.history', {
+        const resp = (await this.api('conversations.history', {
           channel: this.approvalChannelId,
-          oldest:  this.lastTs,
-          limit:   20,
-        }) as { messages?: SlackMessage[] };
+          oldest: this.lastTs,
+          limit: 20,
+        })) as { messages?: SlackMessage[] };
 
         const msgs = (resp.messages ?? []).reverse(); // oldest first
         for (const msg of msgs) {
@@ -156,7 +159,7 @@ export class SlackBot {
         log.error(`Slack bot polling error: ${(e as Error)?.message ?? String(e)}`);
       }
 
-      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
   }
 
@@ -200,9 +203,21 @@ export class SlackBot {
       case '/status': {
         const { getDb } = await import('../../db/index.js');
         const db = getDb();
-        const pending   = (db.prepare("SELECT COUNT(*) as c FROM proposals WHERE status IN ('proposed','awaiting_approval')").get() as { c: number }).c;
-        const openTasks = (db.prepare("SELECT COUNT(*) as c FROM tasks WHERE status IN ('open','in_progress')").get() as { c: number }).c;
-        const memories  = (db.prepare("SELECT COUNT(*) as c FROM memories WHERE archived = 0").get() as { c: number }).c;
+        const pending = (
+          db
+            .prepare(
+              "SELECT COUNT(*) as c FROM proposals WHERE status IN ('proposed','awaiting_approval')",
+            )
+            .get() as { c: number }
+        ).c;
+        const openTasks = (
+          db
+            .prepare("SELECT COUNT(*) as c FROM tasks WHERE status IN ('open','in_progress')")
+            .get() as { c: number }
+        ).c;
+        const memories = (
+          db.prepare('SELECT COUNT(*) as c FROM memories WHERE archived = 0').get() as { c: number }
+        ).c;
         return [
           `*Argos — Status*`,
           `Model: \`${this.llmConfig.model}\``,
@@ -215,14 +230,25 @@ export class SlackBot {
       case '/proposals': {
         const { getDb } = await import('../../db/index.js');
         const db = getDb();
-        const rows = db.prepare(
-          "SELECT id, reasoning, risk_level, created_at FROM proposals WHERE status IN ('proposed','awaiting_approval') ORDER BY created_at DESC LIMIT 10"
-        ).all() as Array<{ id: string; reasoning: string; risk_level: string; created_at: number }>;
+        const rows = db
+          .prepare(
+            "SELECT id, reasoning, risk_level, created_at FROM proposals WHERE status IN ('proposed','awaiting_approval') ORDER BY created_at DESC LIMIT 10",
+          )
+          .all() as Array<{
+          id: string;
+          reasoning: string;
+          risk_level: string;
+          created_at: number;
+        }>;
 
         if (!rows.length) return '✅ No pending proposals.';
-        return ['*Pending proposals:*', ...rows.map(r =>
-          `• \`${r.id.slice(-8)}\` [${r.risk_level}] — ${r.reasoning.slice(0, 120)}…\n  → \`/approve ${r.id.slice(-8)}\` or \`/reject ${r.id.slice(-8)}\``
-        )].join('\n');
+        return [
+          '*Pending proposals:*',
+          ...rows.map(
+            (r) =>
+              `• \`${r.id.slice(-8)}\` [${r.risk_level}] — ${r.reasoning.slice(0, 120)}…\n  → \`/approve ${r.id.slice(-8)}\` or \`/reject ${r.id.slice(-8)}\``,
+          ),
+        ].join('\n');
       }
 
       case '/approve': {
@@ -230,9 +256,11 @@ export class SlackBot {
         if (!shortId) return '⚠️ Usage: `/approve <id>`';
         const { getDb } = await import('../../db/index.js');
         const db = getDb();
-        const row = db.prepare(
-          "SELECT id, risk_level FROM proposals WHERE id LIKE ? AND status IN ('proposed','awaiting_approval') LIMIT 1"
-        ).get(`%${shortId}`) as { id: string; risk_level: string } | null;
+        const row = db
+          .prepare(
+            "SELECT id, risk_level FROM proposals WHERE id LIKE ? AND status IN ('proposed','awaiting_approval') LIMIT 1",
+          )
+          .get(`%${shortId}`) as { id: string; risk_level: string } | null;
 
         if (!row) return `❌ Proposal \`${shortId}\` not found or already resolved.`;
         if (row.risk_level === 'high') {
@@ -244,16 +272,23 @@ export class SlackBot {
         const { generateExecutionToken } = await import('../../gateway/approval.js');
         let executionToken = '';
         db.transaction(() => {
-          db.prepare("UPDATE proposals SET status = 'approved', approved_at = ? WHERE id = ?").run(now, row.id);
-          db.prepare("UPDATE approvals SET status = 'approved', responded_at = ? WHERE proposal_id = ? AND status = 'pending'").run(now, row.id);
+          db.prepare("UPDATE proposals SET status = 'approved', approved_at = ? WHERE id = ?").run(
+            now,
+            row.id,
+          );
+          db.prepare(
+            "UPDATE approvals SET status = 'approved', responded_at = ? WHERE proposal_id = ? AND status = 'pending'",
+          ).run(now, row.id);
           executionToken = generateExecutionToken(row.id);
         })();
 
         // Execute in background (fire-and-forget)
-        import('../../workers/proposal-executor.js').then(async ({ executeApprovedProposal }) => {
-          const notify = (text: string) => this.sendToApprovalChat(text);
-          await executeApprovedProposal(row.id, this.llmConfig, notify, executionToken);
-        }).catch(e => log.warn('Proposal execution failed:', e));
+        import('../../workers/proposal-executor.js')
+          .then(async ({ executeApprovedProposal }) => {
+            const notify = (text: string) => this.sendToApprovalChat(text);
+            await executeApprovedProposal(row.id, this.llmConfig, notify, executionToken);
+          })
+          .catch((e) => log.warn('Proposal execution failed:', e));
 
         return `✅ Proposal \`${shortId}\` approved — executing…`;
       }
@@ -264,9 +299,11 @@ export class SlackBot {
         const reason = args.slice(1).join(' ') || 'Rejected by owner via Slack';
         const { getDb } = await import('../../db/index.js');
         const db = getDb();
-        const updated = db.prepare(
-          "UPDATE proposals SET status = 'rejected', rejection_reason = ? WHERE id LIKE ? AND status IN ('proposed','awaiting_approval')"
-        ).run(reason, `%${shortId}`);
+        const updated = db
+          .prepare(
+            "UPDATE proposals SET status = 'rejected', rejection_reason = ? WHERE id LIKE ? AND status IN ('proposed','awaiting_approval')",
+          )
+          .run(reason, `%${shortId}`);
 
         if ((updated as { changes: number }).changes === 0) {
           return `❌ Proposal \`${shortId}\` not found or already resolved.`;
@@ -277,14 +314,27 @@ export class SlackBot {
       case '/tasks': {
         const { getDb } = await import('../../db/index.js');
         const db = getDb();
-        const rows = db.prepare(
-          "SELECT id, title, category, urgency, chat_id, detected_at FROM tasks WHERE status IN ('open','in_progress') ORDER BY detected_at DESC LIMIT 15"
-        ).all() as Array<{ id: string; title: string; category: string; urgency: string; chat_id: string; detected_at: number }>;
+        const rows = db
+          .prepare(
+            "SELECT id, title, category, urgency, chat_id, detected_at FROM tasks WHERE status IN ('open','in_progress') ORDER BY detected_at DESC LIMIT 15",
+          )
+          .all() as Array<{
+          id: string;
+          title: string;
+          category: string;
+          urgency: string;
+          chat_id: string;
+          detected_at: number;
+        }>;
 
         if (!rows.length) return '✅ No open tasks.';
-        return ['*Open tasks:*', ...rows.map(r =>
-          `• \`${r.id.slice(-6)}\` [${r.urgency}] ${(r.title ?? '').slice(0, 80)}\n  _${new Date(r.detected_at).toLocaleDateString()}_ → \`/done ${r.id.slice(-6)}\``
-        )].join('\n');
+        return [
+          '*Open tasks:*',
+          ...rows.map(
+            (r) =>
+              `• \`${r.id.slice(-6)}\` [${r.urgency}] ${(r.title ?? '').slice(0, 80)}\n  _${new Date(r.detected_at).toLocaleDateString()}_ → \`/done ${r.id.slice(-6)}\``,
+          ),
+        ].join('\n');
       }
 
       case '/done': {
@@ -294,9 +344,11 @@ export class SlackBot {
         const now = Date.now();
 
         if (args[0] === 'all') {
-          const result = db.prepare(
-            "UPDATE tasks SET status = 'completed', completed_at = ? WHERE status IN ('open','in_progress')"
-          ).run(now) as { changes: number };
+          const result = db
+            .prepare(
+              "UPDATE tasks SET status = 'completed', completed_at = ? WHERE status IN ('open','in_progress')",
+            )
+            .run(now) as { changes: number };
           return `✅ Marked *${result.changes}* tasks as completed.`;
         }
 
@@ -305,16 +357,24 @@ export class SlackBot {
         const marked: string[] = [];
         const notFound: string[] = [];
         for (const shortId of args) {
-          const row = db.prepare(
-            "SELECT id, title FROM tasks WHERE id LIKE ? AND status IN ('open','in_progress') LIMIT 1"
-          ).get(`%${shortId}`) as { id: string; title: string } | null;
-          if (!row) { notFound.push(shortId); continue; }
-          db.prepare("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?").run(now, row.id);
+          const row = db
+            .prepare(
+              "SELECT id, title FROM tasks WHERE id LIKE ? AND status IN ('open','in_progress') LIMIT 1",
+            )
+            .get(`%${shortId}`) as { id: string; title: string } | null;
+          if (!row) {
+            notFound.push(shortId);
+            continue;
+          }
+          db.prepare("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?").run(
+            now,
+            row.id,
+          );
           marked.push(row.title.slice(0, 60));
         }
 
         const lines: string[] = [];
-        if (marked.length) lines.push(`✅ Completed:\n${marked.map(t => `• ${t}`).join('\n')}`);
+        if (marked.length) lines.push(`✅ Completed:\n${marked.map((t) => `• ${t}`).join('\n')}`);
         if (notFound.length) lines.push(`⚠️ Not found: ${notFound.join(', ')}`);
         return lines.join('\n') || '⚠️ Nothing matched.';
       }
@@ -324,12 +384,25 @@ export class SlackBot {
         const { getDb } = await import('../../db/index.js');
         const db = getDb();
         const rows = query
-          ? db.prepare("SELECT content, importance, partner FROM memories WHERE archived = 0 AND content LIKE ? ORDER BY created_at DESC LIMIT 8").all(`%${query}%`) as Array<{ content: string; importance: number; partner: string }>
-          : db.prepare("SELECT content, importance, partner FROM memories WHERE archived = 0 ORDER BY created_at DESC LIMIT 8").all() as Array<{ content: string; importance: number; partner: string }>;
+          ? (db
+              .prepare(
+                'SELECT content, importance, partner FROM memories WHERE archived = 0 AND content LIKE ? ORDER BY created_at DESC LIMIT 8',
+              )
+              .all(`%${query}%`) as Array<{ content: string; importance: number; partner: string }>)
+          : (db
+              .prepare(
+                'SELECT content, importance, partner FROM memories WHERE archived = 0 ORDER BY created_at DESC LIMIT 8',
+              )
+              .all() as Array<{ content: string; importance: number; partner: string }>);
 
-        if (!rows.length) return query ? `🔍 No memories matching "${query}".` : '🧠 No memories yet.';
-        return [`*Memories${query ? ` matching "${query}"` : ''}:*`,
-          ...rows.map(r => `• [${r.importance}/10] ${r.partner ? `*${r.partner}*: ` : ''}${r.content.slice(0, 150)}`)
+        if (!rows.length)
+          return query ? `🔍 No memories matching "${query}".` : '🧠 No memories yet.';
+        return [
+          `*Memories${query ? ` matching "${query}"` : ''}:*`,
+          ...rows.map(
+            (r) =>
+              `• [${r.importance}/10] ${r.partner ? `*${r.partner}*: ` : ''}${r.content.slice(0, 150)}`,
+          ),
         ].join('\n');
       }
 
@@ -367,7 +440,9 @@ export class SlackBot {
         this.conversations.set(userId, compacted);
         history.messages = compacted.messages;
         history.compactedSummary = compacted.compactedSummary;
-      } catch { /* continue without compaction */ }
+      } catch {
+        /* continue without compaction */
+      }
     }
 
     // Prepend system message (llmCall strips it and passes as system param to the provider)
@@ -381,12 +456,14 @@ export class SlackBot {
 
     let streamTs: string | null = null;
     try {
-      const posted = await this.api('chat.postMessage', {
+      const posted = (await this.api('chat.postMessage', {
         channel: this.approvalChannelId,
         text: '⏳ Thinking…',
-      }) as { ts?: string };
+      })) as { ts?: string };
       streamTs = posted.ts ?? null;
-    } catch { /* fall through to non-streaming */ }
+    } catch {
+      /* fall through to non-streaming */
+    }
 
     let lastUpdate = 0;
     const updateMessage = async (updateText: string, final = false): Promise<void> => {
@@ -404,9 +481,10 @@ export class SlackBot {
     if (!streamTs) {
       // Could not post placeholder — fall back to original buffered call
       const response = await llmCall(this.llmConfig, messagesWithSystem);
-      const reply = typeof response === 'string'
-        ? response
-        : (response as { content?: string })?.content ?? JSON.stringify(response);
+      const reply =
+        typeof response === 'string'
+          ? response
+          : ((response as { content?: string })?.content ?? JSON.stringify(response));
       history.messages.push({ role: 'assistant', content: reply });
       this.conversations.set(userId, history);
       return reply;
@@ -425,9 +503,10 @@ export class SlackBot {
       // Streaming failed — fall back to buffered call
       try {
         const response = await llmCall(this.llmConfig, messagesWithSystem);
-        reply = typeof response === 'string'
-          ? response
-          : (response as { content?: string })?.content ?? JSON.stringify(response);
+        reply =
+          typeof response === 'string'
+            ? response
+            : ((response as { content?: string })?.content ?? JSON.stringify(response));
         await updateMessage(reply, true);
       } catch (e) {
         log.error(`Slack chat fallback failed: ${(e as Error).message}`);
@@ -439,6 +518,12 @@ export class SlackBot {
     history.messages.push({ role: 'assistant', content: reply });
     this.conversations.set(userId, history);
 
+    // LRU eviction — prevent unbounded memory growth
+    while (this.conversations.size > SlackBot.MAX_CONVERSATIONS) {
+      const oldest = this.conversations.keys().next().value;
+      if (oldest !== undefined) this.conversations.delete(oldest);
+    }
+
     // Return empty string — message was already sent via streaming (placeholder + edits)
     return '';
   }
@@ -448,14 +533,16 @@ export class SlackBot {
     try {
       const { getDb } = await import('../../db/index.js');
       const db = getDb();
-      const openTasks = db.prepare(
-        "SELECT id, title FROM tasks WHERE status IN ('open','in_progress') ORDER BY detected_at DESC LIMIT 20"
-      ).all() as Array<{ id: string; title: string }>;
+      const openTasks = db
+        .prepare(
+          "SELECT id, title FROM tasks WHERE status IN ('open','in_progress') ORDER BY detected_at DESC LIMIT 20",
+        )
+        .all() as Array<{ id: string; title: string }>;
 
       if (!openTasks.length) return;
 
       const { llmCall, extractJson } = await import('../../llm/index.js');
-      const taskList = openTasks.map(t => `[${t.id}] ${t.title}`).join('\n');
+      const taskList = openTasks.map((t) => `[${t.id}] ${t.title}`).join('\n');
 
       const response = await llmCall(this.llmConfig, [
         {
@@ -476,8 +563,11 @@ If nothing is completed, return {"completed": [], "reasoning": ""}`,
 
       const now = Date.now();
       for (const taskId of result.completed) {
-        if (!openTasks.some(t => t.id === taskId)) continue;
-        db.prepare("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?").run(now, taskId);
+        if (!openTasks.some((t) => t.id === taskId)) continue;
+        db.prepare("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?").run(
+          now,
+          taskId,
+        );
         log.info(`Task completed by owner via chat: ${taskId} — ${result.reasoning?.slice(0, 80)}`);
       }
     } catch (e) {
@@ -493,10 +583,10 @@ If nothing is completed, return {"completed": [], "reasoning": ""}`,
 
   private async api(method: string, params: Record<string, unknown>): Promise<unknown> {
     const res = await fetch(`https://slack.com/api/${method}`, {
-      method:  'POST',
+      method: 'POST',
       headers: {
-        'Content-Type':  'application/json; charset=utf-8',
-        'Authorization': `Bearer ${this.token}`,
+        'Content-Type': 'application/json; charset=utf-8',
+        Authorization: `Bearer ${this.token}`,
       },
       body: JSON.stringify(params),
     });
@@ -505,7 +595,7 @@ If nothing is completed, return {"completed": [], "reasoning": ""}`,
       throw new Error(`Slack API HTTP ${res.status}: ${method}`);
     }
 
-    const data = await res.json() as SlackApiResponse;
+    const data = (await res.json()) as SlackApiResponse;
     if (!data.ok) {
       throw new Error(`Slack API error (${method}): ${data.error ?? 'unknown'}`);
     }
@@ -517,17 +607,17 @@ If nothing is completed, return {"completed": [], "reasoning": ""}`,
 
 export function createSlackBot(
   options: {
-    botToken:          string;
+    botToken: string;
     approvalChannelId: string;
-    allowedUserIds?:   string[];
+    allowedUserIds?: string[];
   },
   llmConfig: LLMConfig,
   config?: Config,
 ): SlackBot {
   return new SlackBot({
-    token:             options.botToken,
+    token: options.botToken,
     approvalChannelId: options.approvalChannelId,
-    allowedUserIds:    options.allowedUserIds,
+    allowedUserIds: options.allowedUserIds,
     llmConfig,
     config,
   });

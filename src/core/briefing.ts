@@ -13,12 +13,12 @@ const log = createLogger('briefing');
 type Period = 'morning' | 'noon' | 'evening';
 
 interface TaskRow {
-  id:            string;
-  title:         string;
-  partner_name:  string | null;
+  id: string;
+  title: string;
+  partner_name: string | null;
   assigned_team: string | null;
-  is_my_task:    number;
-  detected_at:   number;
+  is_my_task: number;
+  detected_at: number;
 }
 
 export async function sendTaskBriefing(
@@ -27,25 +27,32 @@ export async function sendTaskBriefing(
 ): Promise<void> {
   const db = getDb();
 
-  const tasks = db.prepare(`
+  const tasks = db
+    .prepare(
+      `
     SELECT id, title, partner_name, assigned_team, is_my_task, detected_at
     FROM tasks
     WHERE status = 'open' OR status = 'in_progress'
     ORDER BY is_my_task DESC, detected_at ASC
     LIMIT 30
-  `).all() as TaskRow[];
+  `,
+    )
+    .all() as TaskRow[];
 
-  const icons  = { morning: '☀️', noon: '🌤', evening: '🌙' } as const;
+  const icons = { morning: '☀️', noon: '🌤', evening: '🌙' } as const;
   const labels = { morning: 'Bonjour', noon: 'Mi-journée', evening: 'Récap du soir' } as const;
 
   if (tasks.length === 0) {
-    if (period === 'morning') await sendFn(`${icons[period]} *${labels[period]}* — aucune task en attente. Bonne journée !`);
+    if (period === 'morning')
+      await sendFn(
+        `${icons[period]} *${labels[period]}* — aucune task en attente. Bonne journée !`,
+      );
     log.info(`Briefing ${period}: no open tasks`);
     return;
   }
 
-  const myTasks   = tasks.filter(t => t.is_my_task === 1);
-  const teamTasks = tasks.filter(t => t.is_my_task === 0);
+  const myTasks = tasks.filter((t) => t.is_my_task === 1);
+  const teamTasks = tasks.filter((t) => t.is_my_task === 0);
 
   const lines: string[] = [
     `${icons[period]} *${labels[period]}* — ${tasks.length} task(s) ouverte(s)\n`,
@@ -81,6 +88,12 @@ export async function sendTaskBriefing(
   const msg = lines.join('\n').trim();
   await sendFn(msg);
 
-  log.info(`Briefing ${period} sent — ${tasks.length} tasks (${myTasks.length} mine, ${teamTasks.length} team)`);
-  audit('briefing_sent', period, 'briefing', { total: tasks.length, mine: myTasks.length, team: teamTasks.length });
+  log.info(
+    `Briefing ${period} sent — ${tasks.length} tasks (${myTasks.length} mine, ${teamTasks.length} team)`,
+  );
+  audit('briefing_sent', period, 'briefing', {
+    total: tasks.length,
+    mine: myTasks.length,
+    team: teamTasks.length,
+  });
 }

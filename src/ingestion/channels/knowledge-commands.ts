@@ -9,7 +9,7 @@
  */
 
 import path from 'path';
-import os   from 'os';
+import os from 'os';
 import { readFileSync, writeFileSync } from 'fs';
 import { createLogger } from '../../logger.js';
 import type { Config } from '../../config/schema.js';
@@ -19,7 +19,10 @@ const log = createLogger('knowledge-cmd');
 
 function getCfgPath(): string {
   const dir = process.env.DATA_DIR ?? path.join(os.homedir(), '.argos');
-  return path.join(dir.startsWith('~') ? path.join(os.homedir(), dir.slice(1)) : dir, 'config.json');
+  return path.join(
+    dir.startsWith('~') ? path.join(os.homedir(), dir.slice(1)) : dir,
+    '.config.json',
+  );
 }
 
 function readConfig(): Record<string, unknown> {
@@ -38,16 +41,22 @@ export async function cmdSources(
 ): Promise<void> {
   const sources = config.knowledge.sources;
   if (!sources.length) {
-    await notify('📚 No knowledge sources configured.\n\nAdd one:\n`/add_source <url>`\n`/add_source github owner/repo`');
+    await notify(
+      '📚 No knowledge sources configured.\n\nAdd one:\n`/add_source <url>`\n`/add_source github owner/repo`',
+    );
     return;
   }
 
   const lines = sources.map((s, i) => {
     switch (s.type) {
-      case 'url':    return `${i + 1}. 🔗 *${s.name}*\n   ${s.url}`;
-      case 'github': return `${i + 1}. 🐙 *${s.name ?? `${s.owner}/${s.repo}`}*\n   github:${s.owner}/${s.repo}`;
-      case 'notion': return `${i + 1}. 📓 *${s.name}*\n   notion:${s.pageId}`;
-      default:       return `${i + 1}. ${s.type}: ${s.name}`;
+      case 'url':
+        return `${i + 1}. 🔗 *${s.name}*\n   ${s.url}`;
+      case 'github':
+        return `${i + 1}. 🐙 *${s.name ?? `${s.owner}/${s.repo}`}*\n   github:${s.owner}/${s.repo}`;
+      case 'notion':
+        return `${i + 1}. 📓 *${s.name}*\n   notion:${s.pageId}`;
+      default:
+        return `${i + 1}. ${s.type}: ${s.name}`;
     }
   });
 
@@ -64,8 +73,8 @@ export async function cmdAddSource(
   if (!args.length) {
     await notify(
       'Usage:\n' +
-      '`/add_source <url>` — add a URL or raw GitHub file\n' +
-      '`/add_source github <owner/repo> [path1 path2]` — add a GitHub repo',
+        '`/add_source <url>` — add a URL or raw GitHub file\n' +
+        '`/add_source github <owner/repo> [path1 path2]` — add a GitHub repo',
     );
     return;
   }
@@ -76,7 +85,9 @@ export async function cmdAddSource(
     // /add_source file /path/to/file.docx
     const filePath = args.slice(1).join(' ');
     if (!filePath) {
-      await notify('Usage: `/add_source file /path/to/file.docx`\nFormats: txt, md, json, csv, docx, xlsx…');
+      await notify(
+        'Usage: `/add_source file /path/to/file.docx`\nFormats: txt, md, json, csv, docx, xlsx…',
+      );
       return;
     }
     const name = filePath.split('/').pop() ?? filePath;
@@ -104,18 +115,24 @@ export async function cmdAddSource(
     newSource = { type: 'url', name, url, refreshHours: 168 };
   }
 
-  // Persist to config.json
+  // Persist to .config
   const raw = readConfig();
   const knowledge = (raw.knowledge as Record<string, unknown>) ?? {};
   const sources = (knowledge.sources as KnowledgeSource[]) ?? [];
 
   // Deduplicate
-  const key = newSource.type === 'url' ? newSource.url
-    : newSource.type === 'github' ? `${newSource.owner}/${newSource.repo}`
-    : '';
-  const alreadyExists = sources.some(s =>
-    (s.type === 'url' && (s as { url?: string }).url === key) ||
-    (s.type === 'github' && `${(s as { owner: string; repo: string }).owner}/${(s as { owner: string; repo: string }).repo}` === key),
+  const key =
+    newSource.type === 'url'
+      ? newSource.url
+      : newSource.type === 'github'
+        ? `${newSource.owner}/${newSource.repo}`
+        : '';
+  const alreadyExists = sources.some(
+    (s) =>
+      (s.type === 'url' && (s as { url?: string }).url === key) ||
+      (s.type === 'github' &&
+        `${(s as { owner: string; repo: string }).owner}/${(s as { owner: string; repo: string }).repo}` ===
+          key),
   );
   if (alreadyExists) {
     await notify('⚠️ Source already configured.');
@@ -127,15 +144,18 @@ export async function cmdAddSource(
   raw.knowledge = knowledge;
   saveConfig(raw);
 
-  const label = newSource.type === 'url' ? (newSource as { url: string }).url
-    : newSource.type === 'github' ? `github:${(newSource as { owner: string; repo: string }).owner}/${(newSource as { owner: string; repo: string }).repo}`
-    : (newSource as { filePath: string }).filePath;
+  const label =
+    newSource.type === 'url'
+      ? (newSource as { url: string }).url
+      : newSource.type === 'github'
+        ? `github:${(newSource as { owner: string; repo: string }).owner}/${(newSource as { owner: string; repo: string }).repo}`
+        : (newSource as { filePath: string }).filePath;
 
   await notify(`✅ Source added: ${label}\n\n_Indexing…_`);
 
   // Index immediately
   try {
-    const { fetchUrl }    = await import('../../knowledge/connectors/url.js');
+    const { fetchUrl } = await import('../../knowledge/connectors/url.js');
     const { fetchGitHub } = await import('../../knowledge/connectors/github.js');
     const { indexDocument } = await import('../../knowledge/indexer.js');
 
@@ -145,7 +165,7 @@ export async function cmdAddSource(
     } else if (newSource.type === 'github') {
       doc = await fetchGitHub({
         owner: newSource.owner,
-        repo:  newSource.repo,
+        repo: newSource.repo,
         paths: newSource.paths,
         refreshDays: 7,
       });
@@ -159,7 +179,9 @@ export async function cmdAddSource(
     }
   } catch (e) {
     log.warn('Knowledge indexing failed', e);
-    await notify(`⚠️ Source saved, but indexing failed: ${(e as Error).message}\n_Will retry on next refresh._`);
+    await notify(
+      `⚠️ Source saved, but indexing failed: ${(e as Error).message}\n_Will retry on next refresh._`,
+    );
   }
 }
 
@@ -193,9 +215,12 @@ export async function cmdRemoveSource(
   (knowledge.sources as KnowledgeSource[]).splice(idx, 1);
   saveConfig(raw);
 
-  const label = removed.type === 'url' ? removed.url
-    : removed.type === 'github' ? `github:${removed.owner}/${removed.repo}`
-    : removed.name;
+  const label =
+    removed.type === 'url'
+      ? removed.url
+      : removed.type === 'github'
+        ? `github:${removed.owner}/${removed.repo}`
+        : removed.name;
 
   await notify(`🗑️ Source removed: ${label}`);
 }

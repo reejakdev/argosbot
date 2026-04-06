@@ -34,13 +34,13 @@ const log = createLogger('plugin-registry');
 
 export interface PluginContext {
   /** Full Argos config */
-  config:          Config;
+  config: Config;
   /** Primary LLM config (cloud) */
-  llmConfig:       LLMConfig;
+  llmConfig: LLMConfig;
   /** Privacy LLM config (local) — null if not configured */
-  privacyConfig:   LLMConfig | null;
+  privacyConfig: LLMConfig | null;
   /** Send a notification to the owner (Saved Messages / approval chat) */
-  notify:          (text: string) => Promise<void>;
+  notify: (text: string) => Promise<void>;
 }
 
 // ─── Plugin interface ─────────────────────────────────────────────────────────
@@ -72,7 +72,9 @@ class PluginRegistry {
 
   register(plugin: ArgosPlugin): void {
     this.plugins.push(plugin);
-    log.info(`Plugin registered: ${plugin.name}${plugin.description ? ` — ${plugin.description}` : ''}`);
+    log.info(
+      `Plugin registered: ${plugin.name}${plugin.description ? ` — ${plugin.description}` : ''}`,
+    );
   }
 
   async emitBoot(ctx: PluginContext): Promise<void> {
@@ -92,15 +94,16 @@ class PluginRegistry {
    * Returns immediately; errors are logged but never propagate to the core.
    */
   emitMessage(msg: RawMessage, ctx: PluginContext): void {
-    const active = this.plugins.filter(p => p.onMessage);
+    const active = this.plugins.filter((p) => p.onMessage);
     if (active.length === 0) return;
 
-    Promise.allSettled(
-      active.map(p => p.onMessage!(msg, ctx)),
-    ).then(results => {
+    Promise.allSettled(active.map((p) => p.onMessage!(msg, ctx))).then((results) => {
       for (let i = 0; i < results.length; i++) {
         if (results[i].status === 'rejected') {
-          log.warn(`${active[i].name}: onMessage error`, (results[i] as PromiseRejectedResult).reason);
+          log.warn(
+            `${active[i].name}: onMessage error`,
+            (results[i] as PromiseRejectedResult).reason,
+          );
         }
       }
     });
@@ -119,7 +122,7 @@ class PluginRegistry {
   }
 
   list(): Array<{ name: string; description?: string }> {
-    return this.plugins.map(p => ({ name: p.name, description: p.description }));
+    return this.plugins.map((p) => ({ name: p.name, description: p.description }));
   }
 }
 

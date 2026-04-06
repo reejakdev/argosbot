@@ -35,7 +35,7 @@
  *    21. Does not touch proposals not yet expired
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -48,7 +48,7 @@ import {
   handleCallback,
   expireStaleApprovals,
 } from '../gateway/approval.js';
-import type { Proposal, ProposedAction } from '../types.js';
+import type { ProposedAction } from '../types.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ function mockSend(_chatId: string, text: string): Promise<{ message_id: number }
 
 function makeAction(risk: 'low' | 'medium' | 'high'): ProposedAction {
   return {
-    type: 'draft_reply',
+    type: 'reply',
     description: `${risk} risk action`,
     risk,
     payload: {},
@@ -83,10 +83,12 @@ function insertProposal(opts: {
 }): void {
   const db = getDb();
   const actions: ProposedAction[] = [makeAction(opts.risk)];
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO proposals (id, context_summary, plan, actions, status, created_at, expires_at, execution_count)
     VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-  `).run(
+  `,
+  ).run(
     opts.id,
     'Test context',
     'Test plan',
@@ -155,8 +157,12 @@ describe('generateExecutionToken', () => {
     const token = generateExecutionToken(proposalId);
     expect(token).toHaveLength(64); // 32 bytes = 64 hex chars
     const db = getDb();
-    const row = db.prepare('SELECT * FROM execution_tokens WHERE proposal_id = ?').get(proposalId) as {
-      token: string; expires_at: number; used: number;
+    const row = db
+      .prepare('SELECT * FROM execution_tokens WHERE proposal_id = ?')
+      .get(proposalId) as {
+      token: string;
+      expires_at: number;
+      used: number;
     };
     expect(row).toBeDefined();
     expect(row.token).toBe(token);
@@ -181,7 +187,9 @@ describe('validateAndConsumeToken', () => {
     const token = generateExecutionToken(proposalId);
     expect(validateAndConsumeToken(proposalId, token)).toBe(true);
     const db = getDb();
-    const row = db.prepare('SELECT used FROM execution_tokens WHERE proposal_id = ?').get(proposalId) as { used: number };
+    const row = db
+      .prepare('SELECT used FROM execution_tokens WHERE proposal_id = ?')
+      .get(proposalId) as { used: number };
     expect(row.used).toBe(1);
   });
 
@@ -196,9 +204,11 @@ describe('validateAndConsumeToken', () => {
     const proposalId = uid();
     generateExecutionToken(proposalId);
     // Manually expire the token
-    getDb().prepare('UPDATE execution_tokens SET expires_at = ? WHERE proposal_id = ?')
+    getDb()
+      .prepare('UPDATE execution_tokens SET expires_at = ? WHERE proposal_id = ?')
       .run(Date.now() - 1000, proposalId);
-    const token = getDb().prepare('SELECT token FROM execution_tokens WHERE proposal_id = ?')
+    const token = getDb()
+      .prepare('SELECT token FROM execution_tokens WHERE proposal_id = ?')
       .get(proposalId) as { token: string };
     expect(validateAndConsumeToken(proposalId, token.token)).toBe(false);
   });
@@ -230,16 +240,15 @@ describe('handleCallback', () => {
     const id = uid();
     insertProposal({ id, risk: 'low' });
 
-    let executionCalled = false;
-    const result = await handleCallback(
-      `approve:${id}`,
-      'cb-1',
-      async () => { executionCalled = true; },
-    );
+    const result = await handleCallback(`approve:${id}`, 'cb-1', async () => {
+      /* execution callback */
+    });
 
     expect(result).toContain('Approved');
     const db = getDb();
-    const row = db.prepare('SELECT status FROM proposals WHERE id = ?').get(id) as { status: string };
+    const row = db.prepare('SELECT status FROM proposals WHERE id = ?').get(id) as {
+      status: string;
+    };
     expect(row.status).toBe('approved');
     // Token must exist
     const tokenRow = db.prepare('SELECT used FROM execution_tokens WHERE proposal_id = ?').get(id);
@@ -255,7 +264,9 @@ describe('handleCallback', () => {
 
     expect(result).toContain('YubiKey');
     const db = getDb();
-    const row = db.prepare('SELECT status FROM proposals WHERE id = ?').get(id) as { status: string };
+    const row = db.prepare('SELECT status FROM proposals WHERE id = ?').get(id) as {
+      status: string;
+    };
     expect(row.status).toBe('awaiting_approval'); // unchanged
   });
 
@@ -268,7 +279,9 @@ describe('handleCallback', () => {
 
     expect(result).toContain('YubiKey');
     const db = getDb();
-    const row = db.prepare('SELECT status FROM proposals WHERE id = ?').get(id) as { status: string };
+    const row = db.prepare('SELECT status FROM proposals WHERE id = ?').get(id) as {
+      status: string;
+    };
     expect(row.status).toBe('awaiting_approval'); // still pending
     initApprovalGateway(mockSend, 'test-chat-id', false); // restore
   });
@@ -281,7 +294,9 @@ describe('handleCallback', () => {
 
     expect(result).toContain('Rejected');
     const db = getDb();
-    const row = db.prepare('SELECT status FROM proposals WHERE id = ?').get(id) as { status: string };
+    const row = db.prepare('SELECT status FROM proposals WHERE id = ?').get(id) as {
+      status: string;
+    };
     expect(row.status).toBe('rejected');
   });
 
@@ -293,7 +308,9 @@ describe('handleCallback', () => {
     await handleCallback(`snooze:${id}`, 'cb-5', async () => {});
 
     const db = getDb();
-    const row = db.prepare('SELECT expires_at FROM proposals WHERE id = ?').get(id) as { expires_at: number };
+    const row = db.prepare('SELECT expires_at FROM proposals WHERE id = ?').get(id) as {
+      expires_at: number;
+    };
     expect(row.expires_at).toBeGreaterThan(originalExpiry + 50 * 60 * 1000); // at least 50min added
   });
 
@@ -305,7 +322,9 @@ describe('handleCallback', () => {
 
     expect(result).toContain('expired');
     const db = getDb();
-    const row = db.prepare('SELECT status FROM proposals WHERE id = ?').get(id) as { status: string };
+    const row = db.prepare('SELECT status FROM proposals WHERE id = ?').get(id) as {
+      status: string;
+    };
     expect(row.status).toBe('expired');
   });
 
@@ -330,13 +349,17 @@ describe('expireStaleApprovals', () => {
   it('marks past-expiry awaiting proposals as expired', () => {
     const id = uid();
     insertProposal({ id, risk: 'low', expiresAt: Date.now() - 1000 });
-    getDb().prepare(
-      "INSERT INTO approvals (id, proposal_id, status, created_at, expires_at) VALUES (?, ?, 'pending', ?, ?)"
-    ).run(uid(), id, Date.now(), Date.now() - 1000);
+    getDb()
+      .prepare(
+        "INSERT INTO approvals (id, proposal_id, status, created_at, expires_at) VALUES (?, ?, 'pending', ?, ?)",
+      )
+      .run(uid(), id, Date.now(), Date.now() - 1000);
 
     expireStaleApprovals();
 
-    const row = getDb().prepare('SELECT status FROM proposals WHERE id = ?').get(id) as { status: string };
+    const row = getDb().prepare('SELECT status FROM proposals WHERE id = ?').get(id) as {
+      status: string;
+    };
     expect(row.status).toBe('expired');
   });
 
@@ -346,7 +369,9 @@ describe('expireStaleApprovals', () => {
 
     expireStaleApprovals();
 
-    const row = getDb().prepare('SELECT status FROM proposals WHERE id = ?').get(id) as { status: string };
+    const row = getDb().prepare('SELECT status FROM proposals WHERE id = ?').get(id) as {
+      status: string;
+    };
     expect(row.status).toBe('awaiting_approval');
   });
 });

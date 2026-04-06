@@ -12,14 +12,18 @@ import path from 'path';
 import os from 'os';
 import { spawn } from 'child_process';
 import { createLogger } from '../logger.js';
-import { getDb } from '../db/index.js';
+import { getDb, audit } from '../db/index.js';
 import { validateAndConsumeToken } from '../gateway/approval.js';
 import type { LLMConfig } from '../llm/index.js';
 
 const log = createLogger('executor');
 
 /** Retry an async worker action on transient failures (network, 429, 5xx). */
-async function withWorkerRetry<T>(label: string, fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
+async function withWorkerRetry<T>(
+  label: string,
+  fn: () => Promise<T>,
+  maxAttempts = 3,
+): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -27,11 +31,15 @@ async function withWorkerRetry<T>(label: string, fn: () => Promise<T>, maxAttemp
     } catch (e) {
       lastError = e;
       const msg = e instanceof Error ? e.message : String(e);
-      const retryable = /\b(5\d\d|429|rate.limit|timeout|ECONNREFUSED|ECONNRESET|ETIMEDOUT)/i.test(msg);
+      const retryable = /\b(5\d\d|429|rate.limit|timeout|ECONNREFUSED|ECONNRESET|ETIMEDOUT)/i.test(
+        msg,
+      );
       if (!retryable || attempt === maxAttempts - 1) throw e;
-      const delay = 1000 * (2 ** attempt); // 1s → 2s → 4s
-      log.warn(`Worker "${label}" failed (attempt ${attempt + 1}/${maxAttempts}), retrying in ${delay}ms — ${msg}`);
-      await new Promise(r => setTimeout(r, delay));
+      const delay = 1000 * 2 ** attempt; // 1s → 2s → 4s
+      log.warn(
+        `Worker "${label}" failed (attempt ${attempt + 1}/${maxAttempts}), retrying in ${delay}ms — ${msg}`,
+      );
+      await new Promise((r) => setTimeout(r, delay));
     }
   }
   throw lastError;
@@ -62,27 +70,57 @@ export async function executeApprovedProposal(
   if (!validateAndConsumeToken(proposalId, executionToken)) {
     log.error(`SECURITY: Execution of proposal ${proposalId} blocked — invalid or missing token`);
     await notifyUser(
-      `🚫 *Execution blocked* — proposal \`${proposalId.slice(-8)}\` rejected by security gate.\nThe approval token was invalid, expired, or already used.`
+      `🚫 *Execution blocked* — proposal \`${proposalId.slice(-8)}\` rejected by security gate.\nThe approval token was invalid, expired, or already used.`,
     ).catch(() => {});
     return { success: false, results: [], errors: ['Blocked: invalid execution token'] };
   }
   // ──────────────────────────────────────────────────────────────────────────
 
   const db = getDb();
-  const proposal = db.prepare(
-    "SELECT id, plan, actions, context_summary, execution_count FROM proposals WHERE id = ?"
-  ).get(proposalId) as { id: string; plan: string; actions: string; context_summary: string; execution_count: number } | undefined;
+  const proposal = db
+    .prepare(
+      'SELECT id, plan, actions, context_summary, execution_count, expires_at FROM proposals WHERE id = ?',
+    )
+    .get(proposalId) as
+    | {
+        id: string;
+        plan: string;
+        actions: string;
+        context_summary: string;
+        execution_count: number;
+        expires_at: number | null;
+      }
+    | undefined;
 
   if (!proposal) {
     return { success: false, results: [], errors: ['Proposal not found'] };
   }
 
+  // Check expiry — don't execute stale proposals
+  if (proposal.expires_at && proposal.expires_at < Date.now()) {
+    log.warn(
+      `Proposal ${proposalId} expired at ${new Date(proposal.expires_at).toISOString()} — blocking execution`,
+    );
+    await notifyUser(
+      `⏰ *Execution blocked* — proposal \`${proposalId.slice(-8)}\` has expired.`,
+    ).catch(() => {});
+    return { success: false, results: [], errors: ['Proposal expired'] };
+  }
+
   // Idempotency guard — increment atomically; block if already executed
   if (proposal.execution_count > 0) {
-    log.warn(`Idempotency: proposal ${proposalId} already executed ${proposal.execution_count} time(s) — blocking duplicate`);
-    return { success: false, results: [], errors: [`Already executed (count: ${proposal.execution_count})`] };
+    log.warn(
+      `Idempotency: proposal ${proposalId} already executed ${proposal.execution_count} time(s) — blocking duplicate`,
+    );
+    return {
+      success: false,
+      results: [],
+      errors: [`Already executed (count: ${proposal.execution_count})`],
+    };
   }
-  db.prepare("UPDATE proposals SET execution_count = execution_count + 1 WHERE id = ?").run(proposalId);
+  db.prepare('UPDATE proposals SET execution_count = execution_count + 1 WHERE id = ?').run(
+    proposalId,
+  );
 
   const actions = JSON.parse(proposal.actions) as Array<Record<string, unknown>>;
   const results: string[] = [];
@@ -114,11 +152,14 @@ export async function executeApprovedProposal(
         }
 
         case 'run_script': {
-          const script     = (input.script  ?? details) as string;
-          const lang       = ((input.lang   ?? 'node') as string).toLowerCase();
+          const script = (input.script ?? details) as string;
+          const lang = ((input.lang ?? 'node') as string).toLowerCase();
           const timeoutSec = (input.timeout ?? 300) as number;
 
-          if (!script?.trim()) { errors.push('run_script: no script provided'); break; }
+          if (!script?.trim()) {
+            errors.push('run_script: no script provided');
+            break;
+          }
 
           log.info(`run_script: executing ${lang} script (timeout ${timeoutSec}s)`);
           const { output, success } = await runScriptDirect(script, lang, timeoutSec, notifyUser);
@@ -130,7 +171,9 @@ export async function executeApprovedProposal(
               JSON.stringify({ script, lang, timeout: timeoutSec, ts: Date.now() }),
               'utf8',
             );
-          } catch { /* non-blocking */ }
+          } catch {
+            /* non-blocking */
+          }
 
           if (success) {
             results.push(`✅ Script completed\n\`\`\`\n${output.trim().slice(0, 3000)}\n\`\`\``);
@@ -143,10 +186,12 @@ export async function executeApprovedProposal(
         case 'Create Notion database':
         case 'Create Notion page':
         case 'notion': {
-          const result = await withWorkerRetry(tool, () => executeWithAgent(
-            `Execute this Notion action:\n${details}\n\nUse the available tools to complete this task.`,
-            llmConfig,
-          ));
+          const result = await withWorkerRetry(tool, () =>
+            executeWithAgent(
+              `Execute this Notion action:\n${details}\n\nUse the available tools to complete this task.`,
+              llmConfig,
+            ),
+          );
           results.push(`✅ Notion: ${result}`);
           break;
         }
@@ -156,12 +201,14 @@ export async function executeApprovedProposal(
           const { sendDirectReply } = await import('./index.js');
           const { loadConfig } = await import('../config/index.js');
           const cfg = loadConfig();
-          const r = await withWorkerRetry(tool, () => sendDirectReply(
-            String(input.to ?? ''),
-            String(input.chatId ?? input.to ?? ''),
-            String(input.content ?? ''),
-            cfg,
-          ));
+          const r = await withWorkerRetry(tool, () =>
+            sendDirectReply(
+              String(input.to ?? ''),
+              String(input.chatId ?? input.to ?? ''),
+              String(input.content ?? ''),
+              cfg,
+            ),
+          );
           results.push(r.success ? `✅ ${r.output}` : `❌ ${r.output}`);
           if (r.dryRun) log.warn('draft_reply: dryRun=true — MTProto not ready or readOnly');
           break;
@@ -169,10 +216,12 @@ export async function executeApprovedProposal(
 
         default: {
           // Generic action — use LLM agent to figure out how to execute
-          const result = await withWorkerRetry(tool, () => executeWithAgent(
-            `Execute this action: ${tool}\nDetails: ${details}\n\nContext: ${proposal.context_summary}`,
-            llmConfig,
-          ));
+          const result = await withWorkerRetry(tool, () =>
+            executeWithAgent(
+              `Execute this action: ${tool}\nDetails: ${details}\n\nContext: ${proposal.context_summary}`,
+              llmConfig,
+            ),
+          );
           results.push(`✅ ${tool}: ${result}`);
           break;
         }
@@ -185,17 +234,23 @@ export async function executeApprovedProposal(
   }
 
   // Update proposal status
-  const finalStatus = errors.length === 0 ? 'executed' : 'partial';
-  db.prepare("UPDATE proposals SET status = ?, executed_at = ? WHERE id = ?")
-    .run(finalStatus, Date.now(), proposalId);
+  const allFailed = results.length === 0 && errors.length > 0;
+  const finalStatus = errors.length === 0 ? 'executed' : allFailed ? 'failed' : 'partial';
+  db.prepare('UPDATE proposals SET status = ?, executed_at = ? WHERE id = ?').run(
+    finalStatus,
+    Date.now(),
+    proposalId,
+  );
+
+  if (finalStatus === 'failed') {
+    audit('proposal_execution_failed', proposalId, 'proposal', {
+      errors,
+      actionCount: actions.length,
+    });
+  }
 
   // Notify user
-  const summary = [
-    `📋 Proposal executed: ${proposal.plan}`,
-    '',
-    ...results,
-    ...errors,
-  ].join('\n');
+  const summary = [`📋 Proposal executed: ${proposal.plan}`, '', ...results, ...errors].join('\n');
 
   await notifyUser(summary).catch(() => {});
 
@@ -212,12 +267,12 @@ export async function runScriptDirect(
   timeoutSec: number,
   notifyUser: (text: string) => Promise<void>,
 ): Promise<{ output: string; success: boolean }> {
-  const ext     = lang === 'bash' || lang === 'sh' ? '.sh' : '.mjs';
+  const ext = lang === 'bash' || lang === 'sh' ? '.sh' : '.mjs';
   const tmpFile = path.join(os.tmpdir(), `argos-script-${Date.now()}${ext}`);
   fs.writeFileSync(tmpFile, script, { mode: 0o700 });
 
   let outputBuffer = '';
-  let lastFlushMs  = 0;
+  let lastFlushMs = 0;
   const FLUSH_INTERVAL = 3000; // max 1 Telegram message every 3s
 
   const flushOutput = async (force = false) => {
@@ -233,11 +288,24 @@ export async function runScriptDirect(
   try {
     const cmd = lang === 'bash' || lang === 'sh' ? 'bash' : 'node';
     await new Promise<void>((resolve, reject) => {
-      const proc = spawn(cmd, [tmpFile], { env: process.env, timeout: timeoutSec * 1000 });
-      const flushTimer = setInterval(() => { void flushOutput(); }, FLUSH_INTERVAL);
+      // Ensure full PATH — launchd has a minimal PATH that misses common tools (lsof, brew, etc.)
+      const env = { ...process.env };
+      const extraPaths = ['/usr/sbin', '/usr/local/bin', '/opt/homebrew/bin', '/opt/homebrew/sbin'];
+      const currentPath = env.PATH ?? '';
+      const missingPaths = extraPaths.filter((p) => !currentPath.includes(p));
+      if (missingPaths.length) env.PATH = [...missingPaths, currentPath].join(':');
 
-      proc.stdout.on('data', (d: Buffer) => { outputBuffer += d.toString(); });
-      proc.stderr.on('data', (d: Buffer) => { outputBuffer += d.toString(); });
+      const proc = spawn(cmd, [tmpFile], { env, timeout: timeoutSec * 1000 });
+      const flushTimer = setInterval(() => {
+        void flushOutput();
+      }, FLUSH_INTERVAL);
+
+      proc.stdout.on('data', (d: Buffer) => {
+        outputBuffer += d.toString();
+      });
+      proc.stderr.on('data', (d: Buffer) => {
+        outputBuffer += d.toString();
+      });
 
       proc.on('close', (code) => {
         clearInterval(flushTimer);
@@ -245,13 +313,20 @@ export async function runScriptDirect(
         else reject(new Error(`Script exited with code ${code}`));
       });
 
-      proc.on('error', (err) => { clearInterval(flushTimer); reject(err); });
+      proc.on('error', (err) => {
+        clearInterval(flushTimer);
+        reject(err);
+      });
     });
     success = true;
   } catch (e) {
     outputBuffer += `\nError: ${e instanceof Error ? e.message : String(e)}`;
   } finally {
-    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {
+      /* ignore */
+    }
   }
 
   await flushOutput(true);
@@ -268,7 +343,7 @@ async function executeWithAgent(prompt: string, llmConfig: LLMConfig): Promise<s
   const { getMcpTools, executeMcpTool } = await import('../mcp/client.js');
 
   // Exclude mcp_notion-mcp_* tools — we use notion_* builtin tools instead (full SDK coverage)
-  const mcpTools = getMcpTools().filter(t => !t.name.startsWith('mcp_notion-mcp_'));
+  const mcpTools = getMcpTools().filter((t) => !t.name.startsWith('mcp_notion-mcp_'));
   const tools = [...BUILTIN_TOOLS, ...mcpTools];
 
   // Executor: approved actions execute DIRECTLY — no more proposals!
@@ -287,16 +362,36 @@ async function executeWithAgent(prompt: string, llmConfig: LLMConfig): Promise<s
 
     // create_proposal / run_script — BLOCK in executor (prevents infinite loops)
     if (name === 'create_proposal' || name === 'run_script') {
-      return { output: 'Already executing an approved proposal — no need to create another one. Use the available tools directly.', error: true };
+      return {
+        output:
+          'Already executing an approved proposal — no need to create another one. Use the available tools directly.',
+        error: true,
+      };
     }
 
     // Block mcp_notion-mcp_* — use notion_* builtin tools instead
     if (name.startsWith('mcp_notion-mcp_')) {
-      return { output: 'Use notion_create / notion_update / notion_query / notion_search instead of mcp_notion-mcp_* tools.', error: true };
+      return {
+        output:
+          'Use notion_create / notion_update / notion_query / notion_search instead of mcp_notion-mcp_* tools.',
+        error: true,
+      };
     }
 
-    // Other MCP tools — execute directly
+    // Other MCP tools — check block policy, then execute directly (already in approved context)
     if (name.startsWith('mcp_')) {
+      const toolParts = name.match(/^mcp_([^_]+?)_(.+)$/);
+      if (toolParts) {
+        const { getToolPolicy } = await import('../mcp/client.js');
+        const { getConfig } = await import('../config/index.js');
+        const cfg = getConfig() as unknown as {
+          mcpServers?: import('../config/schema.js').McpServer[];
+        };
+        const policy = getToolPolicy(toolParts[1], toolParts[2], cfg.mcpServers ?? []);
+        if (policy === 'block') {
+          return { output: `Tool "${toolParts[2]}" is blocked by policy.`, error: true };
+        }
+      }
       return executeMcpTool(name, input);
     }
 
@@ -305,7 +400,9 @@ async function executeWithAgent(prompt: string, llmConfig: LLMConfig): Promise<s
   };
 
   const messages = [
-    { role: 'system' as const, content: `You are an execution agent. Complete the requested action using available tools.
+    {
+      role: 'system' as const,
+      content: `You are an execution agent. Complete the requested action using available tools.
 
 ## Tool priority for Notion
 ALWAYS use notion_* tools (notion_create, notion_update, notion_get, notion_get_content, notion_append, notion_query, notion_search, notion_create_db, notion_comment).
@@ -323,11 +420,19 @@ Group ALL related operations into the fewest tool calls possible. For example: i
 5. End your response with exactly one of:
    - "RESULT: SUCCESS — <what was done and verified>" if fully complete
    - "RESULT: PARTIAL — <what worked> / <what failed>" if partial
-   - "RESULT: FAILED — <exact reason>" if nothing worked` },
+   - "RESULT: FAILED — <exact reason>" if nothing worked`,
+    },
     { role: 'user' as const, content: prompt },
   ];
 
-  const response = await runToolLoop(llmConfig, messages[0].content, messages, tools, executor, callAnthropicBearerRaw);
+  const response = await runToolLoop(
+    llmConfig,
+    messages[0].content,
+    messages,
+    tools,
+    executor,
+    callAnthropicBearerRaw,
+  );
   const output = response.content || '';
 
   // Parse result tag — if agent reports PARTIAL or FAILED, surface as error

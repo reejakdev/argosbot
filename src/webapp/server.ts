@@ -27,6 +27,7 @@ import express, { type Request } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
 import https from 'https';
+import os from 'os';
 import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -77,6 +78,10 @@ export function broadcastEvent(event: string, data?: unknown): void {
 function buildApi(
   sendToApprovalChat: (text: string) => Promise<void>,
   getConfig: () => { owner: { name: string; teams: string[] }; readOnly: boolean },
+  onProposalExecuted?: (
+    result: import('../workers/proposal-executor.js').ExecutionResult,
+    proposalId: string,
+  ) => void,
 ) {
   const router = express.Router();
 
@@ -84,7 +89,8 @@ function buildApi(
 
   router.post('/auth/totp/setup', async (_req, res) => {
     try {
-      const { ensureTotpTable, generateTotpSecret, generateQRCode, storeTotpSecret } = await import('./totp.js');
+      const { ensureTotpTable, generateTotpSecret, generateQRCode, storeTotpSecret } =
+        await import('./totp.js');
       ensureTotpTable();
       const { secret, uri } = generateTotpSecret();
       const qrDataUrl = await generateQRCode(uri);
@@ -106,7 +112,12 @@ function buildApi(
         return;
       }
       const token = createSession('totp');
-      res.cookie('argos_session', token, { httpOnly: true, sameSite: 'lax', secure: process.env.WEBAUTHN_ORIGIN?.startsWith('https') ?? false, maxAge: 13 * 60 * 60 * 1000 });
+      res.cookie('argos_session', token, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.WEBAUTHN_ORIGIN?.startsWith('https') ?? false,
+        maxAge: 13 * 60 * 60 * 1000,
+      });
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ success: false, message: String(e) });
@@ -124,7 +135,12 @@ function buildApi(
         return;
       }
       const token = createSession('totp');
-      res.cookie('argos_session', token, { httpOnly: true, sameSite: 'lax', secure: process.env.WEBAUTHN_ORIGIN?.startsWith('https') ?? false, maxAge: 13 * 60 * 60 * 1000 });
+      res.cookie('argos_session', token, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.WEBAUTHN_ORIGIN?.startsWith('https') ?? false,
+        maxAge: 13 * 60 * 60 * 1000,
+      });
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ success: false, message: String(e) });
@@ -140,8 +156,14 @@ function buildApi(
       const { ensureTotpTable, hasTotpConfigured } = await import('./totp.js');
       ensureTotpTable();
       totpConfigured = hasTotpConfigured();
-    } catch { /* totp module not loaded yet */ }
-    res.json({ registered: hasRegisteredKeys() || totpConfigured, keys: listCredentials(), totp: totpConfigured });
+    } catch {
+      /* totp module not loaded yet */
+    }
+    res.json({
+      registered: hasRegisteredKeys() || totpConfigured,
+      keys: listCredentials(),
+      totp: totpConfigured,
+    });
   });
 
   // Registration: step 1 — generate challenge
@@ -158,9 +180,15 @@ function buildApi(
   // Registration: step 2 — verify response and save credential
   router.post('/auth/register/complete', async (req, res) => {
     const { challengeId, response, deviceName } = req.body as {
-      challengeId: string; response: unknown; deviceName: string;
+      challengeId: string;
+      response: unknown;
+      deviceName: string;
     };
-    const result = await completeRegistration(challengeId, response as Parameters<typeof completeRegistration>[1], deviceName);
+    const result = await completeRegistration(
+      challengeId,
+      response as Parameters<typeof completeRegistration>[1],
+      deviceName,
+    );
     if (result.success) {
       res.json(result);
     } else {
@@ -181,11 +209,15 @@ function buildApi(
   // Authentication: step 2 — verify and issue session
   router.post('/auth/login/complete', async (req, res) => {
     const { challengeId, response } = req.body as { challengeId: string; response: unknown };
-    const result = await completeAuthentication(challengeId, response as Parameters<typeof completeAuthentication>[1]);
+    const result = await completeAuthentication(
+      challengeId,
+      response as Parameters<typeof completeAuthentication>[1],
+    );
     if (result.success && result.sessionToken) {
       // Set httpOnly cookie — 30min, SameSite=Strict
-      res.setHeader('Set-Cookie',
-        `argos_session=${result.sessionToken}; HttpOnly; SameSite=Strict; Max-Age=1800; Path=/`
+      res.setHeader(
+        'Set-Cookie',
+        `argos_session=${result.sessionToken}; HttpOnly; SameSite=Strict; Max-Age=1800; Path=/`,
       );
       res.json({ success: true, message: result.message });
     } else {
@@ -214,14 +246,32 @@ function buildApi(
       teams: config.owner.teams,
       readOnly: config.readOnly,
       tasks: {
-        open: (db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE status='open'`).get() as { c: number }).c,
-        mine: (db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE status='open' AND is_my_task=1`).get() as { c: number }).c,
+        open: (
+          db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE status='open'`).get() as { c: number }
+        ).c,
+        mine: (
+          db
+            .prepare(`SELECT COUNT(*) as c FROM tasks WHERE status='open' AND is_my_task=1`)
+            .get() as { c: number }
+        ).c,
       },
       proposals: {
-        pending: (db.prepare(`SELECT COUNT(*) as c FROM proposals WHERE status IN ('proposed', 'awaiting_approval')`).get() as { c: number }).c,
+        pending: (
+          db
+            .prepare(
+              `SELECT COUNT(*) as c FROM proposals WHERE status IN ('proposed', 'awaiting_approval')`,
+            )
+            .get() as { c: number }
+        ).c,
       },
       memories: {
-        active: (db.prepare(`SELECT COUNT(*) as c FROM memories WHERE expires_at IS NULL OR expires_at > ?`).get(Date.now()) as { c: number }).c,
+        active: (
+          db
+            .prepare(
+              `SELECT COUNT(*) as c FROM memories WHERE expires_at IS NULL OR expires_at > ?`,
+            )
+            .get(Date.now()) as { c: number }
+        ).c,
       },
     });
   });
@@ -229,30 +279,49 @@ function buildApi(
   // Proposals
   router.get('/proposals', (_req, res) => {
     const db = getDb();
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT p.id, p.context_summary, p.plan, p.actions, p.draft_reply,
              p.status, p.created_at, p.expires_at
       FROM proposals p
       WHERE p.status IN ('proposed', 'awaiting_approval')
       ORDER BY p.created_at DESC
       LIMIT 20
-    `).all() as Array<Record<string, unknown>>;
+    `,
+      )
+      .all() as Array<Record<string, unknown>>;
 
-    res.json(rows.map(r => {
-      const rawActions = JSON.parse(r.actions as string) as Array<Record<string, unknown>>;
-      // Normalize action format for frontend
-      const actions = rawActions.map(a => ({
-        description: a.description ?? a.action ?? a.tool ?? 'Unknown action',
-        details: a.details ?? JSON.stringify(a.input ?? {}).slice(0, 200),
-        risk: a.risk ?? 'low',
-        tool: a.tool ?? a.action,
-      }));
-      return {
-        ...r,
-        actions,
-        expiresInMin: Math.max(0, Math.round(((r.expires_at as number) - Date.now()) / 60_000)),
-      };
-    }));
+    res.json(
+      rows.map((r) => {
+        const rawActions = JSON.parse(r.actions as string) as Array<Record<string, unknown>>;
+        // Normalize action format for frontend
+        const actions = rawActions.map((a) => {
+          // For run_script: expose full script in details instead of the short label
+          let details = a.details as string | undefined;
+          if ((a.tool === 'run_script' || a.action === 'run_script') && a.input) {
+            const inp = a.input as { script?: string; lang?: string; timeout?: number };
+            if (inp.script) details = inp.script;
+          }
+          details = details ?? JSON.stringify(a.input ?? {}).slice(0, 500);
+          return {
+            description: a.description ?? a.action ?? a.tool ?? 'Unknown action',
+            details,
+            risk: a.risk ?? 'low',
+            tool: a.tool ?? a.action,
+            // Pass lang for syntax highlighting
+            ...(a.tool === 'run_script' && a.input
+              ? { lang: (a.input as { lang?: string }).lang ?? 'bash' }
+              : {}),
+          };
+        });
+        return {
+          ...r,
+          actions,
+          expiresInMin: Math.max(0, Math.round(((r.expires_at as number) - Date.now()) / 60_000)),
+        };
+      }),
+    );
   });
 
   // Elevated auth: begin (for high-risk proposals)
@@ -273,8 +342,9 @@ function buildApi(
       response as Parameters<typeof completeElevatedAuth>[1],
     );
     if (result.success && result.sessionToken) {
-      res.setHeader('Set-Cookie',
-        `argos_session=${result.sessionToken}; HttpOnly; SameSite=Strict; Max-Age=600; Path=/`
+      res.setHeader(
+        'Set-Cookie',
+        `argos_session=${result.sessionToken}; HttpOnly; SameSite=Strict; Max-Age=600; Path=/`,
       );
       res.json({ success: true, proposalId: result.proposalId });
     } else {
@@ -289,9 +359,11 @@ function buildApi(
 
     try {
       const db = getDb();
-      const proposal = db.prepare(
-        "SELECT id, context_summary, plan, actions, status FROM proposals WHERE id = ?"
-      ).get(proposalId) as { id: string; context_summary: string; plan: string; actions: string; status: string } | undefined;
+      const proposal = db
+        .prepare('SELECT id, context_summary, plan, actions, status FROM proposals WHERE id = ?')
+        .get(proposalId) as
+        | { id: string; context_summary: string; plan: string; actions: string; status: string }
+        | undefined;
 
       if (!proposal) {
         res.status(404).json({ error: 'Proposal not found' });
@@ -305,12 +377,14 @@ function buildApi(
       const { generateExecutionToken } = await import('../gateway/approval.js');
       let executionToken = '';
       const approveResult = db.transaction(() => {
-        const r = db.prepare(
-          "UPDATE proposals SET status = 'approved', approved_at = ? WHERE id = ? AND status IN ('proposed', 'awaiting_approval')"
-        ).run(now, proposalId);
+        const r = db
+          .prepare(
+            "UPDATE proposals SET status = 'approved', approved_at = ? WHERE id = ? AND status IN ('proposed', 'awaiting_approval')",
+          )
+          .run(now, proposalId);
         if (r.changes > 0) {
           db.prepare(
-            "UPDATE approvals SET status = 'approved', responded_at = ? WHERE proposal_id = ? AND status = 'pending'"
+            "UPDATE approvals SET status = 'approved', responded_at = ? WHERE proposal_id = ? AND status = 'pending'",
           ).run(now, proposalId);
           executionToken = generateExecutionToken(String(proposalId));
         }
@@ -319,7 +393,9 @@ function buildApi(
 
       if (approveResult.changes === 0) {
         // Another request already approved/rejected it
-        const fresh = db.prepare("SELECT status FROM proposals WHERE id = ?").get(proposalId) as { status: string } | undefined;
+        const fresh = db.prepare('SELECT status FROM proposals WHERE id = ?').get(proposalId) as
+          | { status: string }
+          | undefined;
         res.status(400).json({ error: `Proposal already ${fresh?.status ?? 'processed'}` });
         return;
       }
@@ -329,34 +405,44 @@ function buildApi(
       res.json({ ok: true, message: 'Approved — executing…' });
 
       // Execute in background
-      import('../workers/proposal-executor.js').then(async ({ executeApprovedProposal }) => {
-        const { llmConfigFromEnv } = await import('../llm/index.js');
-        const llmConfig = llmConfigFromEnv();
-        const notify = async (text: string) => { await sendToApprovalChat(text); };
-        const result = await executeApprovedProposal(String(proposalId), llmConfig, notify, executionToken);
+      import('../workers/proposal-executor.js')
+        .then(async ({ executeApprovedProposal }) => {
+          const { llmConfigFromEnv } = await import('../llm/index.js');
+          const llmConfig = llmConfigFromEnv();
+          const notify = async (text: string) => {
+            await sendToApprovalChat(text);
+          };
+          const result = await executeApprovedProposal(
+            String(proposalId),
+            llmConfig,
+            notify,
+            executionToken,
+          );
 
-        // Inject execution result into the bot's conversation so it has context
-        try {
-          const db = getDb();
-          const allConvs = db.prepare("SELECT user_id, messages FROM conversations").all() as Array<{ user_id: string; messages: string }>;
-          for (const conv of allConvs) {
-            const msgs = JSON.parse(conv.messages) as Array<{ role: string; content: string }>;
-            const summary = result.success
-              ? `[Proposal ${String(proposalId).slice(-8)} executed successfully]\n${result.results.join('\n')}`
-              : `[Proposal ${String(proposalId).slice(-8)} execution had errors]\n${result.results.join('\n')}\n${result.errors.join('\n')}`;
-            msgs.push({ role: 'assistant', content: summary });
-            db.prepare("UPDATE conversations SET messages = ?, updated_at = ? WHERE user_id = ?")
-              .run(JSON.stringify(msgs), Date.now(), conv.user_id);
+          // Trigger proactive follow-up: feed result back to the bot so LLM analyzes and reacts
+          log.info(
+            `Proposal ${String(proposalId).slice(-8)} executed — triggering follow-up (callback=${!!onProposalExecuted})`,
+          );
+          if (onProposalExecuted) {
+            try {
+              onProposalExecuted(result, String(proposalId));
+            } catch (e) {
+              log.error(
+                `onProposalExecuted callback error: ${e instanceof Error ? e.message : String(e)}`,
+              );
+            }
           }
-        } catch { /* non-blocking */ }
 
-        if (!result.success) {
-          log.error(`Proposal execution had errors: ${result.errors.join(', ')}`);
-        }
-      }).catch(e => {
-        log.error(`Proposal execution failed: ${e}`);
-        sendToApprovalChat(`⚠️ Proposal execution failed: ${e instanceof Error ? e.message : String(e)}`).catch(() => {});
-      });
+          if (!result.success) {
+            log.error(`Proposal execution had errors: ${result.errors.join(', ')}`);
+          }
+        })
+        .catch((e) => {
+          log.error(`Proposal execution failed: ${e}`);
+          sendToApprovalChat(
+            `⚠️ Proposal execution failed: ${e instanceof Error ? e.message : String(e)}`,
+          ).catch(() => {});
+        });
 
       return; // response already sent
     } catch (e) {
@@ -370,22 +456,68 @@ function buildApi(
     try {
       const db = getDb();
       const { reason } = req.body as { reason?: string };
-      const proposal = db.prepare("SELECT plan FROM proposals WHERE id = ?").get(proposalId) as { plan: string } | undefined;
+      const proposal = db.prepare('SELECT plan FROM proposals WHERE id = ?').get(proposalId) as
+        | { plan: string }
+        | undefined;
       const rejectNow = Date.now();
       db.transaction(() => {
-        db.prepare("UPDATE proposals SET status = 'rejected', rejection_reason = ? WHERE id = ? AND status IN ('proposed', 'awaiting_approval')")
-          .run(reason ?? null, proposalId);
-        db.prepare("UPDATE approvals SET status = 'rejected', responded_at = ? WHERE proposal_id = ? AND status = 'pending'")
-          .run(rejectNow, proposalId);
+        db.prepare(
+          "UPDATE proposals SET status = 'rejected', rejection_reason = ? WHERE id = ? AND status IN ('proposed', 'awaiting_approval')",
+        ).run(reason ?? null, proposalId);
+        db.prepare(
+          "UPDATE approvals SET status = 'rejected', responded_at = ? WHERE proposal_id = ? AND status = 'pending'",
+        ).run(rejectNow, proposalId);
       })();
       broadcastEvent('proposal_updated', { id: proposalId, status: 'rejected' });
 
       // Notify via messaging channel
       try {
-        await sendToApprovalChat(`❌ Proposal rejected:\n${proposal?.plan ?? proposalId}${reason ? `\nReason: ${reason}` : ''}`);
-      } catch { /* non-blocking */ }
+        await sendToApprovalChat(
+          `❌ Proposal rejected:\n${proposal?.plan ?? proposalId}${reason ? `\nReason: ${reason}` : ''}`,
+        );
+      } catch {
+        /* non-blocking */
+      }
 
       res.json({ ok: true, message: 'Rejected' });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  // ── Speak — test TTS output ────────────────────────────────────────────
+  router.post('/speak', requireAuth('standard'), async (req, res) => {
+    const { text, output } = req.body as { text?: string; output?: string };
+    if (!text) { res.status(400).json({ error: 'text required' }); return; }
+    try {
+      const { getConfig: _gc } = await import('../config/index.js');
+      const cfg = _gc() as unknown as import('../config/schema.js').Config;
+      const voiceCfg = (cfg.voice ?? {}) as Record<string, unknown>;
+      const { speak } = await import('../voice/speak.js');
+      const { jarvisSendText, jarvisSendAudio, jarvisSendStatus } = await import('./jarvis.js');
+      const { synthesizeSpeech } = await import('../voice/synthesize.js');
+
+      const ttsOutput = (output ?? 'all') as import('../voice/speak.js').TtsOutput;
+      const wantMachine = ttsOutput === 'machine' || ttsOutput === 'both' || ttsOutput === 'all';
+      const wantWebspeak = ttsOutput === 'webspeak' || ttsOutput === 'all';
+
+      // Machine
+      if (wantMachine) {
+        const { speakLocal } = await import('../voice/synthesize.js');
+        speakLocal(text, voiceCfg.localTtsVoice as string | undefined).catch(() => {});
+      }
+
+      // Webspeak
+      if (wantWebspeak) {
+        jarvisSendStatus('speaking');
+        jarvisSendText(text);
+        try {
+          const audio = await synthesizeSpeech(text, voiceCfg as import('../voice/synthesize.js').TtsConfig);
+          jarvisSendAudio(audio, String(voiceCfg.ttsProvider ?? 'local') === 'local' ? 'aiff' : 'mp3');
+        } catch (e) { log.warn(`Speak webspeak failed: ${e}`); }
+      }
+
+      res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: String(e) });
     }
@@ -397,35 +529,53 @@ function buildApi(
     const filter = req.query.filter as string | undefined; // 'mine' | 'all' | 'history'
 
     // Combine real tasks + approved/executed proposals
-    const tasks = db.prepare(`
+    const tasks = db
+      .prepare(
+        `
       SELECT id, title, description, category, partner_name, chat_id,
              assigned_team, is_my_task, status, detected_at as created_at, 'task' as source
       FROM tasks
       WHERE status IN ('open', 'in_progress')
       ${filter === 'mine' ? 'AND is_my_task = 1' : ''}
-    `).all() as Array<Record<string, unknown>>;
+    `,
+      )
+      .all() as Array<Record<string, unknown>>;
 
-    const proposals = db.prepare(`
+    const proposals = db
+      .prepare(
+        `
       SELECT id, plan as title, context_summary as description, status,
              created_at, approved_at, executed_at, 'proposal' as source
       FROM proposals
       ORDER BY created_at DESC
       LIMIT 50
-    `).all() as Array<Record<string, unknown>>;
+    `,
+      )
+      .all() as Array<Record<string, unknown>>;
 
     // Merge and sort by date
     const all = [
-      ...tasks.map(t => ({ ...t, statusLabel: t.status as string })),
-      ...proposals.map(p => ({
+      ...tasks.map((t) => ({ ...t, statusLabel: t.status as string })),
+      ...proposals.map((p) => ({
         ...p,
-        statusLabel: p.status === 'proposed' ? '⏳ pending approval'
-          : p.status === 'approved' ? '🔄 executing…'
-          : p.status === 'executed' ? '✅ done'
-          : p.status === 'partial' ? '⚠️ partially done'
-          : p.status === 'rejected' ? '❌ rejected'
-          : String(p.status),
+        statusLabel:
+          p.status === 'proposed'
+            ? '⏳ pending approval'
+            : p.status === 'approved'
+              ? '🔄 executing…'
+              : p.status === 'executed'
+                ? '✅ done'
+                : p.status === 'partial'
+                  ? '⚠️ partially done'
+                  : p.status === 'rejected'
+                    ? '❌ rejected'
+                    : String(p.status),
       })),
-    ].sort((a, b) => ((b as Record<string, unknown>).created_at as number ?? 0) - ((a as Record<string, unknown>).created_at as number ?? 0));
+    ].sort(
+      (a, b) =>
+        (((b as Record<string, unknown>).created_at as number) ?? 0) -
+        (((a as Record<string, unknown>).created_at as number) ?? 0),
+    );
 
     res.json(all);
   });
@@ -433,7 +583,10 @@ function buildApi(
   // Complete task
   router.post('/tasks/:id/complete', (req, res) => {
     const db = getDb();
-    db.prepare(`UPDATE tasks SET status='completed', completed_at=? WHERE id=?`).run(Date.now(), req.params.id);
+    db.prepare(`UPDATE tasks SET status='completed', completed_at=? WHERE id=?`).run(
+      Date.now(),
+      req.params.id,
+    );
     broadcastEvent('task_updated', { id: req.params.id, status: 'completed' });
     res.json({ ok: true });
   });
@@ -441,42 +594,58 @@ function buildApi(
   // History — completed/cancelled tasks + executed/rejected proposals
   router.get('/history', (_req, res) => {
     const db = getDb();
-    const tasks = db.prepare(`
+    const tasks = db
+      .prepare(
+        `
       SELECT id, title, description, category, partner_name, assigned_team,
              is_my_task, status, detected_at, completed_at
       FROM tasks
       WHERE status IN ('completed', 'cancelled', 'follow_up')
       ORDER BY COALESCE(completed_at, detected_at) DESC
       LIMIT 50
-    `).all();
+    `,
+      )
+      .all();
 
-    const proposals = db.prepare(`
+    const proposals = db
+      .prepare(
+        `
       SELECT id, task_id, context_summary, plan, actions, draft_reply,
              status, created_at, approved_at, executed_at, rejection_reason
       FROM proposals
       WHERE status IN ('executed', 'rejected', 'expired')
       ORDER BY COALESCE(executed_at, created_at) DESC
       LIMIT 50
-    `).all() as Array<Record<string, unknown>>;
+    `,
+      )
+      .all() as Array<Record<string, unknown>>;
 
     res.json({
       tasks,
-      proposals: proposals.map(p => ({ ...p, actions: JSON.parse(p.actions as string) })),
+      proposals: proposals.map((p) => ({ ...p, actions: JSON.parse(p.actions as string) })),
     });
+  });
+
+  // Connected MCP tools with annotations — for tool policy UI
+  router.get('/mcp/tools', async (_req, res) => {
+    const { getMcpToolsWithMeta } = await import('../mcp/client.js');
+    res.json(getMcpToolsWithMeta());
   });
 
   // Plugins catalog — MCP catalog + enabled state from config
   router.get('/plugins', async (_req, res) => {
     const cfg = getConfig() as unknown as import('../config/schema.js').Config;
-    const enabled = new Set((cfg.mcpServers ?? []).filter(s => s.enabled).map(s => s.name));
-    const skillEnabled = new Set((cfg.skills ?? []).filter(s => s.enabled !== false).map(s => s.name));
+    const enabled = new Set((cfg.mcpServers ?? []).filter((s) => s.enabled).map((s) => s.name));
+    const skillEnabled = new Set(
+      (cfg.skills ?? []).filter((s) => s.enabled !== false).map((s) => s.name),
+    );
 
-    const { MCP_CATALOG: catalog }   = await import('../mcp/index.js');
-    const { SKILL_CATALOG: skills }  = await import('../skills/registry.js');
+    const { MCP_CATALOG: catalog } = await import('../mcp/index.js');
+    const { SKILL_CATALOG: skills } = await import('../skills/registry.js');
 
     res.json({
-      mcpServers: catalog.map(s => ({ ...s, enabled: enabled.has(s.name) })),
-      skills:     skills.map(s => ({ ...s, enabled: skillEnabled.has(s.name) })),
+      mcpServers: catalog.map((s) => ({ ...s, enabled: enabled.has(s.name) })),
+      skills: skills.map((s) => ({ ...s, enabled: skillEnabled.has(s.name) })),
     });
   });
 
@@ -485,12 +654,12 @@ function buildApi(
 
   router.get('/agents', (_req, res) => {
     const cfg = getConfig() as unknown as import('../config/schema.js').Config;
-    const agents = (cfg.agents ?? []).map(a => ({
-      name:           a.name,
-      description:    a.description,
-      tools:          a.tools,
+    const agents = (cfg.agents ?? []).map((a) => ({
+      name: a.name,
+      description: a.description,
+      tools: a.tools,
       linkedChannels: a.linkedChannels ?? [],
-      enabled:        a.enabled,
+      enabled: a.enabled,
     }));
     res.json(agents);
   });
@@ -498,16 +667,26 @@ function buildApi(
   router.post('/agents/:name/run', async (req, res) => {
     const cfg = getConfig() as unknown as import('../config/schema.js').Config;
     const agentName = req.params.name;
-    const input     = String((req.body as Record<string, unknown>)?.input ?? '').trim();
+    const input = String((req.body as Record<string, unknown>)?.input ?? '').trim();
 
-    if (!input) { res.status(400).json({ error: 'input required' }); return; }
+    if (!input) {
+      res.status(400).json({ error: 'input required' });
+      return;
+    }
 
-    const agentDef = (cfg.agents ?? []).find(a => a.name === agentName && a.enabled !== false);
-    if (!agentDef) { res.status(404).json({ error: `Agent "${agentName}" not found or disabled` }); return; }
+    const agentDef = (cfg.agents ?? []).find((a) => a.name === agentName && a.enabled !== false);
+    if (!agentDef) {
+      res.status(404).json({ error: `Agent "${agentName}" not found or disabled` });
+      return;
+    }
 
     try {
       const { runAgent } = await import('../agents/index.js');
-      const result = await runAgent(agentDef as import('../agents/index.js').AgentDefinition, input, cfg);
+      const result = await runAgent(
+        agentDef as import('../agents/index.js').AgentDefinition,
+        input,
+        cfg,
+      );
       res.json({ success: result.success, output: result.output });
     } catch (e) {
       res.status(500).json({ error: String(e) });
@@ -525,7 +704,7 @@ function buildApi(
 
     // ── helpers ─────────────────────────────────────────────────────────────
     function secret(key: string): boolean {
-      return !!(secrets[key]?.trim());
+      return !!secrets[key]?.trim();
     }
     function cfgSecret(val: unknown): boolean {
       if (typeof val !== 'string') return false;
@@ -538,92 +717,103 @@ function buildApi(
     // 1. LLM
     const llm = (cfg.llm ?? {}) as Record<string, unknown>;
     const providerId = llm.activeProvider ? String(llm.activeProvider) : null;
-    const model      = llm.activeModel    ? String(llm.activeModel)    : null;
+    const model = llm.activeModel ? String(llm.activeModel) : null;
     const noKeyProviders = new Set(['ollama', 'lmstudio', 'custom', 'anthropic-oauth']);
     let llmConfigured = false;
     let llmDetail: string | undefined;
     if (providerId && model) {
-      const provCfg = ((llm.providers ?? {}) as Record<string, Record<string, unknown>>)[providerId] ?? {};
-      const hasKey  = noKeyProviders.has(providerId) || cfgSecret(provCfg.apiKey);
+      const provCfg =
+        ((llm.providers ?? {}) as Record<string, Record<string, unknown>>)[providerId] ?? {};
+      const hasKey = noKeyProviders.has(providerId) || cfgSecret(provCfg.apiKey);
       llmConfigured = hasKey;
-      llmDetail     = llmConfigured ? `${providerId} / ${model}` : `${providerId} — API key missing`;
+      llmDetail = llmConfigured ? `${providerId} / ${model}` : `${providerId} — API key missing`;
     }
 
     // 2. Web app + YubiKey
-    const webapp     = (cfg.webapp ?? {}) as Record<string, unknown>;
-    const hasWebapp  = !!(webapp.webauthnRpId && webapp.webauthnOrigin);
+    const webapp = (cfg.webapp ?? {}) as Record<string, unknown>;
+    const hasWebapp = !!(webapp.webauthnRpId && webapp.webauthnOrigin);
     let yubiKeyCount = 0;
-    let totpActive   = false;
+    let totpActive = false;
     try {
-      yubiKeyCount = (db.prepare('SELECT count(*) as n FROM webauthn_credentials').get() as { n: number }).n;
+      yubiKeyCount = (
+        db.prepare('SELECT count(*) as n FROM webauthn_credentials').get() as { n: number }
+      ).n;
     } catch {}
     try {
       const { hasTotpConfigured } = await import('./totp.js');
       totpActive = hasTotpConfigured();
     } catch {}
     const authConfigured = hasWebapp && (yubiKeyCount > 0 || totpActive);
-    const authDetail     = !hasWebapp
+    const authDetail = !hasWebapp
       ? 'Web app not configured'
       : yubiKeyCount > 0
         ? `${yubiKeyCount} key${yubiKeyCount > 1 ? 's' : ''} registered${totpActive ? ' + TOTP' : ''}`
-        : totpActive ? 'TOTP only' : 'No authentication registered yet';
+        : totpActive
+          ? 'TOTP only'
+          : 'No authentication registered yet';
 
     // 3. Approval channel — detect from whichever bot is actually configured
     // notifications.preferredChannel is the authoritative field (telegram_bot|telegram|slack|whatsapp)
     // Fall back to heuristic: whichever bot token is present
     const preferredChannel = cfg.notifications?.preferredChannel;
-    const hasTgBot    = secret('TELEGRAM_BOT_TOKEN');
+    const hasTgBot = secret('TELEGRAM_BOT_TOKEN');
     const hasSlackBot = secret('SLACK_BOT_TOKEN');
-    const hasDcBot    = secret('DISCORD_BOT_TOKEN');
+    const hasDcBot = secret('DISCORD_BOT_TOKEN');
     let channelConfigured = false;
     let channelDetail: string | undefined;
     if (preferredChannel === 'telegram_bot' || (!preferredChannel && hasTgBot)) {
       channelConfigured = hasTgBot;
-      channelDetail     = channelConfigured ? 'Telegram Bot' : 'TELEGRAM_BOT_TOKEN missing';
+      channelDetail = channelConfigured ? 'Telegram Bot' : 'TELEGRAM_BOT_TOKEN missing';
     } else if (preferredChannel === 'slack' || (!preferredChannel && hasSlackBot)) {
       channelConfigured = hasSlackBot;
-      channelDetail     = channelConfigured ? 'Slack Bot' : 'SLACK_BOT_TOKEN missing';
+      channelDetail = channelConfigured ? 'Slack Bot' : 'SLACK_BOT_TOKEN missing';
     } else if (hasDcBot) {
       channelConfigured = true;
-      channelDetail     = 'Discord Bot';
+      channelDetail = 'Discord Bot';
     } else {
       // Web app only — acceptable if YubiKey is registered
       channelConfigured = authConfigured;
-      channelDetail     = channelConfigured ? 'Web app only' : 'No approval channel configured';
+      channelDetail = channelConfigured ? 'Web app only' : 'No approval channel configured';
     }
 
     // ── channel steps ────────────────────────────────────────────────────────
     const channels = (cfg.channels ?? {}) as Record<string, unknown>;
 
     // Telegram MTProto listener
-    const tgListener = (channels.telegram as Record<string, unknown> | undefined)?.listener as Record<string, unknown> | undefined;
-    const tgEnabled  = tgListener?.mode === 'mtproto';
+    const tgListener = (channels.telegram as Record<string, unknown> | undefined)?.listener as
+      | Record<string, unknown>
+      | undefined;
+    const tgEnabled = tgListener?.mode === 'mtproto';
     const tgConfigured = tgEnabled && secret('TELEGRAM_API_ID') && secret('TELEGRAM_API_HASH');
 
     // Slack listener
-    const slackCfg    = (channels.slack ?? {}) as Record<string, unknown>;
+    const slackCfg = (channels.slack ?? {}) as Record<string, unknown>;
     const slackEnabled = slackCfg.enabled === true;
     const slackConfigured = slackEnabled && secret('SLACK_USER_TOKEN');
 
     // Discord listener
-    const discordCfg    = (channels.discord ?? {}) as Record<string, unknown>;
+    const discordCfg = (channels.discord ?? {}) as Record<string, unknown>;
     const discordEnabled = discordCfg.enabled === true;
     const discordConfigured = discordEnabled && secret('DISCORD_BOT_TOKEN');
 
     // Email IMAP
-    const emailCfg  = (channels.email ?? {}) as Record<string, unknown>;
-    const imapCfg   = (emailCfg.imap ?? {}) as Record<string, unknown>;
-    const emailConfigured = !!(imapCfg.host && (cfgSecret(imapCfg.user) || secret('EMAIL_IMAP_USER'))
-                           && (cfgSecret(imapCfg.password) || secret('EMAIL_IMAP_PASSWORD')));
+    const emailCfg = (channels.email ?? {}) as Record<string, unknown>;
+    const imapCfg = (emailCfg.imap ?? {}) as Record<string, unknown>;
+    const emailConfigured = !!(
+      imapCfg.host &&
+      (cfgSecret(imapCfg.user) || secret('EMAIL_IMAP_USER')) &&
+      (cfgSecret(imapCfg.password) || secret('EMAIL_IMAP_PASSWORD'))
+    );
 
     // WhatsApp
-    const waConfigured = (channels.whatsapp as Record<string, unknown> | undefined)?.enabled === true;
+    const waConfigured =
+      (channels.whatsapp as Record<string, unknown> | undefined)?.enabled === true;
 
     // ── integration steps ────────────────────────────────────────────────────
 
-    const notionConfigured   = secret('NOTION_API_KEY');
+    const notionConfigured = secret('NOTION_API_KEY');
     const calendarConfigured = secret('GOOGLE_CLIENT_ID') && secret('GOOGLE_REFRESH_TOKEN');
-    const linearConfigured   = secret('LINEAR_API_KEY');
+    const linearConfigured = secret('LINEAR_API_KEY');
     const embedCfg = (cfg.embeddings ?? {}) as Record<string, unknown>;
     const embeddingsConfigured = embedCfg.enabled === true;
 
@@ -671,8 +861,16 @@ function buildApi(
         name: 'Telegram Listener',
         category: 'channel',
         configured: !!tgConfigured,
-        detail: tgConfigured ? `MTProto · api_id=${secrets['TELEGRAM_API_ID']}` : tgEnabled ? 'API credentials missing' : 'Not enabled',
-        unlocks: ['Monitor Telegram DMs', 'Partner message detection', 'Task extraction from chats'],
+        detail: tgConfigured
+          ? `MTProto · api_id=${secrets['TELEGRAM_API_ID']}`
+          : tgEnabled
+            ? 'API credentials missing'
+            : 'Not enabled',
+        unlocks: [
+          'Monitor Telegram DMs',
+          'Partner message detection',
+          'Task extraction from chats',
+        ],
         docsUrl: '/docs/integrations.md#telegram-mtproto',
         setupCmd: 'npm run setup  → Telegram listener',
       },
@@ -681,7 +879,11 @@ function buildApi(
         name: 'Slack Listener',
         category: 'channel',
         configured: !!slackConfigured,
-        detail: slackConfigured ? 'xoxp- token active' : slackEnabled ? 'SLACK_USER_TOKEN missing' : 'Not enabled',
+        detail: slackConfigured
+          ? 'xoxp- token active'
+          : slackEnabled
+            ? 'SLACK_USER_TOKEN missing'
+            : 'Not enabled',
         unlocks: ['Monitor Slack DMs and channels', 'Slack task extraction'],
         docsUrl: '/docs/integrations.md#slack-listener',
         setupCmd: 'npm run setup  → Slack listener',
@@ -691,7 +893,11 @@ function buildApi(
         name: 'Discord',
         category: 'channel',
         configured: !!discordConfigured,
-        detail: discordConfigured ? 'Bot token active' : discordEnabled ? 'DISCORD_BOT_TOKEN missing' : 'Not enabled',
+        detail: discordConfigured
+          ? 'Bot token active'
+          : discordEnabled
+            ? 'DISCORD_BOT_TOKEN missing'
+            : 'Not enabled',
         unlocks: ['Monitor Discord servers', 'Discord task extraction'],
         docsUrl: '/docs/integrations.md#discord',
         setupCmd: 'npm run setup  → Discord',
@@ -723,7 +929,11 @@ function buildApi(
         category: 'integration',
         configured: notionConfigured,
         detail: notionConfigured ? 'API key ✓' : 'Not configured',
-        unlocks: ['Knowledge from Notion pages', 'Create/update pages on approval', 'Notion search'],
+        unlocks: [
+          'Knowledge from Notion pages',
+          'Create/update pages on approval',
+          'Notion search',
+        ],
         docsUrl: '/docs/integrations.md#notion',
         setupCmd: 'npm run setup  → integrations → Notion',
       },
@@ -742,7 +952,9 @@ function buildApi(
         name: 'Linear',
         category: 'integration',
         configured: linearConfigured,
-        detail: linearConfigured ? `key ✓${secrets['LINEAR_TEAM_ID'] ? `  team=${secrets['LINEAR_TEAM_ID']}` : ''}` : 'Not configured',
+        detail: linearConfigured
+          ? `key ✓${secrets['LINEAR_TEAM_ID'] ? `  team=${secrets['LINEAR_TEAM_ID']}` : ''}`
+          : 'Not configured',
         unlocks: ['Issue context', 'Create/close Linear issues on approval', 'Linear search'],
         docsUrl: '/docs/integrations.md#linear',
         setupCmd: 'npm run setup  → integrations → Linear',
@@ -752,7 +964,9 @@ function buildApi(
         name: 'Vector Search (Ollama)',
         category: 'integration',
         configured: embeddingsConfigured,
-        detail: embeddingsConfigured ? `${(embedCfg.model as string | undefined) ?? 'nomic-embed-text'}` : 'Not enabled',
+        detail: embeddingsConfigured
+          ? `${(embedCfg.model as string | undefined) ?? 'nomic-embed-text'}`
+          : 'Not enabled',
         unlocks: ['Semantic memory search', 'Hybrid knowledge retrieval', 'Smarter context recall'],
         docsUrl: '/docs/privacy.md#setting-up-local-privacy-model',
         setupCmd: 'ollama pull nomic-embed-text  then enable in config',
@@ -762,7 +976,9 @@ function buildApi(
         name: 'Cloud Mode (VPS security)',
         category: 'security',
         configured: cloudMode,
-        detail: cloudMode ? 'ON — YubiKey required for all approvals' : 'OFF — recommended for remote deployment',
+        detail: cloudMode
+          ? 'ON — YubiKey required for all approvals'
+          : 'OFF — recommended for remote deployment',
         unlocks: ['YubiKey enforcement for all risk levels', 'VPS-safe operation'],
         docsUrl: '/docs/security.md#cloudmode--vps-deployment',
         setupCmd: 'Set security.cloudMode: true in config',
@@ -771,85 +987,87 @@ function buildApi(
 
     // ── models ────────────────────────────────────────────────────────────────
     const noKeySet = new Set(['ollama', 'lmstudio', 'custom', 'anthropic-oauth']);
-    const providers = Object.entries((llm.providers ?? {}) as Record<string, Record<string, unknown>>).map(([id, p]) => ({
+    const providers = Object.entries(
+      (llm.providers ?? {}) as Record<string, Record<string, unknown>>,
+    ).map(([id, p]) => ({
       id,
-      name:      (p.name as string | undefined) ?? id,
-      api:       (p.api  as string | undefined) ?? 'openai',
-      baseUrl:   (p.baseUrl as string | undefined) ?? undefined,
-      models:    (p.models as string[] | undefined) ?? [],
-      hasKey:    noKeySet.has(id) || cfgSecret(p.apiKey),
-      isActive:  id === (llm.activeProvider as string | undefined),
+      name: (p.name as string | undefined) ?? id,
+      api: (p.api as string | undefined) ?? 'openai',
+      baseUrl: (p.baseUrl as string | undefined) ?? undefined,
+      models: (p.models as string[] | undefined) ?? [],
+      hasKey: noKeySet.has(id) || cfgSecret(p.apiKey),
+      isActive: id === (llm.activeProvider as string | undefined),
       isFallback: id === (llm.fallbackProvider as string | undefined),
     }));
 
     // ── voice ─────────────────────────────────────────────────────────────────
     const voice = (cfg.voice ?? {}) as Record<string, unknown>;
-    const whisperBackend  = (voice.whisperBackend  as string | undefined) ?? 'local';
-    const whisperApiKey   = cfgSecret(voice.whisperApiKey) || secret('OPENAI_API_KEY');
-    const elevenLabsKey   = cfgSecret(voice.elevenLabsApiKey) || secret('ELEVENLABS_API_KEY');
-    const openAiTtsKey    = cfgSecret(voice.openAiTtsApiKey)  || secret('OPENAI_API_KEY');
-    const ttsProvider     = (voice.ttsProvider as string | undefined) ?? 'openai';
+    const whisperBackend = (voice.whisperBackend as string | undefined) ?? 'local';
+    const whisperApiKey = cfgSecret(voice.whisperApiKey) || secret('OPENAI_API_KEY');
+    const elevenLabsKey = cfgSecret(voice.elevenLabsApiKey) || secret('ELEVENLABS_API_KEY');
+    const openAiTtsKey = cfgSecret(voice.openAiTtsApiKey) || secret('OPENAI_API_KEY');
+    const ttsProvider = (voice.ttsProvider as string | undefined) ?? 'openai';
     const voiceData = {
-      enabled:               voice.enabled === true,
+      enabled: voice.enabled === true,
       whisperBackend,
-      whisperModel:          (voice.whisperModel as string | undefined) ?? 'base',
-      whisperEndpoint:       (voice.whisperEndpoint as string | undefined) ?? 'https://api.openai.com/v1',
-      whisperApiConfigured:  whisperBackend === 'local' ? true : whisperApiKey,
-      ttsEnabled:            voice.ttsEnabled === true,
+      whisperModel: (voice.whisperModel as string | undefined) ?? 'base',
+      whisperEndpoint: (voice.whisperEndpoint as string | undefined) ?? 'https://api.openai.com/v1',
+      whisperApiConfigured: whisperBackend === 'local' ? true : whisperApiKey,
+      ttsEnabled: voice.ttsEnabled === true,
       ttsProvider,
-      ttsConfigured:         ttsProvider === 'elevenlabs' ? elevenLabsKey : openAiTtsKey,
-      elevenLabsConfigured:  elevenLabsKey,
-      elevenLabsVoiceId:     (voice.elevenLabsVoiceId as string | undefined),
-      openAiTtsModel:        (voice.openAiTtsModel as string | undefined) ?? 'tts-1',
-      openAiTtsVoice:        (voice.openAiTtsVoice as string | undefined) ?? 'onyx',
+      ttsConfigured: ttsProvider === 'elevenlabs' ? elevenLabsKey : openAiTtsKey,
+      elevenLabsConfigured: elevenLabsKey,
+      elevenLabsVoiceId: voice.elevenLabsVoiceId as string | undefined,
+      openAiTtsModel: (voice.openAiTtsModel as string | undefined) ?? 'tts-1',
+      openAiTtsVoice: (voice.openAiTtsVoice as string | undefined) ?? 'onyx',
     };
 
     // ── embeddings ────────────────────────────────────────────────────────────
     const embedCfg2 = (cfg.embeddings ?? {}) as Record<string, unknown>;
     const embeddingsData = {
-      enabled:  embedCfg2.enabled === true,
-      baseUrl:  (embedCfg2.baseUrl as string | undefined) ?? 'http://localhost:11434',
-      model:    (embedCfg2.model   as string | undefined) ?? 'nomic-embed-text',
+      enabled: embedCfg2.enabled === true,
+      baseUrl: (embedCfg2.baseUrl as string | undefined) ?? 'http://localhost:11434',
+      model: (embedCfg2.model as string | undefined) ?? 'nomic-embed-text',
       localOnly: (embedCfg2.localOnly as boolean | undefined) ?? true,
     };
 
     // ── MCP + skills summary ──────────────────────────────────────────────────
     const mcpServers = (cfg.mcpServers ?? []) as Array<Record<string, unknown>>;
-    const skills     = (cfg.skills     ?? []) as Array<Record<string, unknown>>;
+    const skills = (cfg.skills ?? []) as Array<Record<string, unknown>>;
 
     // ── secrets keys ─────────────────────────────────────────────────────────
     const secretKeys = Object.keys(secrets).sort();
 
-    const required = steps.filter(s => s.category === 'required');
+    const required = steps.filter((s) => s.category === 'required');
     res.json({
       steps,
-      requiredComplete: required.filter(s => s.configured).length,
-      requiredTotal:    required.length,
-      fullyOperational: required.every(s => s.configured),
+      requiredComplete: required.filter((s) => s.configured).length,
+      requiredTotal: required.length,
+      fullyOperational: required.every((s) => s.configured),
       models: {
-        activeProvider:  (llm.activeProvider  as string | undefined) ?? null,
-        activeModel:     (llm.activeModel     as string | undefined) ?? null,
-        fallbackProvider:(llm.fallbackProvider as string | undefined) ?? null,
-        fallbackModel:   (llm.fallbackModel   as string | undefined) ?? null,
+        activeProvider: (llm.activeProvider as string | undefined) ?? null,
+        activeModel: (llm.activeModel as string | undefined) ?? null,
+        fallbackProvider: (llm.fallbackProvider as string | undefined) ?? null,
+        fallbackModel: (llm.fallbackModel as string | undefined) ?? null,
         providers,
       },
       voice: voiceData,
       embeddings: embeddingsData,
       mcp: {
-        total:   mcpServers.length,
-        enabled: mcpServers.filter(s => s.enabled !== false).length,
-        servers: mcpServers.map(s => ({
-          name:        s.name,
-          type:        s.type,
+        total: mcpServers.length,
+        enabled: mcpServers.filter((s) => s.enabled !== false).length,
+        servers: mcpServers.map((s) => ({
+          name: s.name,
+          type: s.type,
           description: s.description ?? null,
-          enabled:     s.enabled !== false,
-          command:     s.command ?? null,
-          url:         s.url ?? null,
+          enabled: s.enabled !== false,
+          command: s.command ?? null,
+          url: s.url ?? null,
         })),
       },
       skillsSummary: {
-        total:   skills.length,
-        enabled: skills.filter(s => s.enabled !== false).length,
+        total: skills.length,
+        enabled: skills.filter((s) => s.enabled !== false).length,
       },
       secretKeys,
     });
@@ -875,8 +1093,14 @@ function buildApi(
     }
     function deepMerge(target: Record<string, unknown>, src: Record<string, unknown>): void {
       for (const [k, v] of Object.entries(src)) {
-        if (v !== null && typeof v === 'object' && !Array.isArray(v) &&
-            target[k] !== null && typeof target[k] === 'object' && !Array.isArray(target[k])) {
+        if (
+          v !== null &&
+          typeof v === 'object' &&
+          !Array.isArray(v) &&
+          target[k] !== null &&
+          typeof target[k] === 'object' &&
+          !Array.isArray(target[k])
+        ) {
           deepMerge(target[k] as Record<string, unknown>, v as Record<string, unknown>);
         } else {
           target[k] = v;
@@ -893,9 +1117,23 @@ function buildApi(
         res.status(400).json({ error: 'Validation failed', issues: validation.error.issues });
         return;
       }
-      patchConfig(cfg => { deepMerge(cfg as unknown as Record<string, unknown>, patchData); });
-      const RESTART_KEYS = new Set(['channels', 'webapp', 'mcpServers', 'skills', 'embeddings', 'voice', 'agents', 'cloudflare', 'smtp', 'notifications']);
-      const requiresRestart = Object.keys(patchData).some(k => RESTART_KEYS.has(k));
+      patchConfig((cfg) => {
+        deepMerge(cfg as unknown as Record<string, unknown>, patchData);
+      });
+      const RESTART_KEYS = new Set([
+        'channels',
+        'webapp',
+        'mcpServers',
+        'skills',
+        'embeddings',
+        'voice',
+        'agents',
+        'cloudflare',
+        'smtp',
+        'notifications',
+        'privacy',
+      ]);
+      const requiresRestart = Object.keys(patchData).some((k) => RESTART_KEYS.has(k));
       res.json({ ok: true, requiresRestart });
     } catch (e) {
       res.status(500).json({ error: String(e) });
@@ -952,16 +1190,25 @@ function buildApi(
       return val.startsWith('$') ? secrets[val.slice(1)] : val;
     }
 
-    interface Check { id: string; label: string; status: 'ok' | 'warn' | 'error'; detail: string; fix?: string; }
+    interface Check {
+      id: string;
+      label: string;
+      status: 'ok' | 'warn' | 'error';
+      detail: string;
+      fix?: string;
+    }
     const checks: Check[] = [];
 
     // 1. Primary LLM
     const activeProv = cfg.llm?.providers?.[cfg.llm.activeProvider];
     const hasLlmKey = !!resolve(activeProv?.apiKey) || cfg.llm.activeProvider === 'anthropic-oauth';
     checks.push({
-      id: 'llm', label: 'Primary LLM',
+      id: 'llm',
+      label: 'Primary LLM',
       status: hasLlmKey ? 'ok' : 'warn',
-      detail: hasLlmKey ? `${cfg.llm.activeProvider} / ${cfg.llm.activeModel}` : `Provider "${cfg.llm.activeProvider}" — API key not found in secrets store`,
+      detail: hasLlmKey
+        ? `${cfg.llm.activeProvider} / ${cfg.llm.activeModel}`
+        : `Provider "${cfg.llm.activeProvider}" — API key not found in secrets store`,
       fix: !hasLlmKey ? 'Add API key in Configure → Secrets' : undefined,
     });
 
@@ -970,20 +1217,37 @@ function buildApi(
       const fbProv = cfg.llm.providers?.[cfg.llm.fallbackProvider];
       const hasFbKey = !!resolve(fbProv?.apiKey);
       checks.push({
-        id: 'llm_fallback', label: 'Fallback LLM',
+        id: 'llm_fallback',
+        label: 'Fallback LLM',
         status: hasFbKey ? 'ok' : 'warn',
-        detail: hasFbKey ? `${cfg.llm.fallbackProvider} / ${cfg.llm.fallbackModel ?? 'default'}` : `Fallback "${cfg.llm.fallbackProvider}" — API key not found`,
+        detail: hasFbKey
+          ? `${cfg.llm.fallbackProvider} / ${cfg.llm.fallbackModel ?? 'default'}`
+          : `Fallback "${cfg.llm.fallbackProvider}" — API key not found`,
         fix: !hasFbKey ? 'Add fallback API key in Configure → Secrets' : undefined,
       });
     }
 
     // 3. Authentication
-    const credCount = (db.prepare('SELECT COUNT(*) as c FROM webauthn_credentials').get() as { c: number }).c;
-    const totpRow = (() => { try { return db.prepare('SELECT 1 FROM totp_credentials LIMIT 1').get(); } catch { return null; } })();
+    const credCount = (
+      db.prepare('SELECT COUNT(*) as c FROM webauthn_credentials').get() as { c: number }
+    ).c;
+    const totpRow = (() => {
+      try {
+        return db.prepare('SELECT 1 FROM totp_credentials LIMIT 1').get();
+      } catch {
+        return null;
+      }
+    })();
     checks.push({
-      id: 'auth', label: 'Authentication',
+      id: 'auth',
+      label: 'Authentication',
       status: credCount > 0 ? 'ok' : totpRow ? 'warn' : 'error',
-      detail: credCount > 0 ? `${credCount} YubiKey${credCount > 1 ? 's' : ''} registered${totpRow ? ' + TOTP backup' : ''}` : totpRow ? 'TOTP only — no YubiKey registered' : 'No auth configured',
+      detail:
+        credCount > 0
+          ? `${credCount} YubiKey${credCount > 1 ? 's' : ''} registered${totpRow ? ' + TOTP backup' : ''}`
+          : totpRow
+            ? 'TOTP only — no YubiKey registered'
+            : 'No auth configured',
       fix: credCount === 0 ? 'Register a YubiKey at the Setup page' : undefined,
     });
 
@@ -992,7 +1256,8 @@ function buildApi(
     const slackBotToken = resolve(cfg.channels?.slack?.personal?.botToken);
     const hasChannel = !!tgBotToken || !!slackBotToken || !!cfg.notifications?.preferredChannel;
     checks.push({
-      id: 'channel', label: 'Approval channel',
+      id: 'channel',
+      label: 'Approval channel',
       status: hasChannel ? 'ok' : 'warn',
       detail: hasChannel
         ? (cfg.notifications?.preferredChannel ?? (tgBotToken ? 'telegram_bot' : 'slack'))
@@ -1003,19 +1268,23 @@ function buildApi(
     // 5. Privacy model
     const privProvider = cfg.privacy?.provider;
     const hasPrivModel = !!privProvider && !!cfg.llm.providers?.[privProvider];
-    const allCloud = Object.values(cfg.privacy?.roles ?? {}).every(r => r === 'primary');
+    const allCloud = Object.values(cfg.privacy?.roles ?? {}).every((r) => r === 'primary');
     checks.push({
-      id: 'privacy', label: 'Privacy model',
+      id: 'privacy',
+      label: 'Privacy model',
       status: hasPrivModel ? 'ok' : allCloud ? 'warn' : 'warn',
       detail: hasPrivModel
         ? `${privProvider} / ${cfg.privacy?.model ?? 'default'}`
-        : allCloud ? 'All roles use cloud — raw content reaches primary model' : 'No local model — privacy roles fall back to primary',
+        : allCloud
+          ? 'All roles use cloud — raw content reaches primary model'
+          : 'No local model — privacy roles fall back to primary',
       fix: !hasPrivModel ? 'Configure Ollama or LM Studio in Configure → Privacy' : undefined,
     });
 
     // 6. Security posture
     checks.push({
-      id: 'security', label: 'Security mode',
+      id: 'security',
+      label: 'Security mode',
       status: cfg.security?.cloudMode ? 'ok' : 'warn',
       detail: cfg.security?.cloudMode
         ? 'Cloud mode ON — all approvals require YubiKey'
@@ -1024,34 +1293,51 @@ function buildApi(
 
     // 7. Read-only mode
     checks.push({
-      id: 'readonly', label: 'Execution mode',
+      id: 'readonly',
+      label: 'Execution mode',
       status: cfg.readOnly ? 'ok' : 'warn',
-      detail: cfg.readOnly ? 'Read-only — Argos observes and proposes, never executes' : 'Read-write — Argos can execute approved actions',
+      detail: cfg.readOnly
+        ? 'Read-only — Argos observes and proposes, never executes'
+        : 'Read-write — Argos can execute approved actions',
     });
 
     // 8. MCP servers
-    const mcpEnabled = (cfg.mcpServers ?? []).filter(s => s.enabled).length;
+    const mcpEnabled = (cfg.mcpServers ?? []).filter((s) => s.enabled).length;
     if (mcpEnabled > 0) {
-      checks.push({ id: 'mcp', label: 'MCP servers', status: 'ok', detail: `${mcpEnabled} server${mcpEnabled > 1 ? 's' : ''} enabled` });
+      checks.push({
+        id: 'mcp',
+        label: 'MCP servers',
+        status: 'ok',
+        detail: `${mcpEnabled} server${mcpEnabled > 1 ? 's' : ''} enabled`,
+      });
     }
 
     // 9. Audit chain
     try {
       const total = (db.prepare('SELECT COUNT(*) as c FROM audit_log').get() as { c: number }).c;
-      const withHash = (db.prepare("SELECT COUNT(*) as c FROM audit_log WHERE entry_hash IS NOT NULL AND entry_hash != ''").get() as { c: number }).c;
+      const withHash = (
+        db
+          .prepare(
+            "SELECT COUNT(*) as c FROM audit_log WHERE entry_hash IS NOT NULL AND entry_hash != ''",
+          )
+          .get() as { c: number }
+      ).c;
       const coverage = total > 0 ? Math.round((withHash / total) * 100) : 100;
       checks.push({
-        id: 'audit', label: 'Audit chain',
+        id: 'audit',
+        label: 'Audit chain',
         status: coverage >= 99 ? 'ok' : coverage > 90 ? 'warn' : 'error',
         detail: `${total} events · ${coverage}% hash coverage`,
         fix: coverage < 99 ? 'Run: npm run verify-audit' : undefined,
       });
-    } catch { /* table may not exist yet */ }
+    } catch {
+      /* table may not exist yet */
+    }
 
     const summary = {
-      ok:    checks.filter(c => c.status === 'ok').length,
-      warn:  checks.filter(c => c.status === 'warn').length,
-      error: checks.filter(c => c.status === 'error').length,
+      ok: checks.filter((c) => c.status === 'ok').length,
+      warn: checks.filter((c) => c.status === 'warn').length,
+      error: checks.filter((c) => c.status === 'error').length,
     };
     res.json({ checks, summary });
   });
@@ -1061,12 +1347,33 @@ function buildApi(
   router.get('/audit-log', (_req, res) => {
     const db = getDb();
     const total = (db.prepare('SELECT COUNT(*) as c FROM audit_log').get() as { c: number }).c;
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT id, event, entity_id, entity_type, data, entry_hash, created_at
       FROM audit_log ORDER BY created_at DESC LIMIT 200
-    `).all() as Array<{ id: string; event: string; entity_id?: string; entity_type?: string; data: string; entry_hash?: string; created_at: number }>;
+    `,
+      )
+      .all() as Array<{
+      id: string;
+      event: string;
+      entity_id?: string;
+      entity_type?: string;
+      data: string;
+      entry_hash?: string;
+      created_at: number;
+    }>;
     res.json({
-      rows: rows.map(r => ({ ...r, data: (() => { try { return JSON.parse(r.data ?? '{}'); } catch { return {}; } })() })),
+      rows: rows.map((r) => ({
+        ...r,
+        data: (() => {
+          try {
+            return JSON.parse(r.data ?? '{}');
+          } catch {
+            return {};
+          }
+        })(),
+      })),
       total,
     });
   });
@@ -1096,21 +1403,28 @@ function buildApi(
   router.get('/configure/export', (_req, res) => {
     const cfg = getConfig() as unknown as import('../config/schema.js').Config;
     const redacted = redactSecretsForDisk(cfg);
-    res.setHeader('Content-Disposition', `attachment; filename="argos-config-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="argos-config-${new Date().toISOString().slice(0, 10)}.json"`,
+    );
     res.setHeader('Content-Type', 'application/json');
     res.json(redacted);
   });
 
   router.get('/memories', (_req, res) => {
     const db = getDb();
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT id, content, tags, category, partner_name, importance, archived, expires_at, created_at
       FROM memories
       WHERE expires_at IS NULL OR expires_at > ?
       ORDER BY importance DESC, created_at DESC
       LIMIT 30
-    `).all(Date.now()) as Array<Record<string, unknown>>;
-    res.json(rows.map(r => ({ ...r, tags: JSON.parse(r.tags as string) })));
+    `,
+      )
+      .all(Date.now()) as Array<Record<string, unknown>>;
+    res.json(rows.map((r) => ({ ...r, tags: JSON.parse(r.tags as string) })));
   });
 
   return router;
@@ -1992,6 +2306,10 @@ export interface WebAppOptions {
   port?: number;
   sendToApprovalChat: (text: string) => Promise<void>;
   getConfig: () => { owner: { name: string; teams: string[] }; readOnly: boolean };
+  onProposalExecuted?: (
+    result: import('../workers/proposal-executor.js').ExecutionResult,
+    proposalId: string,
+  ) => void;
 }
 
 export function startWebApp(options: WebAppOptions): void {
@@ -2009,7 +2327,7 @@ export function startWebApp(options: WebAppOptions): void {
       dbStatus = 'error';
     }
     const channels = getChannelStatuses();
-    const degraded = dbStatus === 'error' || channels.some(c => c.status === 'failed');
+    const degraded = dbStatus === 'error' || channels.some((c) => c.status === 'failed');
     res.status(degraded ? 503 : 200).json({
       status: degraded ? 'degraded' : 'ok',
       version: '0.1.0',
@@ -2020,12 +2338,27 @@ export function startWebApp(options: WebAppOptions): void {
   });
 
   // ── Security headers ──────────────────────────────────────────────────────
-  app.use((_req, res, next) => {
+  const _cfgSnap = options.getConfig() as unknown as import('../config/schema.js').Config;
+  const isHttpsHeaders =
+    _cfgSnap.webapp?.webauthnOrigin?.startsWith('https://') ||
+    process.env.WEBAUTHN_ORIGIN?.startsWith('https://');
+  app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('X-XSS-Protection', '1; mode=block');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    // Relaxed CSP for /display (inline script + Google Fonts required)
+    const isDisplay = req.url?.startsWith('/display');
+    res.setHeader(
+      'Content-Security-Policy',
+      isDisplay
+        ? "default-src 'self'; script-src 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; connect-src 'self' ws: wss:; font-src 'self' data: https://fonts.gstatic.com; frame-ancestors 'none'"
+        : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; font-src 'self' data:; frame-ancestors 'none'",
+    );
+    if (isHttpsHeaders) {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
     next();
   });
 
@@ -2035,7 +2368,9 @@ export function startWebApp(options: WebAppOptions): void {
   const configOrigin = cfg.webapp?.webauthnOrigin;
   const allowedOrigins = new Set([
     ...(process.env.WEBAUTHN_ORIGIN ?? '')
-      .split(',').map(o => o.trim()).filter(Boolean),
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean),
     ...(configOrigin ? [configOrigin] : [`http://localhost:${port}`]),
   ]);
   app.use((req, res, next) => {
@@ -2050,14 +2385,21 @@ export function startWebApp(options: WebAppOptions): void {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
       res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
-    if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
     next();
   });
 
   // ── Rate limiting ────────────────────────────────────────────────────────
   function makeRateLimiter(maxReq: number, windowMs: number, message: string) {
     const buckets = new Map<string, { count: number; resetAt: number }>();
-    return function rateLimiter(req: express.Request, res: express.Response, next: express.NextFunction): void {
+    return function rateLimiter(
+      req: express.Request,
+      res: express.Response,
+      next: express.NextFunction,
+    ): void {
       const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
       const now = Date.now();
       const entry = buckets.get(ip);
@@ -2083,7 +2425,7 @@ export function startWebApp(options: WebAppOptions): void {
   // Auth: 10 req/min (brute-force protection)
   const rateLimitAuth = makeRateLimiter(10, 60_000, 'Too many auth attempts — try again later');
   // API: 120 req/min per IP (normal usage ceiling)
-  const rateLimitApi  = makeRateLimiter(120, 60_000, 'Too many requests — slow down');
+  const rateLimitApi = makeRateLimiter(120, 60_000, 'Too many requests — slow down');
 
   app.use(express.json());
 
@@ -2096,7 +2438,25 @@ export function startWebApp(options: WebAppOptions): void {
   app.use('/api', rateLimitApi);
 
   // WebAuthn routes + authenticated API
-  app.use('/api', buildApi(options.sendToApprovalChat, options.getConfig));
+  app.use(
+    '/api',
+    buildApi(options.sendToApprovalChat, options.getConfig, options.onProposalExecuted),
+  );
+
+  // Jarvis display — served via main HTTPS server (no auth required — public display)
+  app.get('/display', async (_req, res) => {
+    try {
+      const { getJarvisHtml } = await import('./jarvis.js');
+      const html = getJarvisHtml();
+      if (html) {
+        res.type('html').send(html);
+      } else {
+        res.status(503).send('Jarvis display not initialized.');
+      }
+    } catch {
+      res.status(503).send('Jarvis not available.');
+    }
+  });
 
   // React SPA — serve static build if available, otherwise inline fallback
   if (existsSync(CLIENT_DIST)) {
@@ -2116,7 +2476,9 @@ export function startWebApp(options: WebAppOptions): void {
       try {
         const { hasTotpConfigured } = await import('./totp.js');
         totpConfigured = hasTotpConfigured();
-      } catch { /* */ }
+      } catch {
+        /* */
+      }
       if (!hasRegisteredKeys() && !totpConfigured) {
         res.redirect('/setup');
         return;
@@ -2126,9 +2488,26 @@ export function startWebApp(options: WebAppOptions): void {
     });
   }
 
+  // ── CA cert download — no auth, lets other devices install the mkcert CA ─
+  const caPath = path.join(os.homedir(), '.argos', 'tls', 'mkcert-rootCA.pem');
+  app.get('/ca.pem', (_req, res) => {
+    if (!existsSync(caPath)) {
+      res.status(404).send('CA cert not found. Run "argos setup" first.');
+      return;
+    }
+    try {
+      const content = readFileSync(caPath);
+      res.setHeader('Content-Type', 'application/x-x509-ca-cert');
+      res.setHeader('Content-Disposition', 'attachment; filename="argos-ca.pem"');
+      res.send(content);
+    } catch {
+      res.status(500).send('Failed to read CA cert.');
+    }
+  });
+
   // ── TLS / HTTPS support ──────────────────────────────────────────────────
   const tlsCert = cfg.webapp?.tlsCert;
-  const tlsKey  = cfg.webapp?.tlsKey;
+  const tlsKey = cfg.webapp?.tlsKey;
   const isHttps = !!(tlsCert && tlsKey);
 
   const server = isHttps
@@ -2137,8 +2516,37 @@ export function startWebApp(options: WebAppOptions): void {
 
   const scheme = isHttps ? 'https' : 'http';
 
-  // WebSocket — requires valid session cookie
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  // WebSocket — manual upgrade routing for multiple WSS on one server
+  const wss = new WebSocketServer({ noServer: true });
+  const jarvisWss = new WebSocketServer({ noServer: true });
+
+  // Register Jarvis WSS in the jarvis module so broadcast/hasClients works
+  import('./jarvis.js').then(({ registerExternalWss }) => {
+    registerExternalWss(jarvisWss);
+  }).catch(() => {});
+
+  jarvisWss.on('connection', (ws) => {
+    log.info('Argos Display client connected');
+    import('./jarvis.js').then(({ getJarvisConfig }) => {
+      const c = getJarvisConfig();
+      if (c) ws.send(JSON.stringify({ type: 'config', ...c }));
+    }).catch(() => {});
+    ws.on('close', () => log.info('Argos Display client disconnected'));
+  });
+
+  server.on('upgrade', (req, socket, head) => {
+    const url = req.url ?? '/';
+    if (url.startsWith('/jarvis-ws')) {
+      jarvisWss.handleUpgrade(req, socket, head, (ws) => jarvisWss.emit('connection', ws, req));
+    } else if (url.startsWith('/ws')) {
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+    } else {
+      socket.destroy();
+    }
+  });
+
+  // Panel WSS — requires auth
+  const _wss = wss;
   wss.on('connection', (ws, req) => {
     // Basic session check on WS upgrade
     const cookieHeader = req.headers.cookie ?? '';
@@ -2153,35 +2561,57 @@ export function startWebApp(options: WebAppOptions): void {
   });
 
   // Cleanup cron — every 10min prune expired challenges + sessions
-  setInterval(() => {
-    pruneExpiredChallenges();
-    pruneExpiredSessions();
-  }, 10 * 60 * 1000);
+  setInterval(
+    () => {
+      pruneExpiredChallenges();
+      pruneExpiredSessions();
+    },
+    10 * 60 * 1000,
+  );
 
   server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
-      log.error(`Port ${port} already in use — kill the old process: lsof -ti:${port} | xargs kill -9`);
+      log.error(
+        `Port ${port} already in use — kill the old process: lsof -ti:${port} | xargs kill -9`,
+      );
       process.exit(1);
     } else {
       throw err;
     }
   });
 
-  server.on('error', (err: NodeJS.ErrnoException) => {
-    if (err.code === 'EADDRINUSE') {
-      log.error(`Port ${port} already in use — run: lsof -ti:${port} | xargs kill -9`);
-      process.exit(1);
-    } else {
-      throw err;
-    }
-  });
+  // ── HTTP CA distribution server (port+1) — lets iOS/Android install CA ──
+  // Plain HTTP so devices can download before trusting the HTTPS cert.
+  if (isHttps && existsSync(caPath)) {
+    const caPort = port + 1;
+    const caApp = express();
+    caApp.get('/ca.pem', (_req, res) => {
+      try {
+        const content = readFileSync(caPath);
+        res.setHeader('Content-Type', 'application/x-x509-ca-cert');
+        res.setHeader('Content-Disposition', 'attachment; filename="argos-ca.pem"');
+        res.send(content);
+      } catch {
+        res.status(500).send('Failed to read CA cert.');
+      }
+    });
+    caApp.use((_req, res) => res.status(404).send('Not found'));
+    http.createServer(caApp).listen(caPort, '0.0.0.0', () => {
+      const nets2 = os.networkInterfaces();
+      const caIp =
+        Object.values(nets2)
+          .flat()
+          .find((i) => i?.family === 'IPv4' && !i?.internal)?.address ?? 'your-mac-ip';
+      log.info(`   CA download: http://${caIp}:${caPort}/ca.pem  (for iOS — HTTP only)`);
+    });
+  }
 
-  server.listen(port, '0.0.0.0', async () => {
-    const { networkInterfaces } = await import('os');
-    const localIp = Object.values(networkInterfaces())
-      .flat()
-      .find(i => i?.family === 'IPv4' && !i.internal)
-      ?.address ?? 'your-mac-ip';
+  server.listen(port, '0.0.0.0', () => {
+    const nets = os.networkInterfaces();
+    const localIp =
+      Object.values(nets)
+        .flat()
+        .find((i) => i?.family === 'IPv4' && !i?.internal)?.address ?? 'your-mac-ip';
 
     log.info(`📱 Web app running (${isHttps ? 'HTTPS' : 'HTTP'}):`);
     log.info(`   Local:    ${scheme}://localhost:${port}`);
@@ -2189,9 +2619,13 @@ export function startWebApp(options: WebAppOptions): void {
     if (!hasRegisteredKeys()) {
       log.info(`   ⚠️  No YubiKey registered — visit ${scheme}://${localIp}:${port}/setup`);
     }
-    log.info(`   RP ID: ${process.env.WEBAUTHN_RP_ID ?? 'localhost'} (set WEBAUTHN_RP_ID to match your access URL)`);
+    log.info(
+      `   RP ID: ${process.env.WEBAUTHN_RP_ID ?? 'localhost'} (set WEBAUTHN_RP_ID to match your access URL)`,
+    );
     if (!isHttps) {
-      log.warn(`   ⚠️  HTTP only — WebAuthn requires HTTPS for non-localhost. Set tlsCert + tlsKey in config.`);
+      log.warn(
+        `   ⚠️  HTTP only — WebAuthn requires HTTPS for non-localhost. Set tlsCert + tlsKey in config.`,
+      );
     }
   });
 }

@@ -40,12 +40,19 @@ export class CalendarWorker {
       });
 
       const events = response.data.items ?? [];
-      const output = events.map(e => {
-        const start = e.start?.dateTime ?? e.start?.date ?? '';
-        return `• ${e.summary} @ ${new Date(start).toLocaleString('fr-FR')}`;
-      }).join('\n');
+      const output = events
+        .map((e) => {
+          const start = e.start?.dateTime ?? e.start?.date ?? '';
+          return `• ${e.summary} @ ${new Date(start).toLocaleString('fr-FR')}`;
+        })
+        .join('\n');
 
-      return { success: true, dryRun: false, output: output || '(no upcoming events)', data: events };
+      return {
+        success: true,
+        dryRun: false,
+        output: output || '(no upcoming events)',
+        data: events,
+      };
     } catch (e) {
       log.error('Calendar list failed', e);
       return { success: false, dryRun: false, output: String(e) };
@@ -59,7 +66,9 @@ export class CalendarWorker {
         `⏰ ${input.start_time} → ${input.end_time}`,
         input.description ? `📝 ${input.description}` : null,
         input.attendees ? `👥 ${(input.attendees as string[]).join(', ')}` : null,
-      ].filter(Boolean).join('\n');
+      ]
+        .filter(Boolean)
+        .join('\n');
 
       return {
         success: true,
@@ -80,7 +89,7 @@ export class CalendarWorker {
           description: (input.description as string | undefined) ?? '',
           start: { dateTime: input.start_time as string },
           end: { dateTime: input.end_time as string },
-          attendees: (input.attendees as string[] | undefined)?.map(email => ({ email })),
+          attendees: (input.attendees as string[] | undefined)?.map((email) => ({ email })),
         },
       });
 
@@ -113,7 +122,10 @@ export class CalendarWorker {
       },
     });
 
-    const busy = (response.data.calendars?.[calId]?.busy ?? []) as Array<{ start?: string; end?: string }>;
+    const busy = (response.data.calendars?.[calId]?.busy ?? []) as Array<{
+      start?: string;
+      end?: string;
+    }>;
     const slots: Array<{ start: Date; end: Date }> = [];
 
     let cursor = from.getTime();

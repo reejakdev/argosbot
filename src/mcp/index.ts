@@ -63,7 +63,7 @@ export interface AnthropicMcpServer {
 interface ManagedProcess {
   server: McpServer;
   process: ChildProcess;
-  localUrl: string;   // http://localhost:{port}/sse
+  localUrl: string; // http://localhost:{port}/sse
   port: number;
 }
 
@@ -72,7 +72,7 @@ const _processes: Map<string, ManagedProcess> = new Map();
 // ─── Start all configured MCP servers ────────────────────────────────────────
 
 export async function startMcpServers(servers: McpServer[]): Promise<void> {
-  const enabled = servers.filter(s => s.enabled);
+  const enabled = servers.filter((s) => s.enabled);
   if (enabled.length === 0) return;
 
   log.info(`Starting ${enabled.length} MCP server(s)…`);
@@ -152,23 +152,36 @@ async function startStdioServer(server: McpServer): Promise<void> {
 
   const env = { ...process.env, ...server.env };
 
-  log.info(`Starting MCP stdio server "${server.name}": ${server.command} ${server.args.join(' ')}`);
+  log.info(
+    `Starting MCP stdio server "${server.name}": ${server.command} ${server.args.join(' ')}`,
+  );
 
   // Try to use supergateway (stdio → SSE bridge) if available
   let child: ChildProcess;
   try {
     // supergateway wraps any stdio MCP as an SSE server
-    child = spawn('npx', [
-      '-y', 'supergateway',
-      '--stdio', `${server.command} ${server.args.join(' ')}`,
-      '--port', String(port),
-      '--quiet',
-    ], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    child = spawn(
+      'npx',
+      [
+        '-y',
+        'supergateway',
+        '--stdio',
+        `${server.command} ${server.args.join(' ')}`,
+        '--port',
+        String(port),
+        '--quiet',
+      ],
+      { env, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
   } catch (e) {
-    log.warn(`supergateway not available for "${server.name}": ${e instanceof Error ? e.message : String(e)}`);
+    log.warn(
+      `supergateway not available for "${server.name}": ${e instanceof Error ? e.message : String(e)}`,
+    );
     // Fallback: just spawn the process directly (won't be usable via API)
     child = spawn(server.command, server.args, { env, stdio: 'inherit' });
-    log.warn(`MCP server "${server.name}" started but no SSE bridge — install supergateway: npm i -g supergateway`);
+    log.warn(
+      `MCP server "${server.name}" started but no SSE bridge — install supergateway: npm i -g supergateway`,
+    );
     return;
   }
 
@@ -182,8 +195,19 @@ async function startStdioServer(server: McpServer): Promise<void> {
     _processes.delete(server.name);
   });
 
+  // Liveness check — periodically verify the process is still alive
+  const livenessInterval = setInterval(() => {
+    if (child.killed || child.exitCode !== null) {
+      log.warn(`MCP server "${server.name}" is dead (exitCode: ${child.exitCode}) — removing`);
+      _processes.delete(server.name);
+      clearInterval(livenessInterval);
+    }
+  }, 30_000);
+  // Don't keep the process alive just for liveness checks
+  livenessInterval.unref?.();
+
   // Wait a moment for startup
-  await new Promise(r => setTimeout(r, 1500));
+  await new Promise((r) => setTimeout(r, 1500));
 
   const localUrl = `http://localhost:${port}/sse`;
   _processes.set(server.name, { server, process: child, localUrl, port });
@@ -200,7 +224,11 @@ async function getFreePort(startFrom: number): Promise<number> {
       const port = (server.address() as { port: number }).port;
       server.close(() => resolve(port));
     });
-    server.on('error', () => getFreePort(startFrom + 1).then(resolve).catch(reject));
+    server.on('error', () =>
+      getFreePort(startFrom + 1)
+        .then(resolve)
+        .catch(reject),
+    );
   });
 }
 
@@ -208,23 +236,23 @@ async function getFreePort(startFrom: number): Promise<number> {
 
 export interface McpCatalogEntry {
   /** Unique key used in config.json mcpServers[].name */
-  name:         string;
-  description:  string;
-  category:     McpCategory;
-  type:         'url' | 'stdio';
+  name: string;
+  description: string;
+  category: McpCategory;
+  type: 'url' | 'stdio';
   /** Official = maintained by the vendor or MCP steering group */
-  official:     boolean;
+  official: boolean;
   /** npm package to npx-run (stdio only) */
-  package?:     string;
+  package?: string;
   /** Full command override (stdio only) */
-  command?:     string;
-  args?:        string[];
+  command?: string;
+  args?: string[];
   /** Remote SSE/HTTP endpoint (url type) */
-  url?:         string;
-  envVars?:     string[];
+  url?: string;
+  envVars?: string[];
   installNote?: string;
   /** Link to docs / GitHub */
-  docsUrl?:     string;
+  docsUrl?: string;
 }
 
 export type McpCategory =
@@ -238,6 +266,7 @@ export type McpCategory =
   | 'finance'
   | 'infra'
   | 'ai'
+  | 'security'
   | 'other';
 
 // ─── Static catalog ───────────────────────────────────────────────────────────
@@ -246,397 +275,414 @@ export type McpCategory =
 // Nothing here is auto-enabled.
 
 export const MCP_CATALOG: McpCatalogEntry[] = [
-
   // ── Search ────────────────────────────────────────────────────────────────
   {
-    name:        'brave-search',
+    name: 'brave-search',
     description: 'Web search via Brave Search API',
-    category:    'search',
-    type:        'stdio',
-    official:    true,
-    package:     '@modelcontextprotocol/server-brave-search',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-brave-search'],
-    envVars:     ['BRAVE_API_KEY'],
+    category: 'search',
+    type: 'stdio',
+    official: true,
+    package: '@modelcontextprotocol/server-brave-search',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-brave-search'],
+    envVars: ['BRAVE_API_KEY'],
     installNote: 'Free API key at brave.com/search/api',
-    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search',
+    docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search',
   },
   {
-    name:        'exa-search',
+    name: 'exa-search',
     description: 'Neural web search and web crawling (Exa AI)',
-    category:    'search',
-    type:        'stdio',
-    official:    false,
-    package:     'exa-mcp-server',
-    command:     'npx',
-    args:        ['-y', 'exa-mcp-server'],
-    envVars:     ['EXA_API_KEY'],
+    category: 'search',
+    type: 'stdio',
+    official: false,
+    package: 'exa-mcp-server',
+    command: 'npx',
+    args: ['-y', 'exa-mcp-server'],
+    envVars: ['EXA_API_KEY'],
     installNote: 'Get key at exa.ai',
-    docsUrl:     'https://github.com/exa-labs/exa-mcp-server',
+    docsUrl: 'https://github.com/exa-labs/exa-mcp-server',
   },
   {
-    name:        'fetch',
+    name: 'fetch',
     description: 'Fetch any URL and convert to LLM-friendly text',
-    category:    'search',
-    type:        'stdio',
-    official:    true,
-    package:     '@modelcontextprotocol/server-fetch',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-fetch'],
-    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/fetch',
+    category: 'search',
+    type: 'stdio',
+    official: true,
+    package: '@modelcontextprotocol/server-fetch',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-fetch'],
+    docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/fetch',
   },
 
   // ── Productivity ──────────────────────────────────────────────────────────
   {
-    name:        'notion-mcp',
+    name: 'notion-mcp',
     description: 'Notion workspace — official Notion MCP server (runs locally)',
-    category:    'productivity',
-    type:        'stdio',
-    official:    true,
-    package:     '@notionhq/notion-mcp-server',
-    command:     'npx',
-    args:        ['-y', '@notionhq/notion-mcp-server'],
-    envVars:     ['NOTION_TOKEN'],
+    category: 'productivity',
+    type: 'stdio',
+    official: true,
+    package: '@notionhq/notion-mcp-server',
+    command: 'npx',
+    args: ['-y', '@notionhq/notion-mcp-server'],
+    envVars: ['NOTION_TOKEN'],
     installNote: 'Runs locally via npx — needs your Notion integration token',
-    docsUrl:     'https://github.com/notionhq/notion-mcp-server',
+    docsUrl: 'https://github.com/notionhq/notion-mcp-server',
   },
   {
-    name:        'linear-mcp',
+    name: 'linear-mcp',
     description: 'Linear — create and manage issues, projects, cycles',
-    category:    'productivity',
-    type:        'url',
-    official:    true,
-    url:         'https://mcp.linear.app/sse',
-    envVars:     ['LINEAR_API_KEY'],
-    docsUrl:     'https://linear.app/docs/mcp',
+    category: 'productivity',
+    type: 'url',
+    official: true,
+    url: 'https://mcp.linear.app/sse',
+    envVars: ['LINEAR_API_KEY'],
+    docsUrl: 'https://linear.app/docs/mcp',
   },
   {
-    name:        'atlassian',
+    name: 'atlassian',
     description: 'Jira + Confluence + Compass — official Atlassian remote MCP',
-    category:    'productivity',
-    type:        'url',
-    official:    true,
-    url:         'https://mcp.atlassian.com/v1/sse',
-    envVars:     ['ATLASSIAN_TOKEN'],
-    docsUrl:     'https://github.com/atlassian/atlassian-mcp',
+    category: 'productivity',
+    type: 'url',
+    official: true,
+    url: 'https://mcp.atlassian.com/v1/sse',
+    envVars: ['ATLASSIAN_TOKEN'],
+    docsUrl: 'https://github.com/atlassian/atlassian-mcp',
   },
   {
-    name:        'todoist',
+    name: 'todoist',
     description: 'Todoist task management — full REST API v2 access',
-    category:    'productivity',
-    type:        'stdio',
-    official:    true,
-    package:     '@doist/todoist-mcp-server',
-    command:     'npx',
-    args:        ['-y', '@doist/todoist-mcp-server'],
-    envVars:     ['TODOIST_API_TOKEN'],
-    docsUrl:     'https://github.com/Doist/todoist-mcp',
+    category: 'productivity',
+    type: 'stdio',
+    official: true,
+    package: '@doist/todoist-mcp-server',
+    command: 'npx',
+    args: ['-y', '@doist/todoist-mcp-server'],
+    envVars: ['TODOIST_API_TOKEN'],
+    docsUrl: 'https://github.com/Doist/todoist-mcp',
   },
   {
-    name:        'google-calendar',
+    name: 'google-calendar',
     description: 'Google Calendar — read/write events',
-    category:    'productivity',
-    type:        'stdio',
-    official:    false,
-    package:     '@modelcontextprotocol/server-google-calendar',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-google-calendar'],
-    envVars:     ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'],
+    category: 'productivity',
+    type: 'stdio',
+    official: false,
+    package: '@modelcontextprotocol/server-google-calendar',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-google-calendar'],
+    envVars: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'],
   },
   {
-    name:        'google-drive',
+    name: 'google-drive',
     description: 'Google Drive — search files, read documents',
-    category:    'storage',
-    type:        'stdio',
-    official:    true,
-    package:     '@modelcontextprotocol/server-gdrive',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-gdrive'],
-    envVars:     ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'],
-    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/gdrive',
+    category: 'storage',
+    type: 'stdio',
+    official: true,
+    package: '@modelcontextprotocol/server-gdrive',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-gdrive'],
+    envVars: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'],
+    docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/gdrive',
   },
 
   // ── Dev ───────────────────────────────────────────────────────────────────
   {
-    name:        'github',
+    name: 'github',
     description: 'GitHub — repos, issues, PRs, code search (official)',
-    category:    'dev',
-    type:        'stdio',
-    official:    true,
-    package:     '@github/github-mcp-server',
-    command:     'npx',
-    args:        ['-y', '@github/github-mcp-server'],
-    envVars:     ['GITHUB_PERSONAL_ACCESS_TOKEN'],
+    category: 'dev',
+    type: 'stdio',
+    official: true,
+    package: '@github/github-mcp-server',
+    command: 'npx',
+    args: ['-y', '@github/github-mcp-server'],
+    envVars: ['GITHUB_PERSONAL_ACCESS_TOKEN'],
     installNote: 'Create token at github.com/settings/tokens',
-    docsUrl:     'https://github.com/github/github-mcp-server',
+    docsUrl: 'https://github.com/github/github-mcp-server',
   },
   {
-    name:        'git',
+    name: 'git',
     description: 'Local Git repos — read history, diff, search commits',
-    category:    'dev',
-    type:        'stdio',
-    official:    true,
-    package:     '@modelcontextprotocol/server-git',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-git'],
-    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/git',
+    category: 'dev',
+    type: 'stdio',
+    official: true,
+    package: '@modelcontextprotocol/server-git',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-git'],
+    docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/git',
   },
   {
-    name:        'filesystem',
+    name: 'filesystem',
     description: 'Local filesystem — read/write files with access controls',
-    category:    'dev',
-    type:        'stdio',
-    official:    true,
-    package:     '@modelcontextprotocol/server-filesystem',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-filesystem', process.env.HOME ?? '/Users'],
-    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem',
+    category: 'dev',
+    type: 'stdio',
+    official: true,
+    package: '@modelcontextprotocol/server-filesystem',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-filesystem', process.env.HOME ?? '/Users'],
+    docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem',
   },
   {
-    name:        'sequential-thinking',
+    name: 'sequential-thinking',
     description: 'Structured multi-step reasoning (chain-of-thought scaffold)',
-    category:    'ai',
-    type:        'stdio',
-    official:    true,
-    package:     '@modelcontextprotocol/server-sequential-thinking',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-sequential-thinking'],
-    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking',
+    category: 'ai',
+    type: 'stdio',
+    official: true,
+    package: '@modelcontextprotocol/server-sequential-thinking',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
+    docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking',
   },
   {
-    name:        'memory-kg',
+    name: 'memory-kg',
     description: 'Persistent knowledge graph memory across sessions',
-    category:    'ai',
-    type:        'stdio',
-    official:    true,
-    package:     '@modelcontextprotocol/server-memory',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-memory'],
-    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/memory',
+    category: 'ai',
+    type: 'stdio',
+    official: true,
+    package: '@modelcontextprotocol/server-memory',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-memory'],
+    docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/memory',
   },
   {
-    name:        'time',
+    name: 'time',
     description: 'Current time and timezone conversion',
-    category:    'other',
-    type:        'stdio',
-    official:    true,
-    package:     '@modelcontextprotocol/server-time',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-time'],
-    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/time',
+    category: 'other',
+    type: 'stdio',
+    official: true,
+    package: '@modelcontextprotocol/server-time',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-time'],
+    docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/time',
   },
   {
-    name:        'e2b-code',
+    name: 'e2b-code',
     description: 'Sandboxed Python/JS code execution (E2B)',
-    category:    'dev',
-    type:        'stdio',
-    official:    false,
-    package:     '@e2b/mcp-server',
-    command:     'npx',
-    args:        ['-y', '@e2b/mcp-server'],
-    envVars:     ['E2B_API_KEY'],
+    category: 'dev',
+    type: 'stdio',
+    official: false,
+    package: '@e2b/mcp-server',
+    command: 'npx',
+    args: ['-y', '@e2b/mcp-server'],
+    envVars: ['E2B_API_KEY'],
     installNote: 'Get sandbox API key at e2b.dev',
-    docsUrl:     'https://e2b.dev/docs/mcp',
+    docsUrl: 'https://e2b.dev/docs/mcp',
   },
   {
-    name:        'vercel',
+    name: 'vercel',
     description: 'Vercel — deployments, env vars, domains, projects',
-    category:    'infra',
-    type:        'stdio',
-    official:    true,
-    package:     '@vercel/mcp-adapter',
-    command:     'npx',
-    args:        ['-y', '@vercel/mcp-adapter'],
-    envVars:     ['VERCEL_TOKEN'],
-    docsUrl:     'https://vercel.com/docs/mcp',
+    category: 'infra',
+    type: 'stdio',
+    official: true,
+    package: '@vercel/mcp-adapter',
+    command: 'npx',
+    args: ['-y', '@vercel/mcp-adapter'],
+    envVars: ['VERCEL_TOKEN'],
+    docsUrl: 'https://vercel.com/docs/mcp',
   },
 
   // ── Browser ───────────────────────────────────────────────────────────────
   {
-    name:        'puppeteer',
+    name: 'puppeteer',
     description: 'Browser automation — scrape, fill forms, screenshots (local)',
-    category:    'browser',
-    type:        'stdio',
-    official:    false,
-    package:     '@modelcontextprotocol/server-puppeteer',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-puppeteer'],
-    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/puppeteer',
+    category: 'browser',
+    type: 'stdio',
+    official: false,
+    package: '@modelcontextprotocol/server-puppeteer',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-puppeteer'],
+    docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/puppeteer',
   },
   {
-    name:        'browserbase',
+    name: 'browserbase',
     description: 'Cloud browser automation via Stagehand (Browserbase)',
-    category:    'browser',
-    type:        'url',
-    official:    false,
-    url:         'https://mcp.browserbase.com/mcp',
-    envVars:     ['BROWSERBASE_API_KEY', 'BROWSERBASE_PROJECT_ID'],
-    docsUrl:     'https://github.com/browserbase/mcp-server-browserbase',
+    category: 'browser',
+    type: 'url',
+    official: false,
+    url: 'https://mcp.browserbase.com/mcp',
+    envVars: ['BROWSERBASE_API_KEY', 'BROWSERBASE_PROJECT_ID'],
+    docsUrl: 'https://github.com/browserbase/mcp-server-browserbase',
   },
 
   // ── Database ──────────────────────────────────────────────────────────────
   {
-    name:        'postgres',
+    name: 'postgres',
     description: 'PostgreSQL — query databases (read-only by default)',
-    category:    'database',
-    type:        'stdio',
-    official:    false,
-    package:     '@modelcontextprotocol/server-postgres',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-postgres'],
-    envVars:     ['POSTGRES_URL'],
+    category: 'database',
+    type: 'stdio',
+    official: false,
+    package: '@modelcontextprotocol/server-postgres',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-postgres'],
+    envVars: ['POSTGRES_URL'],
   },
   {
-    name:        'sqlite',
+    name: 'sqlite',
     description: 'SQLite — query and analyze local SQLite databases',
-    category:    'database',
-    type:        'stdio',
-    official:    true,
-    package:     '@modelcontextprotocol/server-sqlite',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-sqlite', '--db-path', '~/.argos/argos.db'],
-    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite',
+    category: 'database',
+    type: 'stdio',
+    official: true,
+    package: '@modelcontextprotocol/server-sqlite',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-sqlite', '--db-path', '~/.argos/argos.db'],
+    docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite',
   },
   {
-    name:        'supabase',
+    name: 'supabase',
     description: 'Supabase — database, auth, edge functions (⚠ dev/staging only)',
-    category:    'database',
-    type:        'stdio',
-    official:    true,
-    package:     '@supabase/mcp-server-supabase',
-    command:     'npx',
-    args:        ['-y', '@supabase/mcp-server-supabase'],
-    envVars:     ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
+    category: 'database',
+    type: 'stdio',
+    official: true,
+    package: '@supabase/mcp-server-supabase',
+    command: 'npx',
+    args: ['-y', '@supabase/mcp-server-supabase'],
+    envVars: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
     installNote: '⚠ Never use production service role key',
-    docsUrl:     'https://github.com/supabase-community/supabase-mcp',
+    docsUrl: 'https://github.com/supabase-community/supabase-mcp',
   },
 
   // ── Secrets / Credentials ────────────────────────────────────────────────
   {
-    name:        '1password',
-    description: '1Password — retrieve secrets during setup only. NOT for runtime use — secrets must never reach the planner or LLM.',
-    category:    'other',
-    type:        'stdio',
-    official:    true,
-    package:     '@1password/mcp-server',
-    command:     'npx',
-    args:        ['-y', '@1password/mcp-server'],
-    envVars:     ['OP_SERVICE_ACCOUNT_TOKEN'],
-    installNote: '⚠️ Setup use only — enable to pre-fill config.json with API keys, then disable immediately. Never leave enabled at runtime (secrets would be accessible to the planner/LLM). Generate a Service Account token at 1password.com/developer with minimal vault permissions.',
-    docsUrl:     'https://developer.1password.com/docs/mcp',
+    name: '1password',
+    description:
+      '1Password — retrieve secrets during setup only. NOT for runtime use — secrets must never reach the planner or LLM.',
+    category: 'security',
+    type: 'stdio',
+    official: true,
+    package: '@1password/mcp-server',
+    command: 'npx',
+    args: ['-y', '@1password/mcp-server'],
+    envVars: ['OP_SERVICE_ACCOUNT_TOKEN'],
+    installNote:
+      '⚠️ Setup use only — enable to pre-fill config.json with API keys, then disable immediately. Never leave enabled at runtime (secrets would be accessible to the planner/LLM). Generate a Service Account token at 1password.com/developer with minimal vault permissions.',
+    docsUrl: 'https://developer.1password.com/docs/mcp',
+  },
+
+  {
+    name: 'bitwarden',
+    description: 'Bitwarden — vault access: passwords, TOTP, secure notes, password generation',
+    category: 'security',
+    type: 'stdio',
+    official: true,
+    package: '@bitwarden/mcp-server',
+    command: 'npx',
+    args: ['-y', '@bitwarden/mcp-server'],
+    envVars: ['BW_SESSION'],
+    installNote:
+      'Install bw CLI: brew install bitwarden-cli. Then: bw login && export BW_SESSION=$(bw unlock --raw)',
+    docsUrl: 'https://github.com/bitwarden/mcp-server',
   },
 
   // ── Communication ─────────────────────────────────────────────────────────
   {
-    name:        'gmail',
+    name: 'gmail',
     description: 'Gmail — read emails, create drafts, send, manage labels (official Google MCP)',
-    category:    'communication',
-    type:        'stdio',
-    official:    true,
-    package:     '@modelcontextprotocol/server-gmail',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-gmail'],
-    envVars:     ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'],
+    category: 'communication',
+    type: 'stdio',
+    official: true,
+    package: '@modelcontextprotocol/server-gmail',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-gmail'],
+    envVars: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN'],
     installNote: 'Uses the same Google OAuth credentials as the Calendar integration',
-    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/gmail',
+    docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/gmail',
   },
   {
-    name:        'outlook',
+    name: 'outlook',
     description: 'Microsoft Outlook / Office 365 — read, draft, send emails via Graph API',
-    category:    'communication',
-    type:        'stdio',
-    official:    false,
-    package:     'mcp-server-outlook',
-    command:     'npx',
-    args:        ['-y', 'mcp-server-outlook'],
-    envVars:     ['MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET', 'MICROSOFT_REFRESH_TOKEN'],
+    category: 'communication',
+    type: 'stdio',
+    official: false,
+    package: 'mcp-server-outlook',
+    command: 'npx',
+    args: ['-y', 'mcp-server-outlook'],
+    envVars: ['MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET', 'MICROSOFT_REFRESH_TOKEN'],
     installNote: 'Register an app at portal.azure.com → App registrations',
-    docsUrl:     'https://github.com/modelcontextprotocol/servers',
+    docsUrl: 'https://github.com/modelcontextprotocol/servers',
   },
   {
-    name:        'slack',
+    name: 'slack',
     description: 'Slack — read channels, send messages, reply to threads',
-    category:    'communication',
-    type:        'stdio',
-    official:    true,
-    package:     '@modelcontextprotocol/server-slack',
-    command:     'npx',
-    args:        ['-y', '@modelcontextprotocol/server-slack'],
-    envVars:     ['SLACK_BOT_TOKEN', 'SLACK_TEAM_ID'],
-    docsUrl:     'https://github.com/modelcontextprotocol/servers/tree/main/src/slack',
+    category: 'communication',
+    type: 'stdio',
+    official: true,
+    package: '@modelcontextprotocol/server-slack',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-slack'],
+    envVars: ['SLACK_BOT_TOKEN', 'SLACK_TEAM_ID'],
+    docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/slack',
   },
 
   // ── Finance ───────────────────────────────────────────────────────────────
   {
-    name:        'stripe',
+    name: 'stripe',
     description: 'Stripe — customers, payments, invoices (official)',
-    category:    'finance',
-    type:        'stdio',
-    official:    true,
-    package:     '@stripe/mcp',
-    command:     'npx',
-    args:        ['-y', '@stripe/mcp', '--tools=all'],
-    envVars:     ['STRIPE_SECRET_KEY'],
+    category: 'finance',
+    type: 'stdio',
+    official: true,
+    package: '@stripe/mcp',
+    command: 'npx',
+    args: ['-y', '@stripe/mcp', '--tools=all'],
+    envVars: ['STRIPE_SECRET_KEY'],
     installNote: 'Use a Restricted API Key — never the full secret key',
-    docsUrl:     'https://github.com/stripe/agent-toolkit',
+    docsUrl: 'https://github.com/stripe/agent-toolkit',
   },
 
   // ── Infra / Cloud ─────────────────────────────────────────────────────────
   {
-    name:        'cloudflare',
+    name: 'cloudflare',
     description: 'Cloudflare — 2500+ API endpoints, Workers, DNS, analytics',
-    category:    'infra',
-    type:        'url',
-    official:    true,
-    url:         'https://mcp.cloudflare.com/mcp',
-    docsUrl:     'https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/',
+    category: 'infra',
+    type: 'url',
+    official: true,
+    url: 'https://mcp.cloudflare.com/mcp',
+    docsUrl:
+      'https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/',
   },
 
   // ── Automation ────────────────────────────────────────────────────────────
   {
-    name:        'zapier',
+    name: 'zapier',
     description: 'Zapier — trigger any of 8000+ app integrations',
-    category:    'other',
-    type:        'url',
-    official:    false,
-    url:         'https://mcp.zapier.com/api/mcp/mcp',
-    envVars:     ['ZAPIER_MCP_URL'],
+    category: 'other',
+    type: 'url',
+    official: false,
+    url: 'https://mcp.zapier.com/api/mcp/mcp',
+    envVars: ['ZAPIER_MCP_URL'],
     installNote: 'Generate your personal MCP URL at zapier.com/mcp',
-    docsUrl:     'https://zapier.com/mcp',
+    docsUrl: 'https://zapier.com/mcp',
   },
   {
-    name:        'figma',
+    name: 'figma',
     description: 'Figma — read design tokens, layouts, component structure',
-    category:    'dev',
-    type:        'stdio',
-    official:    false,
-    package:     'figma-mcp',
-    command:     'npx',
-    args:        ['-y', 'figma-mcp'],
-    envVars:     ['FIGMA_API_TOKEN'],
+    category: 'dev',
+    type: 'stdio',
+    official: false,
+    package: 'figma-mcp',
+    command: 'npx',
+    args: ['-y', 'figma-mcp'],
+    envVars: ['FIGMA_API_TOKEN'],
   },
   {
-    name:        'spotify',
+    name: 'spotify',
     description: 'Spotify — search, playback control, queue management',
-    category:    'other',
-    type:        'stdio',
-    official:    false,
-    package:     'mcp-server-spotify',
-    command:     'npx',
-    args:        ['-y', 'mcp-server-spotify'],
-    envVars:     ['SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'SPOTIFY_REFRESH_TOKEN'],
+    category: 'other',
+    type: 'stdio',
+    official: false,
+    package: 'mcp-server-spotify',
+    command: 'npx',
+    args: ['-y', 'mcp-server-spotify'],
+    envVars: ['SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'SPOTIFY_REFRESH_TOKEN'],
   },
   {
-    name:        'huggingface',
+    name: 'huggingface',
     description: 'Hugging Face — models, datasets, spaces',
-    category:    'ai',
-    type:        'stdio',
-    official:    false,
-    package:     '@huggingface/mcp-server',
-    command:     'npx',
-    args:        ['-y', '@huggingface/mcp-server'],
-    envVars:     ['HF_TOKEN'],
-    docsUrl:     'https://huggingface.co/blog/mcp',
+    category: 'ai',
+    type: 'stdio',
+    official: false,
+    package: '@huggingface/mcp-server',
+    command: 'npx',
+    args: ['-y', '@huggingface/mcp-server'],
+    envVars: ['HF_TOKEN'],
+    docsUrl: 'https://huggingface.co/blog/mcp',
   },
 ];
 
@@ -647,21 +693,21 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
 const MCP_REGISTRY_URL = 'https://registry.modelcontextprotocol.io/v0/servers';
 
 export interface RegistryServer {
-  id:          string;
-  name:        string;
+  id: string;
+  name: string;
   description: string;
-  package?:    string;
-  url?:        string;
+  package?: string;
+  url?: string;
 }
 
 export async function fetchMcpRegistry(limit = 100): Promise<RegistryServer[]> {
   try {
     const res = await fetch(`${MCP_REGISTRY_URL}?limit=${limit}`, {
-      headers: { 'Accept': 'application/json' },
+      headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(8_000),
     });
     if (!res.ok) return [];
-    const data = await res.json() as { servers?: RegistryServer[] };
+    const data = (await res.json()) as { servers?: RegistryServer[] };
     return data.servers ?? [];
   } catch {
     return [];
@@ -670,7 +716,7 @@ export async function fetchMcpRegistry(limit = 100): Promise<RegistryServer[]> {
 
 /** Returns catalog entries not yet in the static MCP_CATALOG. */
 export async function fetchNewMcpServers(): Promise<RegistryServer[]> {
-  const known = new Set(MCP_CATALOG.map(e => e.name));
+  const known = new Set(MCP_CATALOG.map((e) => e.name));
   const remote = await fetchMcpRegistry(200);
-  return remote.filter(s => !known.has(s.name) && !known.has(s.id));
+  return remote.filter((s) => !known.has(s.name) && !known.has(s.id));
 }

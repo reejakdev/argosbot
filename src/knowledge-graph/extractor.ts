@@ -5,15 +5,15 @@ const log = createLogger('kg-extractor');
 
 export interface ExtractedEntity {
   type: 'person' | 'company' | 'project' | 'contract' | 'amount' | 'address';
-  name: string;       // anonymized (already processed by anonymizer)
+  name: string; // anonymized (already processed by anonymizer)
   properties: Record<string, unknown>;
 }
 
 export interface ExtractedRelation {
-  from: string;  // entity name
+  from: string; // entity name
   to: string;
-  relation: string;  // e.g. 'works_for', 'owns', 'mentioned_with', 'counterparty'
-  context: string;   // short anonymized snippet
+  relation: string; // e.g. 'works_for', 'owns', 'mentioned_with', 'counterparty'
+  context: string; // short anonymized snippet
 }
 
 export interface ExtractionResult {
@@ -44,10 +44,9 @@ Text:
 ${anonText.slice(0, 1500)}`;
 
   try {
-    const response = await llmCall(
-      { ...llmConfig, temperature: 0, maxTokens: 512 },
-      [{ role: 'user', content: prompt }],
-    );
+    const response = await llmCall({ ...llmConfig, temperature: 0, maxTokens: 512 }, [
+      { role: 'user', content: prompt },
+    ]);
     const result = extractJson<ExtractionResult>(response.content);
     return {
       entities: (result.entities ?? []).slice(0, 20),

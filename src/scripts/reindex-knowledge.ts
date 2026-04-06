@@ -18,7 +18,8 @@ const db = getDb();
 db.prepare(`DELETE FROM memories WHERE category = 'context'`).run();
 console.log('Cleared cached knowledge entries\n');
 
-let ok = 0, fail = 0;
+let ok = 0,
+  fail = 0;
 
 for (const source of config.knowledge.sources) {
   process.stdout.write(`Fetching [${source.name}]... `);
@@ -26,16 +27,16 @@ for (const source of config.knowledge.sources) {
     let doc = null;
     if (source.type === 'github') {
       doc = await fetchGitHub({
-        owner:       source.owner,
-        repo:        source.repo,
-        paths:       source.paths,
-        name:        source.name,
+        owner: source.owner,
+        repo: source.repo,
+        paths: source.paths,
+        name: source.name,
         refreshDays: source.refreshHours / 24,
       });
     } else if (source.type === 'url') {
       doc = await fetchUrl({
-        url:         (source as { url: string }).url,
-        name:        source.name,
+        url: (source as { url: string }).url,
+        name: source.name,
         refreshDays: source.refreshHours / 24,
       });
     }

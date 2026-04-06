@@ -19,6 +19,7 @@ import { createLogger } from '../logger.js';
 import { getSkillToolDefinitions, executeSkill } from '../skills/registry.js';
 import { requestApproval } from '../gateway/approval.js';
 import { llmConfigFromConfig, callWithTools, buildToolResultMessages } from '../llm/index.js';
+import { llmForRole, buildPrivacyLlmConfig } from './privacy.js';
 import type { Config } from '../config/schema.js';
 import type { Proposal, ProposedAction, WorkerType } from '../types.js';
 
@@ -31,31 +32,72 @@ function buildStateSnapshot(): string {
   const db = getDb();
   const now = Date.now();
 
-  const openTasks = db.prepare(`
+  // Auto-archive memories whose linked tasks are now completed/cancelled.
+  // Uses actual task status instead of fragile LIKE patterns.
+  try {
+    db.prepare(
+      `
+      UPDATE memories SET archived = 1
+      WHERE archived = 0
+        AND source_ref LIKE 'triage:%'
+        AND created_at < ?
+        AND chat_id IN (
+          SELECT DISTINCT chat_id FROM tasks
+          WHERE status IN ('completed', 'cancelled', 'done_inferred')
+            AND detected_at > ?
+        )
+    `,
+    ).run(now - 6 * 3600_000, now - 30 * 86400_000); // >6h old memories, tasks from last 30d
+  } catch {
+    /* non-blocking */
+  }
+
+  const openTasks = db
+    .prepare(
+      `
     SELECT title, assigned_team, detected_at FROM tasks
     WHERE status IN ('open', 'in_progress')
     ORDER BY detected_at DESC LIMIT 10
-  `).all() as Array<{ title: string; assigned_team: string | null; detected_at: number }>;
+  `,
+    )
+    .all() as Array<{ title: string; assigned_team: string | null; detected_at: number }>;
 
-  const pendingApprovals = db.prepare(`
+  const pendingApprovals = db
+    .prepare(
+      `
     SELECT a.id, p.context_summary, a.expires_at
     FROM approvals a
     JOIN proposals p ON p.id = a.proposal_id
     WHERE a.status = 'pending' AND a.expires_at > ?
     ORDER BY a.created_at DESC LIMIT 5
-  `).all(now) as Array<{ id: string; context_summary: string; expires_at: number }>;
+  `,
+    )
+    .all(now) as Array<{ id: string; context_summary: string; expires_at: number }>;
 
-  const recentMemories = db.prepare(`
+  const recentMemories = db
+    .prepare(
+      `
     SELECT content, partner_name, importance, created_at FROM memories
     WHERE (expires_at IS NULL OR expires_at > ?) AND archived = 0
     ORDER BY importance DESC, created_at DESC LIMIT 8
-  `).all(now) as Array<{ content: string; partner_name: string | null; importance: number; created_at: number }>;
+  `,
+    )
+    .all(now) as Array<{
+    content: string;
+    partner_name: string | null;
+    importance: number;
+    created_at: number;
+  }>;
 
-  const agentCrons = db.prepare(`
+  const agentCrons = db
+    .prepare(
+      `
     SELECT name, schedule, last_run FROM cron_jobs
     WHERE enabled = 1 AND name LIKE 'agent:%'
     ORDER BY name
-  `).all() as Array<{ name: string; schedule: string; last_run: number | null }>;
+  `,
+    )
+    .all() as Array<{ name: string; schedule: string; last_run: number | null }>;
 
   const lines: string[] = [];
 
@@ -65,7 +107,9 @@ function buildStateSnapshot(): string {
     lines.push(`OPEN/IN-PROGRESS TASKS (${openTasks.length}):`);
     for (const t of openTasks) {
       const age = Math.round((now - t.detected_at) / 3600000);
-      lines.push(`  • [${age}h old] ${t.title}${t.assigned_team ? ` (team: ${t.assigned_team})` : ''}`);
+      lines.push(
+        `  • [${age}h old] ${t.title}${t.assigned_team ? ` (team: ${t.assigned_team})` : ''}`,
+      );
     }
     lines.push('');
   } else {
@@ -137,7 +181,13 @@ export async function runProactivePlan(
   log.info(`Proactive plan: ${label}`);
 
   // Provider-agnostic tool loop — works with Anthropic, OpenAI, Groq, Ollama, etc.
-  const llmCfg = { ...llmConfigFromConfig(config), temperature: 0.2, maxTokens: 2048 };
+  const primaryLlm = llmConfigFromConfig(config);
+  const privacyLlm = buildPrivacyLlmConfig(config);
+  const llmCfg = {
+    ...llmForRole('plan', primaryLlm, privacyLlm, config),
+    temperature: 0.2,
+    maxTokens: 2048,
+  };
 
   const stateSnapshot = buildStateSnapshot();
 
@@ -151,9 +201,9 @@ export async function runProactivePlan(
       input_schema: {
         type: 'object',
         properties: {
-          to:              { type: 'string', description: 'Recipient' },
-          content:         { type: 'string', description: 'Message content' },
-          urgency:         { type: 'string', enum: ['low', 'medium', 'high'] },
+          to: { type: 'string', description: 'Recipient' },
+          content: { type: 'string', description: 'Message content' },
+          urgency: { type: 'string', enum: ['low', 'medium', 'high'] },
           notes_for_owner: { type: 'string', description: 'Why this reply is needed' },
         },
         required: ['to', 'content', 'urgency'],
@@ -165,10 +215,10 @@ export async function runProactivePlan(
       input_schema: {
         type: 'object',
         properties: {
-          title:         { type: 'string' },
-          content:       { type: 'string' },
+          title: { type: 'string' },
+          content: { type: 'string' },
           database_type: { type: 'string', enum: ['task', 'note', 'partner', 'deal', 'tx_review'] },
-          tags:          { type: 'array', items: { type: 'string' } },
+          tags: { type: 'array', items: { type: 'string' } },
         },
         required: ['title', 'content', 'database_type'],
       },
@@ -179,8 +229,8 @@ export async function runProactivePlan(
       input_schema: {
         type: 'object',
         properties: {
-          message:     { type: 'string' },
-          fire_at:     { type: 'string', description: 'ISO 8601 datetime' },
+          message: { type: 'string' },
+          fire_at: { type: 'string', description: 'ISO 8601 datetime' },
           context_ref: { type: 'string' },
         },
         required: ['message', 'fire_at'],
@@ -205,16 +255,18 @@ export async function runProactivePlan(
     const feedbacks: Array<{ id: string; content: string }> = [];
 
     for (const call of step.toolCalls) {
-      if (skillTools.some(t => t.name === call.name)) {
+      if (skillTools.some((t) => t.name === call.name)) {
         const result = await executeSkill(call.name, call.input, config.skills);
         feedbacks.push({ id: call.id, content: result.output });
         continue;
       }
-      const workerType: WorkerType =
-        call.name.includes('calendar') ? 'calendar' :
-        call.name.includes('notion')   ? 'notion'   :
-        call.name.includes('reminder') || call.name.includes('cron') ? 'scheduler' :
-        'reply';
+      const workerType: WorkerType = call.name.includes('calendar')
+        ? 'calendar'
+        : call.name.includes('notion')
+          ? 'notion'
+          : call.name.includes('reminder') || call.name.includes('cron')
+            ? 'scheduler'
+            : 'reply';
       actions.push({
         type: workerType,
         description: `[${label}] ${call.name}: ${JSON.stringify(call.input).slice(0, 80)}`,
@@ -249,10 +301,12 @@ export async function runProactivePlan(
   };
 
   const db = getDb();
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO proposals (id, context_summary, plan, actions, draft_reply, status, created_at, expires_at)
     VALUES (?, ?, ?, ?, ?, 'proposed', ?, ?)
-  `).run(
+  `,
+  ).run(
     proposal.id,
     proposal.contextSummary,
     proposal.plan,
@@ -286,8 +340,8 @@ export async function runHeartbeat(
   }
 
   await runProactivePlan(config, {
-    prompt:              config.heartbeat.prompt,
-    label:               'heartbeat',
+    prompt: config.heartbeat.prompt,
+    label: 'heartbeat',
     sendToApprovalChat,
   });
 }

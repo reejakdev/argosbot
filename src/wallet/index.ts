@@ -26,19 +26,19 @@ const log = createLogger('wallet');
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface EncryptedKey {
-  iv: string;     // hex
-  tag: string;    // hex (GCM auth tag)
-  ct: string;     // hex ciphertext
+  iv: string; // hex
+  tag: string; // hex (GCM auth tag)
+  ct: string; // hex ciphertext
 }
 
 interface WalletFile {
   version: 2;
   evm?: {
-    address: string;  // public, plaintext
+    address: string; // public, plaintext
     key: EncryptedKey;
   };
   solana?: {
-    address: string;  // public, plaintext
+    address: string; // public, plaintext
     key: EncryptedKey;
   };
 }
@@ -56,27 +56,22 @@ function deriveKey(secret: string): Buffer {
 }
 
 function encrypt(key: Buffer, plaintext: string): EncryptedKey {
-  const iv = randomBytes(12);  // 96-bit IV for GCM
+  const iv = randomBytes(12); // 96-bit IV for GCM
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   return {
-    iv:  iv.toString('hex'),
+    iv: iv.toString('hex'),
     tag: cipher.getAuthTag().toString('hex'),
-    ct:  ct.toString('hex'),
+    ct: ct.toString('hex'),
   };
 }
 
 function decrypt(key: Buffer, enc: EncryptedKey): string {
-  const decipher = createDecipheriv(
-    'aes-256-gcm',
-    key,
-    Buffer.from(enc.iv, 'hex'),
-  );
+  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(enc.iv, 'hex'));
   decipher.setAuthTag(Buffer.from(enc.tag, 'hex'));
-  return Buffer.concat([
-    decipher.update(Buffer.from(enc.ct, 'hex')),
-    decipher.final(),
-  ]).toString('utf8');
+  return Buffer.concat([decipher.update(Buffer.from(enc.ct, 'hex')), decipher.final()]).toString(
+    'utf8',
+  );
 }
 
 // ─── Wallet file path ─────────────────────────────────────────────────────────
@@ -94,7 +89,11 @@ function loadFile(dataDir: string): WalletFile | null {
 function saveFile(dataDir: string, wallet: WalletFile): void {
   const p = walletPath(dataDir);
   writeFileSync(p, JSON.stringify(wallet, null, 2), { mode: 0o600 });
-  try { chmodSync(p, 0o600); } catch { /* already correct on most systems */ }
+  try {
+    chmodSync(p, 0o600);
+  } catch {
+    /* already correct on most systems */
+  }
 }
 
 // ─── EVM key management ───────────────────────────────────────────────────────
@@ -116,7 +115,7 @@ async function generateSolanaKey(): Promise<{ address: string; secretKey: Uint8A
   const { Keypair } = await import('@solana/web3.js');
   const kp = Keypair.generate();
   return {
-    address:   kp.publicKey.toBase58(),
+    address: kp.publicKey.toBase58(),
     secretKey: kp.secretKey,
   };
 }

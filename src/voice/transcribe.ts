@@ -7,10 +7,10 @@ import { join } from 'path';
 const log = createLogger('voice');
 
 export interface VoiceConfig {
-  whisperEndpoint?: string;   // default: https://api.openai.com/v1
+  whisperEndpoint?: string; // default: https://api.openai.com/v1
   whisperApiKey?: string;
-  whisperModel?: string;      // default: whisper-1 (API) or 'base' (local)
-  whisperBackend?: 'api' | 'local';  // default: auto (local if no apiKey)
+  whisperModel?: string; // default: whisper-1 (API) or 'base' (local)
+  whisperBackend?: 'api' | 'local'; // default: auto (local if no apiKey)
 }
 
 /**
@@ -25,8 +25,7 @@ export async function transcribeAudio(
   filename: string,
   config: VoiceConfig,
 ): Promise<string> {
-  const backend = config.whisperBackend
-    ?? (config.whisperApiKey ? 'api' : 'local');
+  const backend = config.whisperBackend ?? (config.whisperApiKey ? 'api' : 'local');
 
   if (backend === 'local') {
     return transcribeLocal(audioBuffer, filename, config.whisperModel ?? 'base');
@@ -51,33 +50,36 @@ async function transcribeLocal(buffer: Buffer, filename: string, model: string):
       const check = spawn('which', ['whisper']);
       check.on('close', (code) => res(code === 0));
     });
-    const outDir  = voiceDir;  // whisper writes output to ~/.argos/voice/
+    const outDir = voiceDir; // whisper writes output to ~/.argos/voice/
     // whisper names output as <stem>.txt — derive it from the input filename
-    const stem    = tmpFile.replace(/\.[^.]+$/, '');   // strip last extension
+    const stem = tmpFile.replace(/\.[^.]+$/, ''); // strip last extension
     const baseName = stem.split('/').pop()! + '.txt';
-    const outFile  = join(outDir, baseName);
+    const outFile = join(outDir, baseName);
     // whisper sometimes ignores --output_dir — spawn it with cwd=voiceDir so CWD writes land there too
     const cwdOutFile = join(voiceDir, baseName);
 
-    const cmd  = whisperInPath ? 'whisper' : 'python3';
+    const cmd = whisperInPath ? 'whisper' : 'python3';
     const baseArgs = [
-      '--model', model,
-      '--output_format', 'txt',
-      '--output_dir', outDir,
-      '--verbose', 'False',
-      '--fp16', 'False',
+      '--model',
+      model,
+      '--output_format',
+      'txt',
+      '--output_dir',
+      outDir,
+      '--verbose',
+      'False',
+      '--fp16',
+      'False',
     ];
-    const args = whisperInPath
-      ? [tmpFile, ...baseArgs]
-      : ['-m', 'whisper', tmpFile, ...baseArgs];
+    const args = whisperInPath ? [tmpFile, ...baseArgs] : ['-m', 'whisper', tmpFile, ...baseArgs];
 
     const transcript = await new Promise<string>((resolve, reject) => {
       const proc = spawn(cmd, args, { timeout: 120_000, cwd: voiceDir });
 
       let stdout = '';
       let stderr = '';
-      proc.stdout.on('data', (d: Buffer) => stdout += d.toString());
-      proc.stderr.on('data', (d: Buffer) => stderr += d.toString());
+      proc.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
+      proc.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
 
       proc.on('close', (code) => {
         if (code !== 0) {
@@ -85,12 +87,25 @@ async function transcribeLocal(buffer: Buffer, filename: string, model: string):
           return;
         }
         // whisper may write to --output_dir or CWD — check both
-        const actualOut = existsSync(outFile) ? outFile : existsSync(cwdOutFile) ? cwdOutFile : null;
+        const actualOut = existsSync(outFile)
+          ? outFile
+          : existsSync(cwdOutFile)
+            ? cwdOutFile
+            : null;
         if (actualOut) {
           const text = readFileSync(actualOut, 'utf8').trim();
-          try { unlinkSync(actualOut); } catch { /* ignore */ }
+          try {
+            unlinkSync(actualOut);
+          } catch {
+            /* ignore */
+          }
           // Also clean CWD if different
-          if (actualOut !== cwdOutFile) try { unlinkSync(cwdOutFile); } catch { /* ignore */ }
+          if (actualOut !== cwdOutFile)
+            try {
+              unlinkSync(cwdOutFile);
+            } catch {
+              /* ignore */
+            }
           resolve(text || stdout.trim());
         } else {
           // fallback: stdout may contain the transcript
@@ -98,24 +113,37 @@ async function transcribeLocal(buffer: Buffer, filename: string, model: string):
         }
       });
 
-      proc.on('error', (e) => reject(new Error(`whisper not found: ${e.message} — install: pip install openai-whisper`)));
+      proc.on('error', (e) =>
+        reject(new Error(`whisper not found: ${e.message} — install: pip install openai-whisper`)),
+      );
     });
 
     log.info(`Local whisper transcribed: ${transcript.slice(0, 80)}`);
     return transcript;
   } finally {
-    try { unlinkSync(tmpFile); } catch { /* ignore */ }
+    try {
+      unlinkSync(tmpFile);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
 // ─── OpenAI Whisper API ───────────────────────────────────────────────────────
 
-async function transcribeApi(buffer: Buffer, filename: string, config: VoiceConfig): Promise<string> {
+async function transcribeApi(
+  buffer: Buffer,
+  filename: string,
+  config: VoiceConfig,
+): Promise<string> {
   const endpoint = config.whisperEndpoint ?? 'https://api.openai.com/v1';
-  const apiKey   = config.whisperApiKey;
-  const model    = config.whisperModel ?? 'whisper-1';
+  const apiKey = config.whisperApiKey;
+  const model = config.whisperModel ?? 'whisper-1';
 
-  if (!apiKey) throw new Error('whisperApiKey required for API transcription (or use whisperBackend: "local")');
+  if (!apiKey)
+    throw new Error(
+      'whisperApiKey required for API transcription (or use whisperBackend: "local")',
+    );
   if (buffer.length > 25 * 1024 * 1024) throw new Error('Audio file too large (max 25MB for API)');
 
   const blob = new Blob([buffer], { type: 'audio/ogg' });
@@ -128,7 +156,7 @@ async function transcribeApi(buffer: Buffer, filename: string, config: VoiceConf
 
   const res = await fetch(`${endpoint}/audio/transcriptions`, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}` },
+    headers: { Authorization: `Bearer ${apiKey}` },
     body: formData,
     signal: AbortSignal.timeout(60_000),
   });

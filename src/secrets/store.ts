@@ -4,7 +4,7 @@
  * Priority order:
  *   1. System keychain  (macOS Keychain / Linux Secret Service / Windows Credential Manager)
  *      via `keytar` — installed as optional dependency
- *   2. ~/.argos/secrets.json at mode 0o600 — file fallback (VPS / headless)
+ *   2. ~/.argos/.secrets.json at mode 0o600 — file fallback (VPS / headless)
  *
  * Usage:
  *   - initSecretsStoreSync(dataDir)  — call ONCE at boot (sync file load, async keychain probe)
@@ -14,11 +14,11 @@
  *   - setSecretSync(key, value)      — write one
  *
  * Config refs:
- *   Values starting with "$" in config.json are references: "$ANTHROPIC_API_KEY"
+ *   Values starting with "$" in .config.json are references: "$ANTHROPIC_API_KEY"
  *   → resolved at load time against the secrets store.
  */
 
-import fs   from 'fs';
+import fs from 'fs';
 import path from 'path';
 import { createLogger } from '../logger.js';
 
@@ -29,7 +29,7 @@ export type SecretsBackend = 'keychain' | 'file';
 
 // ── Internal state ─────────────────────────────────────────────────────────────
 
-let _dataDir       = '';
+let _dataDir = '';
 let _cache: Record<string, string> = {};
 let _backend: SecretsBackend = 'file';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,7 +38,7 @@ let _keytar: any | null = null;
 // ── File helpers ───────────────────────────────────────────────────────────────
 
 function secretsFilePath(): string {
-  return path.join(_dataDir, 'secrets.json');
+  return path.join(_dataDir, '.secrets.json');
 }
 
 function readSecretsFile(): Record<string, string> {
@@ -46,7 +46,9 @@ function readSecretsFile(): Record<string, string> {
   try {
     if (!fs.existsSync(p)) return {};
     return JSON.parse(fs.readFileSync(p, 'utf8')) as Record<string, string>;
-  } catch { return {}; }
+  } catch {
+    return {};
+  }
 }
 
 function writeSecretsFile(data: Record<string, string>): void {
@@ -57,7 +59,9 @@ function writeSecretsFile(data: Record<string, string>): void {
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(tmp, p);
   // Ensure permissions in case the file already existed with wider perms
-  try { fs.chmodSync(p, 0o600); } catch {}
+  try {
+    fs.chmodSync(p, 0o600);
+  } catch {}
 }
 
 // ── Keychain probe (async, non-blocking) ───────────────────────────────────────
@@ -66,13 +70,13 @@ async function probeKeychain(): Promise<void> {
   try {
     // Dynamic import — keytar is optional, will throw if not installed
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mod = await import('keytar' as any) as any;
+    const mod = (await import('keytar' as any)) as any;
     // Support both CJS default export and named exports
     const kt = mod.default ?? mod;
     // Verify it actually works (headless Linux without libsecret will throw here)
     await kt.findCredentials(KEYCHAIN_SERVICE);
 
-    _keytar  = kt;
+    _keytar = kt;
     _backend = 'keychain';
 
     // ── One-time sync: file → keychain ──────────────────────────────────────
@@ -108,7 +112,7 @@ async function probeKeychain(): Promise<void> {
  */
 export function initSecretsStoreSync(dataDir: string): void {
   _dataDir = dataDir;
-  _cache   = readSecretsFile();
+  _cache = readSecretsFile();
   log.debug(`Secrets store initialised (file, ${Object.keys(_cache).length} entries)`);
 
   // Async upgrade — doesn't block boot
@@ -148,8 +152,9 @@ export function setManySecretsSync(entries: Record<string, string>): void {
   writeSecretsFile(_cache);
   if (_backend === 'keychain' && _keytar) {
     const kt = _keytar;
-    Promise.all(Object.entries(entries).map(([k, v]) => kt.setPassword(KEYCHAIN_SERVICE, k, v)))
-      .catch((e: unknown) => log.warn(`Keychain bulk write failed: ${e}`));
+    Promise.all(
+      Object.entries(entries).map(([k, v]) => kt.setPassword(KEYCHAIN_SERVICE, k, v)),
+    ).catch((e: unknown) => log.warn(`Keychain bulk write failed: ${e}`));
   }
 }
 

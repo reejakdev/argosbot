@@ -10,11 +10,17 @@ import path from 'path';
 import os from 'os';
 import { createLogger } from '../../logger.js';
 import type { LLMConfig } from '../../llm/index.js';
-import type { } from '../../llm/index.js'; // types only — llmCall imported dynamically
+import type {} from '../../llm/index.js'; // types only — llmCall imported dynamically
 import type { Config } from '../../config/schema.js';
 import type { CompactableHistory } from '../../llm/compaction.js';
 import type { TelegramChannel } from './telegram.js';
-import { cmdProposals, cmdTasks, cmdDone, cmdDoneShortcut, cmdCancel } from './telegram-bot-commands.js';
+import {
+  cmdProposals,
+  cmdTasks,
+  cmdDone,
+  cmdDoneShortcut,
+  cmdCancel,
+} from './telegram-bot-commands.js';
 
 const log = createLogger('telegram-bot');
 
@@ -22,9 +28,9 @@ const POLL_TIMEOUT = 30; // seconds (Telegram long-poll)
 
 export interface TelegramBotOptions {
   token: string;
-  allowedUsers: string[];  // Telegram user IDs allowed to interact
+  allowedUsers: string[]; // Telegram user IDs allowed to interact
   llmConfig: LLMConfig;
-  config?: Config;          // Full Argos config — used to build system prompt
+  config?: Config; // Full Argos config — used to build system prompt
   onMessage?: (userId: string, text: string) => Promise<string>;
   mtprotoChannel?: TelegramChannel; // MTProto user client — needed for /add_chat dialog listing
 }
@@ -38,6 +44,7 @@ export class TelegramBot {
   private argosConfig: Config | undefined;
   private onMessage: (userId: string, text: string) => Promise<string>;
   private conversations: Map<string, CompactableHistory> = new Map();
+  private static readonly MAX_CONVERSATIONS = 100;
   private lastChatId: string | null = null;
   private pendingConfirmation: Map<string, string> = new Map();
   // Per-user sequential queue — prevents parallel LLM calls for the same user
@@ -68,12 +75,25 @@ export class TelegramBot {
     this.running = true;
     log.info('Telegram Bot started — polling for messages');
 
+    // Force-claim exclusive polling: delete any webhook and drop stale getUpdates sessions.
+    // This stops any other instance that might be polling with the same bot token.
+    try {
+      await this.api('deleteWebhook', { drop_pending_updates: false });
+      log.info('Webhook cleared — exclusive polling claimed');
+    } catch (e) {
+      log.warn(`deleteWebhook failed (non-fatal): ${(e as Error)?.message}`);
+    }
+
     // Drain and DISCARD all pending updates accumulated while offline.
     // Without this, old messages from other users would trigger LLM calls at boot.
     try {
       let drained = false;
       while (!drained) {
-        const res = await this.api('getUpdates', { offset: this.offset, limit: 100, timeout: 0 }) as { result: Array<{ update_id: number }> };
+        const res = (await this.api('getUpdates', {
+          offset: this.offset,
+          limit: 100,
+          timeout: 0,
+        })) as { result: Array<{ update_id: number }> };
         if (!res.result || res.result.length === 0) {
           drained = true;
         } else {
@@ -82,35 +102,39 @@ export class TelegramBot {
         }
       }
       log.info(`Telegram Bot: discarded stale updates, starting fresh from offset ${this.offset}`);
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
 
     // Register commands so Telegram shows them when user types /
     this.api('setMyCommands', {
       commands: [
-        { command: 'status',          description: 'État du système' },
-        { command: 'proposals',       description: 'Propositions en attente' },
-        { command: 'add_chat',        description: 'Lister les chats à surveiller' },
-        { command: 'chats',           description: 'Chats surveillés' },
-        { command: 'remove_chat',     description: 'Arrêter de surveiller un chat' },
-        { command: 'triage',          description: 'Config triage (on/off, mention-only, ignore-own)' },
-        { command: 'teams',           description: 'Lister les équipes' },
-        { command: 'add_team',        description: 'Créer une équipe' },
-        { command: 'team',            description: 'Détails d\'une équipe' },
-        { command: 'team_own',        description: 'Marquer équipe interne/externe' },
-        { command: 'add_handle',      description: 'Ajouter un handle à une équipe' },
-        { command: 'add_keyword',     description: 'Ajouter un keyword à une équipe' },
-        { command: 'my_handles',      description: 'Mes pseudos personnels' },
-        { command: 'add_my_handle',   description: 'Ajouter un pseudo personnel' },
-        { command: 'whitelist',       description: 'Keywords whitelist TX' },
-        { command: 'add_whitelist',   description: 'Ajouter keyword whitelist TX' },
-        { command: 'stop',            description: 'Stopper la tâche en cours' },
-        { command: 'rerun',           description: 'Relancer le dernier script (optionnel: script corrigé)' },
-        { command: 'cancel',          description: 'Annuler les propositions' },
-        { command: 'compact',         description: 'Compresser l\'historique' },
-        { command: 'clear',           description: 'Réinitialiser la conversation' },
-        { command: 'help',            description: 'Toutes les commandes' },
+        { command: 'status', description: 'État du système' },
+        { command: 'proposals', description: 'Propositions en attente' },
+        { command: 'add_chat', description: 'Lister les chats à surveiller' },
+        { command: 'chats', description: 'Chats surveillés' },
+        { command: 'remove_chat', description: 'Arrêter de surveiller un chat' },
+        { command: 'triage', description: 'Config triage (on/off, mention-only, ignore-own)' },
+        { command: 'teams', description: 'Lister les équipes' },
+        { command: 'add_team', description: 'Créer une équipe' },
+        { command: 'team', description: "Détails d'une équipe" },
+        { command: 'team_own', description: 'Marquer équipe interne/externe' },
+        { command: 'add_handle', description: 'Ajouter un handle à une équipe' },
+        { command: 'add_keyword', description: 'Ajouter un keyword à une équipe' },
+        { command: 'my_handles', description: 'Mes pseudos personnels' },
+        { command: 'add_my_handle', description: 'Ajouter un pseudo personnel' },
+        { command: 'whitelist', description: 'Keywords whitelist TX' },
+        { command: 'add_whitelist', description: 'Ajouter keyword whitelist TX' },
+        { command: 'stop', description: 'Stopper la tâche en cours' },
+        { command: 'rerun', description: 'Relancer le dernier script (optionnel: script corrigé)' },
+        { command: 'cancel', description: 'Annuler les propositions' },
+        { command: 'compact', description: "Compresser l'historique" },
+        { command: 'clear', description: 'Réinitialiser la conversation' },
+        { command: 'help', description: 'Toutes les commandes' },
       ],
-    }).catch(() => { /* non-blocking */ });
+    }).catch(() => {
+      /* non-blocking */
+    });
 
     this.poll();
   }
@@ -123,16 +147,18 @@ export class TelegramBot {
   private async poll(): Promise<void> {
     while (this.running) {
       try {
-        const data = await this.api('getUpdates', {
+        const data = (await this.api('getUpdates', {
           offset: this.offset,
           timeout: POLL_TIMEOUT,
           allowed_updates: ['message', 'callback_query'],
-        }) as { result: TgUpdate[] };
+        })) as { result: TgUpdate[] };
 
         for (const update of data.result) {
           this.offset = update.update_id + 1;
           if (update.callback_query) {
-            void this.handleCallbackQuery(update.callback_query).catch(e => log.error(`Callback error: ${e}`));
+            void this.handleCallbackQuery(update.callback_query).catch((e) =>
+              log.error(`Callback error: ${e}`),
+            );
           } else {
             this.handleUpdate(update); // non-blocking — processingQueue handles per-user ordering
           }
@@ -141,7 +167,7 @@ export class TelegramBot {
         // AbortError = long-poll timeout — normal, just retry immediately
         if ((e as Error)?.name === 'AbortError' || (e as Error)?.name === 'TimeoutError') continue;
         log.error(`Polling error: ${(e as Error)?.message ?? String(e)}`);
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise((r) => setTimeout(r, 5000));
       }
     }
   }
@@ -152,7 +178,7 @@ export class TelegramBot {
 
     const userId = String(msg.from.id);
     const chatId = String(msg.chat.id);
-    const text   = (msg.text ?? '').trim();
+    const text = (msg.text ?? '').trim();
 
     // If a tool loop is active and this is plain text (not a command), inject as interrupt.
     // Commands (/stop, etc.) still go through the queue so abort/reply logic works.
@@ -160,7 +186,7 @@ export class TelegramBot {
       const queue = this.interruptMessages.get(userId) ?? [];
       queue.push(text);
       this.interruptMessages.set(userId, queue);
-      void this.sendMessage(chatId, '💬 Reçu — j\'en tiendrai compte à la prochaine étape.');
+      void this.sendMessage(chatId, "💬 Reçu — j'en tiendrai compte à la prochaine étape.");
       return;
     }
 
@@ -169,7 +195,9 @@ export class TelegramBot {
     const next = prev
       .then(() => this._handleUpdateInner(update))
       .catch((e) => {
-        log.error(`Unhandled queue error for user ${userId}: ${e instanceof Error ? e.message : String(e)}`);
+        log.error(
+          `Unhandled queue error for user ${userId}: ${e instanceof Error ? e.message : String(e)}`,
+        );
       })
       .finally(() => {
         if (this.processingQueue.get(userId) === next) this.processingQueue.delete(userId);
@@ -206,7 +234,9 @@ export class TelegramBot {
       const voice = msg.voice as { file_id: string; duration: number };
       try {
         // 1. Get file path from Telegram
-        const fileInfo = await this.api('getFile', { file_id: voice.file_id }) as { result: { file_path: string } };
+        const fileInfo = (await this.api('getFile', { file_id: voice.file_id })) as {
+          result: { file_path: string };
+        };
         const filePath = fileInfo.result.file_path;
 
         // 2. Download audio (never persisted beyond this scope)
@@ -238,11 +268,11 @@ export class TelegramBot {
           try {
             const { synthesizeSpeech } = await import('../../voice/synthesize.js');
             const ttsConfig = {
-              ttsProvider:       this.argosConfig.voice.ttsProvider,
-              openAiTtsApiKey:   this.argosConfig.voice.openAiTtsApiKey,
-              openAiTtsModel:    this.argosConfig.voice.openAiTtsModel,
-              openAiTtsVoice:    this.argosConfig.voice.openAiTtsVoice,
-              elevenLabsApiKey:  this.argosConfig.voice.elevenLabsApiKey,
+              ttsProvider: this.argosConfig.voice.ttsProvider,
+              openAiTtsApiKey: this.argosConfig.voice.openAiTtsApiKey,
+              openAiTtsModel: this.argosConfig.voice.openAiTtsModel,
+              openAiTtsVoice: this.argosConfig.voice.openAiTtsVoice,
+              elevenLabsApiKey: this.argosConfig.voice.elevenLabsApiKey,
               elevenLabsVoiceId: this.argosConfig.voice.elevenLabsVoiceId,
             };
             const audioBytes = await synthesizeSpeech(reply, ttsConfig);
@@ -264,7 +294,10 @@ export class TelegramBot {
         }
       } catch (e) {
         log.warn(`Voice handling failed: ${(e as Error).message}`);
-        await this.sendMessage(chatId, '⚠️ Could not process voice message. Is whisperApiKey configured?');
+        await this.sendMessage(
+          chatId,
+          '⚠️ Could not process voice message. Is whisperApiKey configured?',
+        );
       }
       return; // handled
     }
@@ -276,7 +309,7 @@ export class TelegramBot {
     if (!this.approvalChatIdSaved) {
       this.approvalChatIdSaved = true;
       try {
-        const cfgPath = path.join(os.homedir(), '.argos', 'config.json');
+        const cfgPath = path.join(os.homedir(), '.argos', '.config.json');
         const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
         if (!cfg.telegram?.approvalChatId || cfg.telegram.approvalChatId === 'me') {
           cfg.telegram = cfg.telegram ?? {};
@@ -284,7 +317,9 @@ export class TelegramBot {
           fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), { mode: 0o600 });
           log.info(`Auto-saved approvalChatId: ${chatId}`);
         }
-      } catch { /* non-blocking */ }
+      } catch {
+        /* non-blocking */
+      }
     }
 
     this.lastChatId = chatId;
@@ -324,8 +359,13 @@ export class TelegramBot {
     const guard = guardMessage(text);
 
     if (guard.redacted) {
-      log.warn(`🛡️ Auto-redacted ${guard.redactedItems.length} item(s): ${guard.redactedItems.join(', ')}`);
-      await this.sendMessage(chatId, `🛡️ Données sensibles détectées et masquées automatiquement:\n${guard.redactedItems.map(i => `• ${i}`).join('\n')}`);
+      log.warn(
+        `🛡️ Auto-redacted ${guard.redactedItems.length} item(s): ${guard.redactedItems.join(', ')}`,
+      );
+      await this.sendMessage(
+        chatId,
+        `🛡️ Données sensibles détectées et masquées automatiquement:\n${guard.redactedItems.map((i) => `• ${i}`).join('\n')}`,
+      );
     }
 
     // If sensitive data detected, ask for confirmation
@@ -367,7 +407,11 @@ export class TelegramBot {
     }
   }
 
-  private async handleFileUpload(msg: NonNullable<TgUpdate['message']>, userId: string, chatId: string): Promise<void> {
+  private async handleFileUpload(
+    msg: NonNullable<TgUpdate['message']>,
+    userId: string,
+    chatId: string,
+  ): Promise<void> {
     if (this.allowedUsers.size === 0 || !this.allowedUsers.has(userId)) return;
 
     const fileId = msg.document?.file_id ?? msg.photo?.[msg.photo.length - 1]?.file_id;
@@ -380,7 +424,7 @@ export class TelegramBot {
 
     try {
       // Get file path from Telegram
-      const fileInfo = await this.api('getFile', { file_id: fileId }) as {
+      const fileInfo = (await this.api('getFile', { file_id: fileId })) as {
         result: { file_path: string };
       };
       const fileUrl = `https://api.telegram.org/file/bot${this.token}/${fileInfo.result.file_path}`;
@@ -390,7 +434,9 @@ export class TelegramBot {
       const buffer = Buffer.from(await res.arrayBuffer());
 
       const dataDir = process.env.DATA_DIR ?? path.join(os.homedir(), '.argos');
-      const resolvedDir = dataDir.startsWith('~') ? path.join(os.homedir(), dataDir.slice(1)) : dataDir;
+      const resolvedDir = dataDir.startsWith('~')
+        ? path.join(os.homedir(), dataDir.slice(1))
+        : dataDir;
       const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
 
       // Caption "knowledge" (or starts with /knowledge) → save to ~/.argos/knowledge/
@@ -402,20 +448,36 @@ export class TelegramBot {
         const knowledgeDir = path.join(resolvedDir, 'knowledge');
         fs.mkdirSync(knowledgeDir, { recursive: true });
         filePath = path.join(knowledgeDir, safeName);
-        savedTo  = `knowledge/${safeName}`;
+        savedTo = `knowledge/${safeName}`;
       } else {
         const contextDir = path.join(resolvedDir, 'context', 'uploads');
         fs.mkdirSync(contextDir, { recursive: true });
         filePath = path.join(contextDir, `${Date.now()}_${safeName}`);
-        savedTo  = `context/uploads/${Date.now()}_${safeName}`;
+        savedTo = `context/uploads/${Date.now()}_${safeName}`;
       }
 
       fs.writeFileSync(filePath, buffer);
-      log.info(`File saved: ${filePath} (${buffer.length} bytes)${isKnowledge ? ' [knowledge]' : ''}`);
+      log.info(
+        `File saved: ${filePath} (${buffer.length} bytes)${isKnowledge ? ' [knowledge]' : ''}`,
+      );
 
       // If it's a text-based file, read and process it
       const ext = path.extname(fileName).toLowerCase();
-      const textExts = ['.txt', '.md', '.json', '.csv', '.xml', '.html', '.yml', '.yaml', '.toml', '.log', '.py', '.js', '.ts'];
+      const textExts = [
+        '.txt',
+        '.md',
+        '.json',
+        '.csv',
+        '.xml',
+        '.html',
+        '.yml',
+        '.yaml',
+        '.toml',
+        '.log',
+        '.py',
+        '.js',
+        '.ts',
+      ];
       const isText = textExts.includes(ext) || msg.document?.mime_type?.startsWith('text/');
 
       if (isKnowledge) {
@@ -437,9 +499,10 @@ export class TelegramBot {
             log.warn(`Failed to index knowledge file: ${e}`);
           }
         }
-        await this.sendMessage(chatId,
+        await this.sendMessage(
+          chatId,
           `📚 Saved to knowledge base: \`${savedTo}\`${indexMsg}\n` +
-          `Use \`read_file(path="${savedTo}", search="<keyword>")\` for exact lookups.`
+            `Use \`read_file(path="${savedTo}", search="<keyword>")\` for exact lookups.`,
         );
         return;
       }
@@ -454,7 +517,8 @@ export class TelegramBot {
 
         // Build multimodal message and inject into conversation, then call LLM directly
         let conv = await this.loadConversation(userId);
-        const { buildMessagesWithCompaction, needsCompaction, compactHistory } = await import('../../llm/compaction.js');
+        const { buildMessagesWithCompaction, needsCompaction, compactHistory } =
+          await import('../../llm/compaction.js');
 
         // Add multimodal user turn to conversation history as text-only summary (for history)
         conv.messages.push({ role: 'user', content: caption ? `[Photo] ${caption}` : '[Photo]' });
@@ -479,7 +543,14 @@ export class TelegramBot {
               role: 'user' as const,
               content: [
                 { type: 'text' as const, text: textPrompt },
-                { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data: imageData } },
+                {
+                  type: 'image' as const,
+                  source: {
+                    type: 'base64' as const,
+                    media_type: 'image/jpeg' as const,
+                    data: imageData,
+                  },
+                },
               ],
             };
           }
@@ -505,8 +576,12 @@ export class TelegramBot {
           : `The user sent a PDF: "${fileName}". Read it and give a useful summary or answer any question about it.`;
 
         let conv = await this.loadConversation(userId);
-        const { buildMessagesWithCompaction, needsCompaction, compactHistory } = await import('../../llm/compaction.js');
-        conv.messages.push({ role: 'user', content: caption ? `[PDF: ${fileName}] ${caption}` : `[PDF: ${fileName}]` });
+        const { buildMessagesWithCompaction, needsCompaction, compactHistory } =
+          await import('../../llm/compaction.js');
+        conv.messages.push({
+          role: 'user',
+          content: caption ? `[PDF: ${fileName}] ${caption}` : `[PDF: ${fileName}]`,
+        });
         if (needsCompaction(conv)) {
           conv = await compactHistory(conv, this.llmConfig, _llmCall);
           await this.saveConversation(userId, conv);
@@ -525,14 +600,24 @@ export class TelegramBot {
               role: 'user' as const,
               content: [
                 { type: 'text' as const, text: textPrompt },
-                { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: pdfData } },
+                {
+                  type: 'document' as const,
+                  source: {
+                    type: 'base64' as const,
+                    media_type: 'application/pdf' as const,
+                    data: pdfData,
+                  },
+                },
               ],
             };
           }
           return m;
         });
 
-        const pdfResponse = await _llmCall(this.llmConfig, pdfMessages as Parameters<typeof _llmCall>[1]);
+        const pdfResponse = await _llmCall(
+          this.llmConfig,
+          pdfMessages as Parameters<typeof _llmCall>[1],
+        );
         const pdfContent = pdfResponse.content?.trim() || '(Impossible de lire le PDF)';
         conv.messages.push({ role: 'assistant', content: pdfContent });
         await this.saveConversation(userId, conv);
@@ -555,7 +640,10 @@ export class TelegramBot {
       await this.sendMessage(chatId, safeResponse);
     } catch (e) {
       log.error(`File upload error: ${e}`);
-      await this.sendMessage(chatId, `⚠️ Error processing file: ${e instanceof Error ? e.message : String(e)}`);
+      await this.sendMessage(
+        chatId,
+        `⚠️ Error processing file: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 
@@ -577,21 +665,27 @@ export class TelegramBot {
     if (data.startsWith('add_chat:')) {
       const rawChatId = data.slice('add_chat:'.length);
       // Look up name + isGroup from the MTProto dialogCache
-      const cached  = this.mtprotoChannel?.dialogCache.find(d => d.chatId === rawChatId);
-      const name    = cached?.name ?? rawChatId;
+      const cached = this.mtprotoChannel?.dialogCache.find((d) => d.chatId === rawChatId);
+      const name = cached?.name ?? rawChatId;
       const isGroup = cached?.isGroup ?? rawChatId.startsWith('-');
 
       const { addMonitoredChat } = await import('../../config/index.js');
       const config = (await import('../../config/index.js')).getConfig();
-      const already = config.channels.telegram.listener.monitoredChats.some(c => c.chatId === rawChatId);
+      const already = config.channels.telegram.listener.monitoredChats.some(
+        (c) => c.chatId === rawChatId,
+      );
       if (already) {
-        await this.api('answerCallbackQuery', { callback_query_id: cb.id, text: `${name} déjà surveillé`, show_alert: false });
+        await this.api('answerCallbackQuery', {
+          callback_query_id: cb.id,
+          text: `${name} déjà surveillé`,
+          show_alert: false,
+        });
         return;
       }
       addMonitoredChat(rawChatId, name, isGroup);
       // Edit the clicked button to show ✅
       await this.api('editMessageReplyMarkup', {
-        chat_id:    chatId,
+        chat_id: chatId,
         message_id: cb.message?.message_id,
         reply_markup: { inline_keyboard: [[{ text: `✅ ${name}`, callback_data: 'noop' }]] },
       }).catch(() => {});
@@ -602,23 +696,40 @@ export class TelegramBot {
     if (data === 'noop') return;
 
     // approve:<proposalId> / reject:<proposalId> — inline button callbacks
-    if (data.startsWith('approve:') || data.startsWith('reject:') || data.startsWith('snooze:') || data.startsWith('details:')) {
+    if (
+      data.startsWith('approve:') ||
+      data.startsWith('reject:') ||
+      data.startsWith('snooze:') ||
+      data.startsWith('details:')
+    ) {
       const { handleCallback } = await import('../../gateway/approval.js');
       const { executeProposal } = await import('../../workers/index.js');
       const { getConfig } = await import('../../config/index.js');
 
-      const response = await handleCallback(
-        data, cb.id,
-        async (proposal, actions, token) => {
-          const config = getConfig();
-          await executeProposal(proposal, actions, config, t => this.sendMessage(chatId, t), token);
-        },
-      );
+      const response = await handleCallback(data, cb.id, async (proposal, actions, token) => {
+        const config = getConfig();
+        const notify = (t: string) => this.sendMessage(chatId, t);
+        await executeProposal(proposal, actions, config, notify, token);
+
+        // Proactive follow-up: feed execution result back to LLM so it continues the conversation
+        if (data.startsWith('approve:')) {
+          const db = (await import('../../db/index.js')).getDb();
+          const row = db.prepare('SELECT status FROM proposals WHERE id = ?').get(proposal.id) as
+            | { status: string }
+            | undefined;
+          const wasExecuted = row?.status === 'executed';
+          const summary = wasExecuted
+            ? `Script/action executed successfully for proposal ${proposal.id.slice(-8)}.`
+            : `Proposal ${proposal.id.slice(-8)} execution completed with possible errors.`;
+          // Trigger bot to analyze and continue
+          void this.injectAndProcess(userId, chatId, summary);
+        }
+      });
 
       // Edit the original message to reflect the new status
       if (data.startsWith('approve:') || data.startsWith('reject:')) {
         await this.api('editMessageReplyMarkup', {
-          chat_id:    chatId,
+          chat_id: chatId,
           message_id: cb.message?.message_id,
           reply_markup: { inline_keyboard: [] },
         }).catch(() => {});
@@ -633,7 +744,7 @@ export class TelegramBot {
     // /done_XXXXXX shortcut (Telegram inline command with underscore-separated ID)
     const doneShortcut = text.match(/^\/done_([A-Z0-9]+)(@\S+)?$/i);
     if (doneShortcut) {
-      await cmdDoneShortcut(doneShortcut[1], t => this.sendMessage(chatId, t));
+      await cmdDoneShortcut(doneShortcut[1], (t) => this.sendMessage(chatId, t));
       return;
     }
 
@@ -642,22 +753,24 @@ export class TelegramBot {
 
     switch (cmd) {
       case '/start':
-        await this.sendMessage(chatId,
-          '👋 Hey! I\'m Argos — your AI assistant.\n\n' +
-          'Just send me a message and I\'ll help you.\n\n' +
-          'Commands:\n' +
-          '/status — system status\n' +
-          '/compact — summarize history to save tokens\n' +
-          '/clear — reset conversation\n' +
-          '/help — all commands',
+        await this.sendMessage(
+          chatId,
+          "👋 Hey! I'm Argos — your AI assistant.\n\n" +
+            "Just send me a message and I'll help you.\n\n" +
+            'Commands:\n' +
+            '/status — system status\n' +
+            '/compact — summarize history to save tokens\n' +
+            '/clear — reset conversation\n' +
+            '/help — all commands',
         );
         break;
 
       case '/status':
-        await this.sendMessage(chatId,
+        await this.sendMessage(
+          chatId,
           '🔭 Argos is running\n' +
-          `Model: ${this.llmConfig.model}\n` +
-          `Provider: ${this.llmConfig.provider}`,
+            `Model: ${this.llmConfig.model}\n` +
+            `Provider: ${this.llmConfig.provider}`,
         );
         break;
 
@@ -674,7 +787,10 @@ export class TelegramBot {
           break;
         }
         if (msgCount < 4 && !conv.compactedSummary) {
-          await this.sendMessage(chatId, `💬 Only ${msgCount} message(s) — not worth compacting yet.`);
+          await this.sendMessage(
+            chatId,
+            `💬 Only ${msgCount} message(s) — not worth compacting yet.`,
+          );
           break;
         }
         await this.sendMessage(chatId, `🗜 Compacting ${msgCount} messages…`);
@@ -682,25 +798,35 @@ export class TelegramBot {
           const { compactHistory } = await import('../../llm/compaction.js');
           const { llmCall } = await import('../../llm/index.js');
           // Force compaction regardless of threshold by temporarily inflating message count
-          const forceConv = { ...conv, messages: [...conv.messages, ...Array(20).fill({ role: 'user', content: '' })] };
+          const forceConv = {
+            ...conv,
+            messages: [...conv.messages, ...Array(20).fill({ role: 'user', content: '' })],
+          };
           const compacted = await compactHistory(forceConv, this.llmConfig, llmCall);
           // Restore real recent messages (strip the padding we added)
-          const realRecent = compacted.messages.filter(m => m.content !== '');
+          const realRecent = compacted.messages.filter((m) => m.content !== '');
           const result = { compactedSummary: compacted.compactedSummary, messages: realRecent };
           await this.saveConversation(userId, result);
-          await this.sendMessage(chatId,
+          await this.sendMessage(
+            chatId,
             `✅ Compacted ${msgCount} messages → ${realRecent.length} kept verbatim\n` +
-            `📝 Summary: ${(result.compactedSummary ?? '').slice(0, 200)}…`,
+              `📝 Summary: ${(result.compactedSummary ?? '').slice(0, 200)}…`,
           );
         } catch (e) {
-          await this.sendMessage(chatId, `⚠️ Compaction failed: ${e instanceof Error ? e.message : String(e)}`);
+          await this.sendMessage(
+            chatId,
+            `⚠️ Compaction failed: ${e instanceof Error ? e.message : String(e)}`,
+          );
         }
         break;
       }
 
       case '/approve':
       case '/reject':
-        await this.sendMessage(chatId, '🔒 Approvals are only available on the web app (2FA required).\nOpen the dashboard to approve or reject proposals.');
+        await this.sendMessage(
+          chatId,
+          '🔒 Approvals are only available on the web app (2FA required).\nOpen the dashboard to approve or reject proposals.',
+        );
         break;
 
       case '/stop': {
@@ -721,54 +847,76 @@ export class TelegramBot {
           'last_script.json',
         );
         try {
-          const saved = JSON.parse(fs.readFileSync(lastScriptPath, 'utf8')) as { script: string; lang: string; timeout: number };
+          const saved = JSON.parse(fs.readFileSync(lastScriptPath, 'utf8')) as {
+            script: string;
+            lang: string;
+            timeout: number;
+          };
           // Everything after /rerun (supports multi-line paste) is the new script
           const newScript = text.slice(cmd.length).trim() || saved.script;
-          const lang      = saved.lang ?? 'node';
-          const timeout   = saved.timeout ?? 300;
+          const lang = saved.lang ?? 'node';
+          const timeout = saved.timeout ?? 300;
 
           await this.sendMessage(chatId, `▶️ Relancement du script (${lang}, ${timeout}s)…`);
           const { runScriptDirect } = await import('../../workers/proposal-executor.js');
-          const result = await runScriptDirect(newScript, lang, timeout, (t) => this.sendMessage(chatId, t));
+          const result = await runScriptDirect(newScript, lang, timeout, (t) =>
+            this.sendMessage(chatId, t),
+          );
 
           // Update saved script if user provided a new one
           if (text.slice(cmd.length).trim()) {
-            fs.writeFileSync(lastScriptPath, JSON.stringify({ script: newScript, lang, timeout, ts: Date.now() }), 'utf8');
+            fs.writeFileSync(
+              lastScriptPath,
+              JSON.stringify({ script: newScript, lang, timeout, ts: Date.now() }),
+              'utf8',
+            );
           }
 
-          const status      = result.success ? '✅ Script terminé' : '❌ Script échoué';
+          const status = result.success ? '✅ Script terminé' : '❌ Script échoué';
           const finalOutput = result.output.trim().slice(-2000);
-          await this.sendMessage(chatId, finalOutput ? `${status}\n\`\`\`\n${finalOutput}\n\`\`\`` : status);
+          await this.sendMessage(
+            chatId,
+            finalOutput ? `${status}\n\`\`\`\n${finalOutput}\n\`\`\`` : status,
+          );
         } catch (e) {
           if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-            await this.sendMessage(chatId, '❌ Aucun script récent. Lance d\'abord un script via une proposition.');
+            await this.sendMessage(
+              chatId,
+              "❌ Aucun script récent. Lance d'abord un script via une proposition.",
+            );
           } else {
-            await this.sendMessage(chatId, `❌ Erreur: ${e instanceof Error ? e.message : String(e)}`);
+            await this.sendMessage(
+              chatId,
+              `❌ Erreur: ${e instanceof Error ? e.message : String(e)}`,
+            );
           }
         }
         break;
       }
 
       case '/cancel':
-        await cmdCancel(arg, t => this.sendMessage(chatId, t));
+        await cmdCancel(arg, (t) => this.sendMessage(chatId, t));
         break;
 
       case '/proposals':
-        await cmdProposals(t => this.sendMessage(chatId, t));
+        await cmdProposals((t) => this.sendMessage(chatId, t));
         break;
 
       case '/tasks':
-        await cmdTasks(t => this.sendMessage(chatId, t));
+        await cmdTasks((t) => this.sendMessage(chatId, t));
         break;
 
       case '/done':
-        await cmdDone(arg, t => this.sendMessage(chatId, t));
+        await cmdDone(arg, (t) => this.sendMessage(chatId, t));
         break;
 
       case '/add_chat':
       case '/add-chat': {
         if (!this.mtprotoChannel) {
-          await this.sendMessage(chatId, '❌ Telegram MTProto listener not running — cannot list dialogs.\nConfigure api_id + api_hash in setup.');
+          await this.sendMessage(
+            chatId,
+            '❌ Telegram MTProto listener not running — cannot list dialogs.\nConfigure api_id + api_hash in setup.',
+          );
           break;
         }
         await this.mtprotoChannel.handleAddChat(
@@ -791,170 +939,258 @@ export class TelegramBot {
       case '/remove-chat':
       case '/remove_chat': {
         const targetId = arg;
-        if (!targetId) { await this.sendMessage(chatId, '❌ Usage: /remove_chat <chatId>'); break; }
+        if (!targetId) {
+          await this.sendMessage(chatId, '❌ Usage: /remove_chat <chatId>');
+          break;
+        }
         if (!this.mtprotoChannel) {
           await this.sendMessage(chatId, '❌ MTProto listener not running.');
           break;
         }
-        await this.mtprotoChannel.handleRemoveChat(targetId, (text) => this.sendMessage(chatId, text));
+        await this.mtprotoChannel.handleRemoveChat(targetId, (text) =>
+          this.sendMessage(chatId, text),
+        );
         break;
       }
 
       // ── Triage management ────────────────────────────────────────────────────
       case '/triage': {
         const { cmdTriage } = await import('./triage-commands.js');
-        await cmdTriage(args, t => this.sendMessage(chatId, t));
+        await cmdTriage(args, (t) => this.sendMessage(chatId, t));
         break;
       }
       case '/teams': {
         const { cmdTeams } = await import('./triage-commands.js');
-        await cmdTeams(t => this.sendMessage(chatId, t));
+        await cmdTeams((t) => this.sendMessage(chatId, t));
         break;
       }
       case '/add_team': {
         const { cmdAddTeam } = await import('./triage-commands.js');
-        await cmdAddTeam(args, t => this.sendMessage(chatId, t));
+        await cmdAddTeam(args, (t) => this.sendMessage(chatId, t));
         break;
       }
       case '/team': {
         const { cmdTeam } = await import('./triage-commands.js');
-        await cmdTeam(args, t => this.sendMessage(chatId, t));
+        await cmdTeam(args, (t) => this.sendMessage(chatId, t));
         break;
       }
       case '/remove_team': {
         const { cmdRemoveTeam } = await import('./triage-commands.js');
-        await cmdRemoveTeam(args, t => this.sendMessage(chatId, t));
+        await cmdRemoveTeam(args, (t) => this.sendMessage(chatId, t));
         break;
       }
       case '/team_own': {
         const { cmdTeamOwn } = await import('./triage-commands.js');
-        await cmdTeamOwn(args, t => this.sendMessage(chatId, t));
+        await cmdTeamOwn(args, (t) => this.sendMessage(chatId, t));
         break;
       }
       case '/add_handle': {
         const { cmdAddHandle } = await import('./triage-commands.js');
-        await cmdAddHandle(args, t => this.sendMessage(chatId, t));
+        await cmdAddHandle(args, (t) => this.sendMessage(chatId, t));
         break;
       }
       case '/remove_handle': {
         const { cmdRemoveHandle } = await import('./triage-commands.js');
-        await cmdRemoveHandle(args, t => this.sendMessage(chatId, t));
+        await cmdRemoveHandle(args, (t) => this.sendMessage(chatId, t));
         break;
       }
       case '/add_keyword': {
         const { cmdAddKeyword } = await import('./triage-commands.js');
-        await cmdAddKeyword(args, t => this.sendMessage(chatId, t));
+        await cmdAddKeyword(args, (t) => this.sendMessage(chatId, t));
         break;
       }
       case '/remove_keyword': {
         const { cmdRemoveKeyword } = await import('./triage-commands.js');
-        await cmdRemoveKeyword(args, t => this.sendMessage(chatId, t));
+        await cmdRemoveKeyword(args, (t) => this.sendMessage(chatId, t));
         break;
       }
       case '/my_handles': {
         const { cmdMyHandles } = await import('./triage-commands.js');
-        await cmdMyHandles(t => this.sendMessage(chatId, t));
+        await cmdMyHandles((t) => this.sendMessage(chatId, t));
         break;
       }
       case '/add_my_handle': {
         const { cmdAddMyHandle } = await import('./triage-commands.js');
-        await cmdAddMyHandle(args, t => this.sendMessage(chatId, t));
+        await cmdAddMyHandle(args, (t) => this.sendMessage(chatId, t));
         break;
       }
       case '/remove_my_handle': {
         const { cmdRemoveMyHandle } = await import('./triage-commands.js');
-        await cmdRemoveMyHandle(args, t => this.sendMessage(chatId, t));
+        await cmdRemoveMyHandle(args, (t) => this.sendMessage(chatId, t));
         break;
       }
       case '/whitelist': {
         const { cmdWhitelist } = await import('./triage-commands.js');
-        await cmdWhitelist(t => this.sendMessage(chatId, t));
+        await cmdWhitelist((t) => this.sendMessage(chatId, t));
         break;
       }
       case '/add_whitelist': {
         const { cmdAddWhitelist } = await import('./triage-commands.js');
-        await cmdAddWhitelist(args, t => this.sendMessage(chatId, t));
+        await cmdAddWhitelist(args, (t) => this.sendMessage(chatId, t));
         break;
       }
       case '/remove_whitelist': {
         const { cmdRemoveWhitelist } = await import('./triage-commands.js');
-        await cmdRemoveWhitelist(args, t => this.sendMessage(chatId, t));
+        await cmdRemoveWhitelist(args, (t) => this.sendMessage(chatId, t));
         break;
       }
 
       case '/sources': {
         const { cmdSources } = await import('./knowledge-commands.js');
-        await cmdSources(this.argosConfig ?? (await import('../../config/index.js')).getConfig(), t => this.sendMessage(chatId, t));
+        await cmdSources(
+          this.argosConfig ?? (await import('../../config/index.js')).getConfig(),
+          (t) => this.sendMessage(chatId, t),
+        );
         break;
       }
       case '/add_source': {
         const { cmdAddSource } = await import('./knowledge-commands.js');
-        await cmdAddSource(args, this.argosConfig ?? (await import('../../config/index.js')).getConfig(), t => this.sendMessage(chatId, t));
+        await cmdAddSource(
+          args,
+          this.argosConfig ?? (await import('../../config/index.js')).getConfig(),
+          (t) => this.sendMessage(chatId, t),
+        );
         break;
       }
       case '/remove_source': {
         const { cmdRemoveSource } = await import('./knowledge-commands.js');
-        await cmdRemoveSource(args, this.argosConfig ?? (await import('../../config/index.js')).getConfig(), t => this.sendMessage(chatId, t));
+        await cmdRemoveSource(
+          args,
+          this.argosConfig ?? (await import('../../config/index.js')).getConfig(),
+          (t) => this.sendMessage(chatId, t),
+        );
         break;
       }
       case '/refresh_sources': {
         const { cmdRefreshSources } = await import('./knowledge-commands.js');
-        await cmdRefreshSources(this.argosConfig ?? (await import('../../config/index.js')).getConfig(), t => this.sendMessage(chatId, t));
+        await cmdRefreshSources(
+          this.argosConfig ?? (await import('../../config/index.js')).getConfig(),
+          (t) => this.sendMessage(chatId, t),
+        );
+        break;
+      }
+
+      case '/ignore': {
+        const { patchConfig } = await import('../../config/index.js');
+        const { getConfig } = await import('../../config/index.js');
+        const cfg = getConfig();
+        const current = cfg.channels.telegram.listener.ignoredSenders ?? [];
+
+        if (!arg) {
+          // List ignored senders
+          if (current.length === 0) {
+            await this.sendMessage(
+              chatId,
+              '📋 No ignored senders.\nUsage: `/ignore @username` or `/ignore 123456789`',
+            );
+          } else {
+            await this.sendMessage(
+              chatId,
+              `📋 *Ignored senders:*\n${current.map((s) => `• ${s}`).join('\n')}\n\nRemove with \`/unignore username\``,
+            );
+          }
+          break;
+        }
+        const sender = arg.replace(/^@/, '').toLowerCase().trim();
+        if (current.includes(sender)) {
+          await this.sendMessage(chatId, `Already ignoring \`${sender}\``);
+          break;
+        }
+        patchConfig((c) => {
+          c.channels.telegram.listener.ignoredSenders = [...current, sender];
+        });
+        await this.sendMessage(
+          chatId,
+          `🔇 \`${sender}\` added to ignored senders. Their messages won't create tasks.`,
+        );
+        break;
+      }
+
+      case '/unignore': {
+        const { patchConfig } = await import('../../config/index.js');
+        const { getConfig } = await import('../../config/index.js');
+        const cfg = getConfig();
+        const current = cfg.channels.telegram.listener.ignoredSenders ?? [];
+        const sender = arg.replace(/^@/, '').toLowerCase().trim();
+
+        if (!sender) {
+          await this.sendMessage(chatId, 'Usage: `/unignore username`');
+          break;
+        }
+        if (!current.includes(sender)) {
+          await this.sendMessage(chatId, `\`${sender}\` is not in the ignore list.`);
+          break;
+        }
+        patchConfig((c) => {
+          c.channels.telegram.listener.ignoredSenders = current.filter((s) => s !== sender);
+        });
+        await this.sendMessage(chatId, `🔊 \`${sender}\` removed from ignored senders.`);
         break;
       }
 
       case '/help':
-        await this.sendMessage(chatId,
+        await this.sendMessage(
+          chatId,
           '🔭 *Argos commands*\n\n' +
-          '*Monitoring*\n' +
-          '/add_chat — lister tes chats\n' +
-          '/chats — chats surveillés\n' +
-          '/remove_chat <id>\n\n' +
-          '*Triage*\n' +
-          '/triage — config & statut\n' +
-          '/triage on|off\n' +
-          '/triage mention-only on|off\n' +
-          '/triage ignore-own on|off\n' +
-          '/my_handles — mes pseudos\n' +
-          '/add_my_handle @pseudo\n\n' +
-          '*Équipes*\n' +
-          '/teams — lister les équipes\n' +
-          '/add_team <nom> [desc]\n' +
-          '/team <nom>\n' +
-          '/team_own <nom> on|off\n' +
-          '/add_handle <équipe> @pseudo\n' +
-          '/add_keyword <équipe> <mot>\n' +
-          '/remove_team <nom>\n\n' +
-          '*Whitelist TX*\n' +
-          '/whitelist\n' +
-          '/add_whitelist <mot>\n' +
-          '/remove_whitelist <mot>\n\n' +
-          '*Knowledge*\n' +
-          '/sources — sources indexées\n' +
-          '/add_source <url> — ajouter une URL\n' +
-          '/add_source github owner/repo\n' +
-          '/remove_source <index>\n' +
-          '/refresh_sources — re-indexer\n\n' +
-          '*Système*\n' +
-          '/stop — stopper la tâche en cours\n' +
-          '/status · /proposals · /tasks · /done <id>|all · /cancel · /compact · /clear\n\n' +
-          '🔒 Approvals: web app only\n\n' +
-          '*Setup & maintenance*\n' +
-          '`npm run setup -- --step 1` — LLM / API keys\n' +
-          '`npm run setup -- --step 4` — Telegram credentials\n' +
-          '`npm run setup -- --step 6` — Voice, Cloudflare, MCP\n' +
-          '`npm run doctor` — health check',
+            '*Monitoring*\n' +
+            '/add_chat — lister tes chats\n' +
+            '/chats — chats surveillés\n' +
+            '/remove_chat <id>\n\n' +
+            '*Triage*\n' +
+            '/triage — config & statut\n' +
+            '/triage on|off\n' +
+            '/triage mention-only on|off\n' +
+            '/triage ignore-own on|off\n' +
+            '/my_handles — mes pseudos\n' +
+            '/add_my_handle @pseudo\n\n' +
+            '*Équipes*\n' +
+            '/teams — lister les équipes\n' +
+            '/add_team <nom> [desc]\n' +
+            '/team <nom>\n' +
+            '/team_own <nom> on|off\n' +
+            '/add_handle <équipe> @pseudo\n' +
+            '/add_keyword <équipe> <mot>\n' +
+            '/remove_team <nom>\n\n' +
+            '*Whitelist TX*\n' +
+            '/whitelist\n' +
+            '/add_whitelist <mot>\n' +
+            '/remove_whitelist <mot>\n\n' +
+            '*Knowledge*\n' +
+            '/sources — sources indexées\n' +
+            '/add_source <url> — ajouter une URL\n' +
+            '/add_source github owner/repo\n' +
+            '/remove_source <index>\n' +
+            '/refresh_sources — re-indexer\n\n' +
+            '*Filtres*\n' +
+            '/ignore @user — ignorer un sender (pas de tâches)\n' +
+            '/unignore @user — ne plus ignorer\n' +
+            '/ignore — lister les ignorés\n\n' +
+            '*Système*\n' +
+            '/stop — stopper la tâche en cours\n' +
+            '/status · /proposals · /tasks · /done <id>|all · /cancel · /compact · /clear\n\n' +
+            '🔒 Approvals: web app only\n\n' +
+            '*Setup & maintenance*\n' +
+            '`npm run setup -- --step 1` — LLM / API keys\n' +
+            '`npm run setup -- --step 4` — Telegram credentials\n' +
+            '`npm run setup -- --step 6` — Voice, Cloudflare, MCP\n' +
+            '`npm run doctor` — health check',
         );
         break;
 
       default:
-        await this.sendMessage(chatId, `Unknown command: ${cmd}\nType /help for available commands.`);
+        await this.sendMessage(
+          chatId,
+          `Unknown command: ${cmd}\nType /help for available commands.`,
+        );
     }
   }
 
   private getUserMdPath(): string {
     const dataDir = process.env.DATA_DIR ?? path.join(os.homedir(), '.argos');
-    return path.join(dataDir.startsWith('~') ? path.join(os.homedir(), dataDir.slice(1)) : dataDir, 'user.md');
+    return path.join(
+      dataDir.startsWith('~') ? path.join(os.homedir(), dataDir.slice(1)) : dataDir,
+      'user.md',
+    );
   }
 
   private loadUserMd(): string | null {
@@ -969,15 +1205,29 @@ export class TelegramBot {
     return !fs.existsSync(this.getUserMdPath());
   }
 
+  /** Evict oldest conversations when cache exceeds limit (simple LRU via Map insertion order). */
+  private evictConversations(): void {
+    while (this.conversations.size > TelegramBot.MAX_CONVERSATIONS) {
+      const oldest = this.conversations.keys().next().value;
+      if (oldest !== undefined) this.conversations.delete(oldest);
+    }
+  }
+
   private async loadConversation(userId: string): Promise<CompactableHistory> {
     const cached = this.conversations.get(userId);
-    if (cached) return cached;
+    if (cached) {
+      // Move to end (refresh LRU position)
+      this.conversations.delete(userId);
+      this.conversations.set(userId, cached);
+      return cached;
+    }
 
     try {
       const { getDb } = await import('../../db/index.js');
       const db = getDb();
-      const row = db.prepare('SELECT messages, compacted_summary FROM conversations WHERE user_id = ?').get(userId) as
-        { messages: string; compacted_summary: string | null } | undefined;
+      const row = db
+        .prepare('SELECT messages, compacted_summary FROM conversations WHERE user_id = ?')
+        .get(userId) as { messages: string; compacted_summary: string | null } | undefined;
       if (row) {
         const rawMsgs: CompactableHistory['messages'] = JSON.parse(row.messages);
         // Sanitize: remove consecutive messages with the same role (causes API 400)
@@ -999,7 +1249,9 @@ export class TelegramBot {
         log.debug(`Loaded conversation for ${userId}: ${conv.messages.length} messages`);
         return conv;
       }
-    } catch { /* DB not ready */ }
+    } catch {
+      /* DB not ready */
+    }
 
     const fresh: CompactableHistory = { messages: [] };
     this.conversations.set(userId, fresh);
@@ -1008,16 +1260,24 @@ export class TelegramBot {
 
   private async saveConversation(userId: string, conv: CompactableHistory): Promise<void> {
     this.conversations.set(userId, conv);
+    this.evictConversations();
     try {
       const { getDb } = await import('../../db/index.js');
       const db = getDb();
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO conversations (user_id, messages, compacted_summary, updated_at)
         VALUES (?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET messages = ?, compacted_summary = ?, updated_at = ?
-      `).run(
-        userId, JSON.stringify(conv.messages), conv.compactedSummary ?? null, Date.now(),
-        JSON.stringify(conv.messages), conv.compactedSummary ?? null, Date.now(),
+      `,
+      ).run(
+        userId,
+        JSON.stringify(conv.messages),
+        conv.compactedSummary ?? null,
+        Date.now(),
+        JSON.stringify(conv.messages),
+        conv.compactedSummary ?? null,
+        Date.now(),
       );
     } catch (e) {
       log.debug(`Failed to save conversation: ${e}`);
@@ -1029,13 +1289,15 @@ export class TelegramBot {
     try {
       const { getDb } = await import('../../db/index.js');
       const db = getDb();
-      const openTasks = db.prepare(
-        "SELECT id, title FROM tasks WHERE status IN ('open','in_progress') ORDER BY detected_at DESC LIMIT 20"
-      ).all() as Array<{ id: string; title: string }>;
+      const openTasks = db
+        .prepare(
+          "SELECT id, title FROM tasks WHERE status IN ('open','in_progress') ORDER BY detected_at DESC LIMIT 20",
+        )
+        .all() as Array<{ id: string; title: string }>;
       if (!openTasks.length) return;
 
       const { llmCall, extractJson } = await import('../../llm/index.js');
-      const taskList = openTasks.map(t => `[${t.id}] ${t.title}`).join('\n');
+      const taskList = openTasks.map((t) => `[${t.id}] ${t.title}`).join('\n');
 
       const response = await llmCall(this.llmConfig, [
         {
@@ -1056,12 +1318,35 @@ If nothing is completed, return {"completed": [], "reasoning": ""}`,
 
       const now = Date.now();
       for (const taskId of result.completed) {
-        if (!openTasks.some(t => t.id === taskId)) continue;
-        db.prepare("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?").run(now, taskId);
-        log.info(`Task completed by owner via Telegram chat: ${taskId} — ${result.reasoning?.slice(0, 80)}`);
+        if (!openTasks.some((t) => t.id === taskId)) continue;
+        db.prepare("UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?").run(
+          now,
+          taskId,
+        );
+        log.info(
+          `Task completed by owner via Telegram chat: ${taskId} — ${result.reasoning?.slice(0, 80)}`,
+        );
       }
     } catch (e) {
       log.warn(`Task completion detection failed: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * Inject a system result (e.g. script output) into a user's conversation and trigger
+   * the LLM to analyze it and react. Used after proposal execution so Argos continues
+   * the conversation proactively instead of just dumping output.
+   */
+  async injectAndProcess(userId: string, chatId: string, resultText: string): Promise<void> {
+    log.info(`injectAndProcess: userId=${userId} chatId=${chatId} resultLen=${resultText.length}`);
+    this.lastChatId = chatId;
+    try {
+      // Run defaultHandler as if the user sent the result — LLM will see it as context
+      const syntheticMessage = `[System — Script execution result]\n\n${resultText}\n\nAnalyze this result. If it failed, explain why and suggest or try a fix. If it succeeded, summarize the outcome.`;
+      await this.defaultHandler(userId, syntheticMessage);
+      log.info('injectAndProcess: defaultHandler completed');
+    } catch (e) {
+      log.error(`injectAndProcess failed: ${(e as Error)?.message}`);
     }
   }
 
@@ -1076,7 +1361,8 @@ If nothing is completed, return {"completed": [], "reasoning": ""}`,
     conv.messages.push({ role: 'user', content: text });
 
     // Compact if needed (summarize old messages)
-    const { needsCompaction, compactHistory, buildMessagesWithCompaction } = await import('../../llm/compaction.js');
+    const { needsCompaction, compactHistory, buildMessagesWithCompaction } =
+      await import('../../llm/compaction.js');
     const { llmCall } = await import('../../llm/index.js');
 
     if (needsCompaction(conv)) {
@@ -1116,12 +1402,15 @@ You are meeting this user for the first time. You MUST:
     try {
       const { search } = await import('../../memory/store.js');
       const memories = search({ query: text, limit: 5 });
-      const nonContext = memories.filter(m => String(m.category) !== 'context');
+      const nonContext = memories.filter((m) => String(m.category) !== 'context');
       if (nonContext.length > 0) {
-        memoryContext = '\n\n---\n## Relevant memories:\n' +
-          nonContext.map(m => `- [${m.category}] ${m.content}`).join('\n');
+        memoryContext =
+          '\n\n---\n## Relevant memories:\n' +
+          nonContext.map((m) => `- [${m.category}] ${m.content}`).join('\n');
       }
-    } catch { /* memory not initialized */ }
+    } catch {
+      /* memory not initialized */
+    }
 
     // Build messages with compaction context
     const messages = buildMessagesWithCompaction(systemPrompt, conv, memoryContext);
@@ -1129,11 +1418,14 @@ You are meeting this user for the first time. You MUST:
     // Call LLM with tool loop (builtin tools + MCP tools)
     const { BUILTIN_TOOLS, executeBuiltinTool } = await import('../../llm/builtin-tools.js');
     const { runToolLoop } = await import('../../llm/tool-loop.js');
-    const { callAnthropicBearerRaw } = await import('../../llm/index.js');
+    const { callAnthropicBearerRaw: _callAnthropicBearerRaw } = await import('../../llm/index.js');
     const { getMcpTools, executeMcpToolSafe } = await import('../../mcp/client.js');
 
     // Merge builtin + MCP tools — exclude notion-mcp (use notion_* builtins instead)
-    const allTools = [...BUILTIN_TOOLS, ...getMcpTools().filter(t => !t.name.startsWith('mcp_notion-mcp_'))];
+    const allTools = [
+      ...BUILTIN_TOOLS,
+      ...getMcpTools().filter((t) => !t.name.startsWith('mcp_notion-mcp_')),
+    ];
     const combinedExecutor = async (name: string, input: Record<string, unknown>) => {
       if (name.startsWith('mcp_')) return executeMcpToolSafe(name, input);
       return executeBuiltinTool(name, input);
@@ -1142,63 +1434,122 @@ You are meeting this user for the first time. You MUST:
     const chatId = this.lastChatId!;
 
     // ── Streaming state ────────────────────────────────────────────────────────
-    let statusMsgId: number | null = null;   // tool-use status bubble
-    let streamMsgId: number | null = null;   // live response bubble
+    let statusMsgId: number | null = null; // tool-use status bubble
+    let streamMsgId: number | null = null; // live response bubble
     let accText = '';
     let lastEditMs = 0;
     const STREAM_THROTTLE = 900; // ms between Telegram edits (rate limit safety)
 
-    const sendOrEdit = async (msgId: number | null, text: string, markdown = false): Promise<number> => {
+    const sendOrEdit = async (
+      msgId: number | null,
+      text: string,
+      markdown = false,
+    ): Promise<number> => {
       try {
         if (msgId) {
           await this.api('editMessageText', {
-            chat_id: chatId, message_id: msgId, text,
+            chat_id: chatId,
+            message_id: msgId,
+            text,
             ...(markdown && { parse_mode: 'Markdown' }),
           }).catch(() => {});
           return msgId;
         }
-        const sent = await this.api('sendMessage', {
-          chat_id: chatId, text,
+        const sent = (await this.api('sendMessage', {
+          chat_id: chatId,
+          text,
           ...(markdown && { parse_mode: 'Markdown' }),
-        }) as { result: { message_id: number } };
+        })) as { result: { message_id: number } };
         return sent.result.message_id;
-      } catch { return msgId ?? 0; }
+      } catch {
+        return msgId ?? 0;
+      }
     };
 
     const toolEmoji: Record<string, string> = {
-      web_search: '🔍', fetch_url: '🌐', memory_search: '🧠', memory_store: '💾',
-      read_file: '📄', write_file: '✏️', current_time: '🕐', spawn_agent: '🤖',
-      semantic_search: '🔎', create_proposal: '📋', list_knowledge: '📚',
+      web_search: '🔍',
+      fetch_url: '🌐',
+      memory_search: '🧠',
+      memory_store: '💾',
+      read_file: '📄',
+      write_file: '✏️',
+      current_time: '🕐',
+      spawn_agent: '🤖',
+      semantic_search: '🔎',
+      create_proposal: '📋',
+      list_knowledge: '📚',
     };
 
+    let toolStatusLine = ''; // persisted tool status shown above stream text
+
+    // Serialize Telegram API calls — prevents race conditions when chunks arrive faster than API responds
+    let eventQueue: Promise<void> = Promise.resolve();
     const onEvent = async (event: import('../../llm/tool-loop.js').ToolLoopEvent) => {
+      // Queue events so they execute one at a time
+      eventQueue = eventQueue.then(() => onEventInner(event)).catch(() => {});
+      return eventQueue;
+    };
+
+    const onEventInner = async (event: import('../../llm/tool-loop.js').ToolLoopEvent) => {
       if (event.type === 'tool_call') {
         const emoji = toolEmoji[event.name] ?? '🔧';
-        const hint = event.name === 'web_search'
-          ? ` _${String((event.input as Record<string,unknown>).query ?? '').slice(0, 50)}_`
-          : '';
-        // Delete streaming bubble if open — switch to tool status
-        if (streamMsgId) {
-          await this.api('deleteMessage', { chat_id: chatId, message_id: streamMsgId }).catch(() => {});
-          streamMsgId = null; accText = '';
+        const hint =
+          event.name === 'web_search'
+            ? ` _${String((event.input as Record<string, unknown>).query ?? '').slice(0, 50)}_`
+            : '';
+        toolStatusLine = `${emoji} *${event.name}*${hint}…`;
+
+        // Reuse existing bubble (stream or status) — never delete
+        const bubble = streamMsgId ?? statusMsgId;
+        const displayText = accText ? `${accText}\n\n${toolStatusLine}` : toolStatusLine;
+        if (bubble) {
+          await this.api('editMessageText', {
+            chat_id: chatId,
+            message_id: bubble,
+            text: displayText,
+            parse_mode: 'Markdown',
+          }).catch(() => {});
+          statusMsgId = bubble;
+          streamMsgId = null; // tool phase — stream will reattach on next text_chunk
+        } else {
+          statusMsgId = await sendOrEdit(null, displayText, true);
         }
-        statusMsgId = await sendOrEdit(statusMsgId, `${emoji} *${event.name}*${hint}…`, true);
       } else if (event.type === 'tool_result') {
-        if (event.error) statusMsgId = await sendOrEdit(statusMsgId, `⚠️ *${event.name}* failed`, true);
+        if (event.error) {
+          toolStatusLine = `⚠️ *${event.name}* failed`;
+          const bubble = statusMsgId ?? streamMsgId;
+          if (bubble)
+            await this.api('editMessageText', {
+              chat_id: chatId,
+              message_id: bubble,
+              text: accText ? `${accText}\n\n${toolStatusLine}` : toolStatusLine,
+              parse_mode: 'Markdown',
+            }).catch(() => {});
+        } else {
+          toolStatusLine = ''; // tool succeeded — clear status for next text
+        }
       } else if (event.type === 'text_chunk') {
         accText += event.text;
         const now = Date.now();
         if (now - lastEditMs > STREAM_THROTTLE) {
-          if (!streamMsgId) {
-            // Hide tool status while streaming response
-            if (statusMsgId) {
-              await this.api('deleteMessage', { chat_id: chatId, message_id: statusMsgId }).catch(() => {});
-              statusMsgId = null;
-            }
-            const sent = await this.api('sendMessage', { chat_id: chatId, text: accText + ' ▌' }) as { result: { message_id: number } };
-            streamMsgId = sent.result.message_id;
+          const displayText = accText + ' ▌';
+          // Reuse status bubble as stream bubble — no delete
+          if (!streamMsgId && statusMsgId) {
+            streamMsgId = statusMsgId;
+            statusMsgId = null;
+          }
+          if (streamMsgId) {
+            await this.api('editMessageText', {
+              chat_id: chatId,
+              message_id: streamMsgId,
+              text: displayText,
+            }).catch(() => {});
           } else {
-            await this.api('editMessageText', { chat_id: chatId, message_id: streamMsgId, text: accText + ' ▌' }).catch(() => {});
+            const sent = (await this.api('sendMessage', {
+              chat_id: chatId,
+              text: displayText,
+            })) as { result: { message_id: number } };
+            streamMsgId = sent.result.message_id;
           }
           lastEditMs = now;
         }
@@ -1227,35 +1578,200 @@ You are meeting this user for the first time. You MUST:
     let response: { content: string; inputTokens?: number; outputTokens?: number };
 
     const { callAnthropicBearerRaw: _bearerRaw } = await import('../../llm/index.js');
-    const providerRaw = this.llmConfig.authMode === 'bearer'
-      ? _bearerRaw
-      : async (cfg: import('../../llm/index.js').LLMConfig, body: Record<string, unknown>, onDelta?: (d: string) => void) => {
-          // OpenAI-compat raw (Gemini, etc.) — stream via fetch
-          const { streamLlmResponse } = await import('../../llm/index.js');
-          // Build minimal messages from body
-          const msgs = body.messages as import('../../llm/index.js').LLMMessage[];
-          const sys = body.system as string | undefined;
-          const allMsgs = sys ? [{ role: 'system' as const, content: sys }, ...msgs] : msgs;
-          let fullText = '';
-          const toolBlocks: Array<{ type: string; id: string; name: string; input: Record<string, unknown> }> = [];
-          // For OpenAI-compat we can't do tool use in streaming easily — use llmCall
-          const { llmCall: _lc } = await import('../../llm/index.js');
-          const r = await _lc(cfg, allMsgs);
-          if (onDelta && r.content) onDelta(r.content);
-          fullText = r.content;
-          void toolBlocks;
-          return {
-            content: [{ type: 'text', text: fullText }],
-            stop_reason: 'end_turn',
-            usage: { input_tokens: r.inputTokens ?? 0, output_tokens: r.outputTokens ?? 0 },
-            model: cfg.model,
+    const providerRaw =
+      this.llmConfig.provider === 'anthropic'
+        ? _bearerRaw
+        : async (
+            cfg: import('../../llm/index.js').LLMConfig,
+            body: Record<string, unknown>,
+            onDelta?: (d: string) => void,
+          ) => {
+            // OpenAI-compat streaming (Ollama, Gemini, etc.)
+            const msgs = body.messages as import('../../llm/index.js').LLMMessage[];
+            const sys = body.system as string | undefined;
+            const allMsgs = sys ? [{ role: 'system' as const, content: sys }, ...msgs] : msgs;
+            const tools = body.tools as unknown[] | undefined;
+            const baseURL = cfg.baseUrl ?? 'https://api.openai.com/v1';
+
+            // Convert Anthropic message format → OpenAI format
+            const mappedMessages: Array<Record<string, unknown>> = [];
+            for (const m of allMsgs) {
+              if (!Array.isArray(m.content)) {
+                mappedMessages.push({ role: m.role, content: m.content });
+                continue;
+              }
+              const blocks = m.content as Array<Record<string, unknown>>;
+
+              // Anthropic assistant with tool_use blocks → OpenAI assistant with tool_calls
+              if (m.role === 'assistant') {
+                const textParts = blocks
+                  .filter((b) => b.type === 'text')
+                  .map((b) => b.text as string)
+                  .join('');
+                const toolUseBlocks = blocks.filter((b) => b.type === 'tool_use');
+                if (toolUseBlocks.length > 0) {
+                  mappedMessages.push({
+                    role: 'assistant',
+                    content: textParts || null,
+                    tool_calls: toolUseBlocks.map((b) => ({
+                      id: b.id as string,
+                      type: 'function',
+                      function: {
+                        name: b.name as string,
+                        arguments: JSON.stringify(b.input ?? {}),
+                      },
+                    })),
+                  });
+                } else {
+                  mappedMessages.push({ role: 'assistant', content: textParts });
+                }
+                continue;
+              }
+
+              // Anthropic user with tool_result blocks → OpenAI tool messages
+              const toolResults = blocks.filter((b) => b.type === 'tool_result');
+              if (toolResults.length > 0) {
+                for (const tr of toolResults) {
+                  mappedMessages.push({
+                    role: 'tool',
+                    tool_call_id: tr.tool_use_id as string,
+                    content: tr.content as string,
+                  });
+                }
+                // Also add any non-tool-result content as a regular user message
+                const otherBlocks = blocks.filter((b) => b.type !== 'tool_result');
+                if (otherBlocks.length > 0) {
+                  mappedMessages.push({
+                    role: 'user',
+                    content: otherBlocks.map((b) => b.text ?? '').join(''),
+                  });
+                }
+                continue;
+              }
+
+              // Default: extract text
+              mappedMessages.push({
+                role: m.role,
+                content: blocks.map((b) => (b.type === 'text' ? (b.text as string) : '')).join(''),
+              });
+            }
+
+            // Map Anthropic tool format → OpenAI function format
+            const openaiTools = tools?.map((t: unknown) => {
+              const tool = t as { name: string; description?: string; input_schema?: unknown };
+              return {
+                type: 'function',
+                function: {
+                  name: tool.name,
+                  description: tool.description ?? '',
+                  parameters: tool.input_schema ?? { type: 'object', properties: {} },
+                },
+              };
+            });
+
+            const res = await fetch(`${baseURL}/chat/completions`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
+              },
+              body: JSON.stringify({
+                model: cfg.model,
+                messages: mappedMessages,
+                max_tokens: cfg.maxTokens ?? 4096,
+                ...(cfg.temperature !== undefined && { temperature: cfg.temperature }),
+                ...(openaiTools?.length ? { tools: openaiTools } : {}),
+                stream: true,
+              }),
+            });
+
+            if (!res.ok) {
+              const errBody = await res.text();
+              throw new Error(`LLM streaming error ${res.status}: ${errBody.slice(0, 300)}`);
+            }
+
+            // Parse SSE stream
+            const content: Array<{
+              type: string;
+              text?: string;
+              id?: string;
+              name?: string;
+              input?: Record<string, unknown>;
+            }> = [];
+            let fullText = '';
+            const toolCalls: Record<number, { id: string; name: string; args: string }> = {};
+            let inputTokens = 0,
+              outputTokens = 0;
+
+            const { _readSseJson } = await import('../../llm/index.js');
+            for await (const parsed of _readSseJson(res)) {
+              const usage = parsed.usage as
+                | { prompt_tokens?: number; completion_tokens?: number }
+                | undefined;
+              if (usage) {
+                inputTokens = usage.prompt_tokens ?? inputTokens;
+                outputTokens = usage.completion_tokens ?? outputTokens;
+              }
+              const choices = parsed.choices as
+                | Array<{
+                    delta: {
+                      content?: string;
+                      reasoning?: string;
+                      tool_calls?: Array<{
+                        index: number;
+                        id?: string;
+                        function?: { name?: string; arguments?: string };
+                      }>;
+                    };
+                  }>
+                | undefined;
+              const delta = choices?.[0]?.delta;
+              // Some models (Qwen) put text in content, reasoning in a separate field
+              const textChunk = delta?.content || '';
+              if (textChunk) {
+                fullText += textChunk;
+                if (onDelta) onDelta(textChunk);
+              }
+              if (delta?.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                  if (!toolCalls[tc.index])
+                    toolCalls[tc.index] = { id: tc.id ?? `call_${tc.index}`, name: '', args: '' };
+                  if (tc.function?.name) toolCalls[tc.index].name = tc.function.name;
+                  if (tc.function?.arguments) toolCalls[tc.index].args += tc.function.arguments;
+                }
+              }
+            }
+
+            if (fullText) content.push({ type: 'text', text: fullText });
+            for (const tc of Object.values(toolCalls)) {
+              let input: Record<string, unknown> = {};
+              try {
+                input = JSON.parse(tc.args);
+              } catch {
+                /* empty */
+              }
+              content.push({ type: 'tool_use', id: tc.id, name: tc.name, input });
+            }
+
+            const hasToolUse = content.some((b) => b.type === 'tool_use');
+            return {
+              content,
+              stop_reason: hasToolUse ? 'tool_use' : 'end_turn',
+              usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+              model: cfg.model,
+            };
           };
-        };
 
     try {
       response = await runToolLoop(
-        this.llmConfig, systemPrompt, messages,
-        allTools, combinedExecutor, providerRaw, onEventWithAbort, getInterrupt,
+        this.llmConfig,
+        systemPrompt,
+        messages,
+        allTools,
+        combinedExecutor,
+        providerRaw,
+        onEventWithAbort,
+        getInterrupt,
       );
     } finally {
       this.abortControllers.delete(userId);
@@ -1263,8 +1779,16 @@ You are meeting this user for the first time. You MUST:
       this.interruptMessages.delete(userId);
     }
 
-    // Delete only the status/tool bubble (not the stream bubble — we'll edit it in place)
-    if (statusMsgId) await this.api('deleteMessage', { chat_id: chatId, message_id: statusMsgId }).catch(() => {});
+    // If a status bubble is still showing (no text was streamed), convert it to the stream bubble
+    // so the final response replaces it in-place instead of creating a new message
+    if (statusMsgId && !streamMsgId) {
+      streamMsgId = statusMsgId;
+      statusMsgId = null;
+    }
+    // Clean up any remaining status bubble (should be rare — only if both exist)
+    if (statusMsgId && statusMsgId !== streamMsgId) {
+      await this.api('deleteMessage', { chat_id: chatId, message_id: statusMsgId }).catch(() => {});
+    }
 
     // Auto-save user.md if present in response
     const userMdMatch = response.content.match(/```user\.md\n([\s\S]*?)```/);
@@ -1278,7 +1802,9 @@ You are meeting this user for the first time. You MUST:
     // Save important info to memory automatically
     try {
       await this.autoMemorize(userId, text, response.content);
-    } catch { /* non-blocking */ }
+    } catch {
+      /* non-blocking */
+    }
 
     // Guard against empty responses
     const finalContent = response.content?.trim() || '(No response generated — try again)';
@@ -1288,30 +1814,58 @@ You are meeting this user for the first time. You MUST:
     await this.saveConversation(userId, conv);
 
     // Token footer (debug info)
-    const inTok  = (response as { inputTokens?: number }).inputTokens;
+    const inTok = (response as { inputTokens?: number }).inputTokens;
     const outTok = (response as { outputTokens?: number }).outputTokens;
-    const footer = inTok != null ? `\n\n_${inTok}↑ ${outTok}↓ tokens_` : '';
+    const footer = inTok !== null && inTok !== undefined ? `\n\n_${inTok}↑ ${outTok}↓ tokens_` : '';
 
     const displayContent = finalContent + footer;
 
     // Final render: edit stream bubble in place (no flicker) or send fresh if no stream bubble
     if (streamMsgId) {
       // Try Markdown first; fall back to plain edit (NOT sendMessage — avoid duplicate)
-      const edited = await this.api('editMessageText', {
-        chat_id: chatId,
-        message_id: streamMsgId,
-        text: displayContent,
-        parse_mode: 'Markdown',
-      }).catch(() => null) ??
-      await this.api('editMessageText', {
-        chat_id: chatId,
-        message_id: streamMsgId,
-        text: displayContent,
-      }).catch(() => null);
+      const edited =
+        (await this.api('editMessageText', {
+          chat_id: chatId,
+          message_id: streamMsgId,
+          text: displayContent,
+          parse_mode: 'Markdown',
+        }).catch(() => null)) ??
+        (await this.api('editMessageText', {
+          chat_id: chatId,
+          message_id: streamMsgId,
+          text: displayContent,
+        }).catch(() => null));
       // Only send fresh if both edits failed (e.g. message deleted by user)
-      if (!edited) await this.sendMessage(chatId, displayContent, false);
+      // Delete the stale ▌ bubble first to avoid double-message
+      if (!edited) {
+        await this.api('deleteMessage', { chat_id: chatId, message_id: streamMsgId }).catch(
+          () => {},
+        );
+        await this.sendMessage(chatId, displayContent, false);
+      }
     } else {
       await this.sendMessage(chatId, displayContent, false);
+    }
+
+    // TTS — speak the response via configured triggers
+    if (this.argosConfig?.voice?.ttsEnabled && finalContent) {
+      try {
+        const { speak } = await import('../../voice/speak.js');
+        const voiceCfg = this.argosConfig.voice as unknown as import('../../voice/speak.js').VoiceOutputConfig;
+        const trigger = 'always' as const;
+        const sendVoice = async (audio: Buffer, filename: string) => {
+          const blob = new Blob([audio]);
+          const form = new globalThis.FormData();
+          form.append('chat_id', chatId);
+          form.append('voice', blob, filename);
+          await fetch(`https://api.telegram.org/bot${this.token}/sendVoice`, {
+            method: 'POST', body: form,
+          });
+        };
+        speak(finalContent, voiceCfg, trigger, sendVoice).catch(e => {
+          log.warn(`TTS speak failed: ${e instanceof Error ? e.message : String(e)}`);
+        });
+      } catch (e) { log.warn(`TTS init failed: ${e}`); }
     }
 
     // Signal to handleUpdate that the reply was already sent
@@ -1329,35 +1883,58 @@ You are meeting this user for the first time. You MUST:
     try {
       const { llmCall } = await import('../../llm/index.js');
       const { getAnonymizer } = await import('../../privacy/anonymizer.js');
-      const anonConfig = this.argosConfig?.anonymizer ?? { mode: 'regex' as const, bucketAmounts: true, anonymizeCryptoAddresses: false, knownPersons: [], customPatterns: [] };
+      const anonConfig = this.argosConfig?.anonymizer ?? {
+        mode: 'regex' as const,
+        bucketAmounts: true,
+        anonymizeCryptoAddresses: false,
+        knownPersons: [],
+        customPatterns: [],
+      };
       const anonymizer = getAnonymizer(anonConfig);
 
       // Anonymize both sides before sending to LLM — never expose raw PII/addresses
-      const anonUser      = anonymizer.anonymize(userMsg.slice(0, 500)).text;
+      const anonUser = anonymizer.anonymize(userMsg.slice(0, 500)).text;
       const anonAssistant = anonymizer.anonymize(assistantMsg.slice(0, 500)).text;
 
       // Quick check: is this worth memorizing?
       const check = await llmCall(this.llmConfig, [
-        { role: 'system', content: `You decide if a conversation exchange contains information worth remembering long-term.
+        {
+          role: 'system',
+          content: `You decide if a conversation exchange contains information worth remembering long-term.
 Output ONLY a JSON object: { "memorize": true/false, "summary": "one-line summary if true", "category": "preference|fact|task|decision|context" }
-Only memorize: user preferences, important facts, decisions made, task outcomes. NOT: greetings, small talk, questions without answers.` },
-        { role: 'user', content: `User said: "${anonUser}"\nAssistant replied: "${anonAssistant}"` },
+Only memorize: user preferences, important facts, decisions made, task outcomes. NOT: greetings, small talk, questions without answers.`,
+        },
+        {
+          role: 'user',
+          content: `User said: "${anonUser}"\nAssistant replied: "${anonAssistant}"`,
+        },
       ]);
 
-      const parsed = JSON.parse(check.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
+      const parsed = JSON.parse(
+        check.content
+          .replace(/```json?\n?/g, '')
+          .replace(/```/g, '')
+          .trim(),
+      );
       if (parsed.memorize && parsed.summary) {
         const { storeQuick } = await import('../../memory/store.js');
         storeQuick(parsed.summary, parsed.category ?? 'general', [`user:${userId}`]);
         log.debug(`Auto-memorized: ${parsed.summary}`);
       }
-    } catch { /* non-critical */ }
+    } catch {
+      /* non-critical */
+    }
   }
 
-  async sendMessageWithKeyboard(chatId: string, text: string, keyboard: TgInlineKeyboard): Promise<void> {
+  async sendMessageWithKeyboard(
+    chatId: string,
+    text: string,
+    keyboard: TgInlineKeyboard,
+  ): Promise<void> {
     await this.api('sendMessage', {
-      chat_id:      chatId,
+      chat_id: chatId,
       text,
-      parse_mode:   'Markdown',
+      parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: keyboard },
     });
   }
@@ -1377,9 +1954,7 @@ Only memorize: user preferences, important facts, decisions made, task outcomes.
 
     // Store notifications sent to the owner in conversation history
     // so the bot has full context when the owner replies ("c'est bon je l'ai fait")
-    const approvalChatId = this.allowedUsers.size === 1
-      ? [...this.allowedUsers][0]
-      : chatId;
+    const approvalChatId = this.allowedUsers.size === 1 ? [...this.allowedUsers][0] : chatId;
     if (saveConv && chatId === approvalChatId) {
       const conv = await this.loadConversation(chatId);
       conv.messages.push({ role: 'assistant', content: text });

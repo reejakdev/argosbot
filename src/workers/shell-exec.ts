@@ -9,20 +9,46 @@ const log = createLogger('shell-exec');
 
 // ─── Allowlist ───────────────────────────────────────────────────────────────
 const DEFAULT_ALLOWED = new Set([
-  'git', 'ls', 'cat', 'head', 'tail', 'grep', 'find', 'wc',
-  'node', 'npm', 'npx', 'tsx',
-  'python3', 'pip3',
-  'jq', 'yq',
-  'date', 'whoami', 'pwd',
-  'ps', 'df', 'du', 'uptime',
-  'curl', 'wget',
+  'git',
+  'ls',
+  'cat',
+  'head',
+  'tail',
+  'grep',
+  'find',
+  'wc',
+  'node',
+  'npm',
+  'npx',
+  'tsx',
+  'python3',
+  'pip3',
+  'jq',
+  'yq',
+  'date',
+  'whoami',
+  'pwd',
+  'ps',
+  'df',
+  'du',
+  'uptime',
+  'curl',
+  'wget',
 ]);
 
 // Hard-blocked regardless of allowlist
 const BLOCKED_RE = [
-  /\brm\b/, /\brmdir\b/, /\bdd\b/, /\bmkfs\b/,
-  /\bsudo\b/, /\bsu\b/, /\bchmod\b/, /\bchown\b/,
-  /\bpasswd\b/, /\bcrontab\b/, /\bkill\b/,
+  /\brm\b/,
+  /\brmdir\b/,
+  /\bdd\b/,
+  /\bmkfs\b/,
+  /\bsudo\b/,
+  /\bsu\b/,
+  /\bchmod\b/,
+  /\bchown\b/,
+  /\bpasswd\b/,
+  /\bcrontab\b/,
+  /\bkill\b/,
   /\beval\b/,
   /[;&|`]/, // shell metacharacters
   /\.\.[/\\]/, // path traversal
@@ -32,7 +58,9 @@ function isPrivateUrl(url: string): boolean {
   try {
     const { hostname } = new URL(url);
     return /^(localhost|127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(hostname);
-  } catch { return true; }
+  } catch {
+    return true;
+  }
 }
 
 export interface ShellExecInput {
@@ -54,16 +82,22 @@ export async function executeShellExec(
   input: Record<string, unknown>,
   config: Config,
 ): Promise<WorkerResult> {
-  const cmd       = String(input.command ?? '').trim();
-  const args      = (input.args as string[] | undefined) ?? [];
-  const reason    = String(input.reason ?? '');
+  const cmd = String(input.command ?? '').trim();
+  const args = (input.args as string[] | undefined) ?? [];
+  const reason = String(input.reason ?? '');
   const timeoutMs = Math.min(Number(input.timeoutSeconds ?? 30), 60) * 1000;
-  const rawDir    = input.workingDir ? String(input.workingDir) : undefined;
+  const rawDir = input.workingDir ? String(input.workingDir) : undefined;
 
   // ── shellExec must be enabled in config ──
-  const shellCfg = (config as unknown as { shellExec?: { enabled?: boolean; allowedCommands?: string[] } }).shellExec;
+  const shellCfg = (
+    config as unknown as { shellExec?: { enabled?: boolean; allowedCommands?: string[] } }
+  ).shellExec;
   if (!shellCfg?.enabled) {
-    return { success: false, output: 'shell_exec is disabled. Set shellExec.enabled = true in config.', dryRun: false };
+    return {
+      success: false,
+      output: 'shell_exec is disabled. Set shellExec.enabled = true in config.',
+      dryRun: false,
+    };
   }
 
   // ── Build effective allowlist ──
@@ -79,15 +113,25 @@ export async function executeShellExec(
   const fullCommand = [cmd, ...args].join(' ');
   for (const re of BLOCKED_RE) {
     if (re.test(fullCommand)) {
-      audit('shell_exec_blocked', cmd, 'worker', { reason: 'blocked pattern', pattern: re.toString() });
+      audit('shell_exec_blocked', cmd, 'worker', {
+        reason: 'blocked pattern',
+        pattern: re.toString(),
+      });
       return { success: false, output: `Blocked pattern detected in command.`, dryRun: false };
     }
   }
 
-  // ── For curl/wget: block private URLs ──
+  // ── For curl/wget: block private URLs + enforce HTTPS ──
   if (cmd === 'curl' || cmd === 'wget') {
     for (const arg of args) {
-      if (/^https?:\/\//.test(arg) && isPrivateUrl(arg)) {
+      if (/^http:\/\//i.test(arg)) {
+        return {
+          success: false,
+          output: `Blocked insecure HTTP URL: ${arg}. Use HTTPS.`,
+          dryRun: false,
+        };
+      }
+      if (/^https?:\/\//i.test(arg) && isPrivateUrl(arg)) {
         return { success: false, output: `Blocked private/localhost URL: ${arg}`, dryRun: false };
       }
     }
@@ -137,7 +181,11 @@ export async function executeShellExec(
       if (code === 0) {
         resolve({ success: true, output: output + truncated, dryRun: false });
       } else {
-        resolve({ success: false, output: `Exit code ${code}\n${output}${truncated}`, dryRun: false });
+        resolve({
+          success: false,
+          output: `Exit code ${code}\n${output}${truncated}`,
+          dryRun: false,
+        });
       }
     });
 

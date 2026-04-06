@@ -28,19 +28,19 @@ import type { Channel } from './registry.js';
 import type { RawMessage } from '../../types.js';
 
 const ulid = monotonicFactory();
-const log  = createLogger('signal');
+const log = createLogger('signal');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 export interface SignalChannelOptions {
   /** Path to signal-cli binary. Default: 'signal-cli' (must be on PATH) */
-  signalCliBin:   string;
+  signalCliBin: string;
   /** Registered phone number, e.g. +33612345678 */
-  phoneNumber:    string;
+  phoneNumber: string;
   /** Allowlist of sender numbers. Empty = allow all (NOT recommended for production) */
   allowedNumbers: string[];
   /** Unix socket path for JSON-RPC. Default: /tmp/argos-signal.sock */
-  socketPath:     string;
+  socketPath: string;
   /** signal-cli data directory (--config flag). Optional. */
   signalDataDir?: string;
 }
@@ -52,13 +52,16 @@ type MessageHandler = (msg: RawMessage) => Promise<void>;
 export class SignalChannel implements Channel {
   readonly name = 'signal';
 
-  private proc:    ChildProcess | null = null;
-  private socket:  net.Socket | null = null;
+  private proc: ChildProcess | null = null;
+  private socket: net.Socket | null = null;
   private handler: MessageHandler | null = null;
-  private pending  = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
-  private reqId    = 0;
-  private buffer   = '';
-  private stopped  = false;
+  private pending = new Map<
+    number,
+    { resolve: (v: unknown) => void; reject: (e: Error) => void }
+  >();
+  private reqId = 0;
+  private buffer = '';
+  private stopped = false;
 
   constructor(private opts: SignalChannelOptions) {
     // Validate socket path — prevent path traversal
@@ -73,9 +76,11 @@ export class SignalChannel implements Channel {
 
   async start(): Promise<void> {
     const args = [
-      '--account', this.opts.phoneNumber,
+      '--account',
+      this.opts.phoneNumber,
       'daemon',
-      '--socket', this.opts.socketPath,
+      '--socket',
+      this.opts.socketPath,
       ...(this.opts.signalDataDir ? ['--config', this.opts.signalDataDir] : []),
     ];
 
@@ -87,8 +92,12 @@ export class SignalChannel implements Channel {
       shell: false,
     });
 
-    this.proc.stdout?.on('data', (d: Buffer) => log.debug(`signal-cli stdout: ${d.toString().trim()}`));
-    this.proc.stderr?.on('data', (d: Buffer) => log.debug(`signal-cli stderr: ${d.toString().trim()}`));
+    this.proc.stdout?.on('data', (d: Buffer) =>
+      log.debug(`signal-cli stdout: ${d.toString().trim()}`),
+    );
+    this.proc.stderr?.on('data', (d: Buffer) =>
+      log.debug(`signal-cli stderr: ${d.toString().trim()}`),
+    );
     this.proc.on('exit', (code) => {
       if (!this.stopped) log.warn(`signal-cli exited unexpectedly (code ${code})`);
     });
@@ -124,7 +133,7 @@ export class SignalChannel implements Channel {
   // ─── JSON-RPC over Unix socket ────────────────────────────────────────────
 
   private async rpc(method: string, params: Record<string, unknown>): Promise<unknown> {
-    const id  = ++this.reqId;
+    const id = ++this.reqId;
     const req = JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n';
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
@@ -153,7 +162,9 @@ export class SignalChannel implements Channel {
             resolve(msg.result);
           }
         }
-      } catch { /* malformed JSON line — ignore */ }
+      } catch {
+        /* malformed JSON line — ignore */
+      }
     }
   }
 
@@ -177,23 +188,23 @@ export class SignalChannel implements Channel {
     if (!content.trim()) return;
 
     const raw: RawMessage = {
-      id:          ulid(),
-      channel:     'signal',
-      source:      'signal',
-      chatId:      sender,
-      chatType:    'dm',
-      senderId:    sender,
-      senderName:  sender,
+      id: ulid(),
+      channel: 'signal',
+      source: 'signal',
+      chatId: sender,
+      chatType: 'dm',
+      senderId: sender,
+      senderName: sender,
       content,
-      links:       extractLinks(content),
-      receivedAt:  Date.now(),
-      timestamp:   Number(envelope.timestamp ?? Date.now()),
+      links: extractLinks(content),
+      receivedAt: Date.now(),
+      timestamp: Number(envelope.timestamp ?? Date.now()),
     };
 
     log.info(`Signal message from ${sender}: ${content.slice(0, 60)}`);
 
     if (this.handler) {
-      await this.handler(raw).catch(e => log.error(`Signal message handler error: ${e}`));
+      await this.handler(raw).catch((e) => log.error(`Signal message handler error: ${e}`));
     }
   }
 
@@ -206,7 +217,9 @@ export class SignalChannel implements Channel {
         if (existsSync(this.opts.socketPath)) {
           resolve();
         } else if (Date.now() - start > maxMs) {
-          reject(new Error(`signal-cli socket not found after ${maxMs}ms: ${this.opts.socketPath}`));
+          reject(
+            new Error(`signal-cli socket not found after ${maxMs}ms: ${this.opts.socketPath}`),
+          );
         } else {
           setTimeout(check, 300);
         }

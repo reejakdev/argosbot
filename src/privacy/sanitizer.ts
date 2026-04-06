@@ -21,22 +21,38 @@ const log = createLogger('sanitizer');
 // These catch the most common injection attempts without LLM cost
 
 const INJECTION_PATTERNS: Array<{ name: string; regex: RegExp }> = [
-  { name: 'ignore_instructions',   regex: /ignore\s+(all\s+)?(previous|above|prior)\s+instructions?/i },
-  { name: 'new_instructions',      regex: /new\s+instructions?:/i },
-  { name: 'system_prompt_leak',    regex: /repeat\s+your\s+(system\s+)?prompt/i },
-  { name: 'jailbreak_dan',         regex: /do\s+anything\s+now|DAN\s+mode|pretend\s+you\s+have\s+no\s+restrictions/i },
-  { name: 'role_override',         regex: /you\s+are\s+now\s+(a\s+)?(?:an?\s+)?(?:AI|assistant|bot|GPT|Claude)\s+(?:without|that|who)/i },
+  {
+    name: 'ignore_instructions',
+    regex: /ignore\s+(all\s+)?(previous|above|prior)\s+instructions?/i,
+  },
+  { name: 'new_instructions', regex: /new\s+instructions?:/i },
+  { name: 'system_prompt_leak', regex: /repeat\s+your\s+(system\s+)?prompt/i },
+  {
+    name: 'jailbreak_dan',
+    regex: /do\s+anything\s+now|DAN\s+mode|pretend\s+you\s+have\s+no\s+restrictions/i,
+  },
+  {
+    name: 'role_override',
+    regex:
+      /you\s+are\s+now\s+(a\s+)?(?:an?\s+)?(?:AI|assistant|bot|GPT|Claude)\s+(?:without|that|who)/i,
+  },
   { name: 'instruction_injection', regex: /\[SYSTEM\]|\[INST\]|<\|system\|>|<\|im_start\|>/i },
-  { name: 'forget_rules',         regex: /forget\s+(all\s+)?(?:your\s+)?(?:previous\s+)?(?:rules|constraints|guidelines|ethics)/i },
-  { name: 'sudo_mode',             regex: /sudo\s+mode|developer\s+mode|override\s+mode|god\s+mode/i },
+  {
+    name: 'forget_rules',
+    regex: /forget\s+(all\s+)?(?:your\s+)?(?:previous\s+)?(?:rules|constraints|guidelines|ethics)/i,
+  },
+  { name: 'sudo_mode', regex: /sudo\s+mode|developer\s+mode|override\s+mode|god\s+mode/i },
   { name: 'assistant_impersonation', regex: /assistant:\s*(?:sure|of course|absolutely|yes)/i },
-  { name: 'translate_reveal',      regex: /translate\s+the\s+above|echo\s+back\s+the|print\s+your\s+prompt/i },
+  {
+    name: 'translate_reveal',
+    regex: /translate\s+the\s+above|echo\s+back\s+the|print\s+your\s+prompt/i,
+  },
 ];
 
 export interface SanitizationResult {
   safe: boolean;
   injectionDetected: boolean;
-  injectionPatterns: string[];       // which patterns triggered
+  injectionPatterns: string[]; // which patterns triggered
   llmAssessed: boolean;
   risk: 'none' | 'low' | 'medium' | 'high';
   reason?: string;
@@ -123,7 +139,10 @@ export async function deepSanitize(
 
     if (assessment.injected) {
       log.warn(`LLM detected injection from ${source}`, assessment);
-      audit('injection_detected_llm', source, 'message', { assessment, preview: anonContent.slice(0, 200) });
+      audit('injection_detected_llm', source, 'message', {
+        assessment,
+        preview: anonContent.slice(0, 200),
+      });
     }
 
     return {
@@ -178,9 +197,16 @@ export async function sanitize(
     };
   }
 
-  const shouldDeepScan = options.deepScan ?? (content.length > 500);
+  const shouldDeepScan = options.deepScan ?? content.length > 500;
   if (!shouldDeepScan) {
-    return { safe: true, injectionDetected: false, injectionPatterns: [], llmAssessed: false, risk: 'none', taggedContent: tagged };
+    return {
+      safe: true,
+      injectionDetected: false,
+      injectionPatterns: [],
+      llmAssessed: false,
+      risk: 'none',
+      taggedContent: tagged,
+    };
   }
 
   return deepSanitize(content, source, llmConfig);

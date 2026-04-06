@@ -26,13 +26,31 @@ import type { RawMessage } from '../../types.js';
 
 const log = createLogger('discord');
 
+// Rate limiter — max N concurrent message processing to avoid overwhelming the LLM
+const MAX_CONCURRENT = 3;
+let _inFlight = 0;
+const _queue: Array<() => void> = [];
+
+async function withConcurrencyLimit<T>(fn: () => Promise<T>): Promise<T> {
+  if (_inFlight >= MAX_CONCURRENT) {
+    await new Promise<void>((resolve) => _queue.push(resolve));
+  }
+  _inFlight++;
+  try {
+    return await fn();
+  } finally {
+    _inFlight--;
+    _queue.shift()?.();
+  }
+}
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 export interface DiscordConfig {
-  token:             string;
+  token: string;
   monitoredChannels: Array<{ channelId: string; name: string; guildId?: string; tags?: string[] }>;
   monitoredGuildIds: string[];
-  monitorDMs:        boolean;
+  monitorDMs: boolean;
 }
 
 // ─── Discord channel ──────────────────────────────────────────────────────────
@@ -89,7 +107,7 @@ export class DiscordChannel implements Channel {
       });
 
       c.on('messageCreate', async (message: unknown) => {
-        await this.handleMessage(message);
+        await withConcurrencyLimit(() => this.handleMessage(message));
       });
 
       c.on('error', async (error: unknown) => {
@@ -118,35 +136,35 @@ export class DiscordChannel implements Channel {
     if (!this.onMessageCb) return;
 
     const msg = message as {
-      author:    { id: string; username: string; displayName?: string; bot?: boolean };
-      content:   string;
-      channel:   {
+      author: { id: string; username: string; displayName?: string; bot?: boolean };
+      content: string;
+      channel: {
         id: string;
         type: number;
         name?: string;
         isDMBased: () => boolean;
-        isThread:  () => boolean;
+        isThread: () => boolean;
         fetch?: () => Promise<unknown>;
       };
-      guild?:    { id: string; name?: string } | null;
-      id:        string;
+      guild?: { id: string; name?: string } | null;
+      id: string;
       createdTimestamp: number;
       webhookId?: string | null;
-      system?:   boolean;
+      system?: boolean;
     };
 
     // Skip bots, webhooks, system messages
-    if (msg.author.bot)   return;
-    if (msg.webhookId)    return;
-    if (msg.system)       return;
+    if (msg.author.bot) return;
+    if (msg.webhookId) return;
+    if (msg.system) return;
 
     const content = msg.content.trim();
     if (!content) return;
 
-    const isDM      = msg.channel.isDMBased();
-    const isThread  = msg.channel.isThread();
+    const isDM = msg.channel.isDMBased();
+    const isThread = msg.channel.isThread();
     const channelId = msg.channel.id;
-    const guildId   = msg.guild?.id ?? null;
+    const guildId = msg.guild?.id ?? null;
 
     // DM filtering
     if (isDM && !this.config.monitorDMs) return;
@@ -158,34 +176,35 @@ export class DiscordChannel implements Channel {
 
     // Channel filtering — if list configured, only monitor listed channels
     if (!isDM && this.config.monitoredChannels.length > 0) {
-      const monitored = this.config.monitoredChannels.find(c => c.channelId === channelId);
+      const monitored = this.config.monitoredChannels.find((c) => c.channelId === channelId);
       if (!monitored) return;
     }
 
-    const senderName  = msg.author.displayName ?? msg.author.username;
-    const channelName = this.config.monitoredChannels.find(c => c.channelId === channelId)?.name
-      ?? msg.channel.name
-      ?? (isDM ? `DM:${senderName}` : channelId);
+    const senderName = msg.author.displayName ?? msg.author.username;
+    const channelName =
+      this.config.monitoredChannels.find((c) => c.channelId === channelId)?.name ??
+      msg.channel.name ??
+      (isDM ? `DM:${senderName}` : channelId);
 
     const raw: RawMessage = {
-      id:          `discord_${msg.id}`,
-      channel:     'discord',
-      source:      'discord' as unknown as RawMessage['source'],
-      chatId:      channelId,
-      chatName:    channelName,
-      chatType:    isDM ? 'dm' : (isThread ? 'thread' : 'channel'),
+      id: `discord_${msg.id}`,
+      channel: 'discord',
+      source: 'discord' as unknown as RawMessage['source'],
+      chatId: channelId,
+      chatName: channelName,
+      chatType: isDM ? 'dm' : isThread ? 'thread' : 'channel',
       partnerName: senderName,
       senderName,
-      senderId:    msg.author.id,
+      senderId: msg.author.id,
       content,
-      links:       extractLinks(content),
-      receivedAt:  Date.now(),
-      timestamp:   msg.createdTimestamp,
+      links: extractLinks(content),
+      receivedAt: Date.now(),
+      timestamp: msg.createdTimestamp,
       meta: {
         discord_channel_id: channelId,
         discord_message_id: msg.id,
-        discord_guild_id:   guildId,
-        discord_is_thread:  isThread,
+        discord_guild_id: guildId,
+        discord_is_thread: isThread,
       },
     };
 
@@ -210,9 +229,9 @@ function extractLinks(text: string): string[] {
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 export function createDiscordChannel(config?: {
-  monitoredChannels?:  Array<{ channelId: string; name: string; guildId?: string; tags?: string[] }>;
-  monitoredGuildIds?:  string[];
-  monitorDMs?:         boolean;
+  monitoredChannels?: Array<{ channelId: string; name: string; guildId?: string; tags?: string[] }>;
+  monitoredGuildIds?: string[];
+  monitorDMs?: boolean;
 }): DiscordChannel | null {
   const token = process.env.DISCORD_BOT_TOKEN;
 
@@ -223,8 +242,8 @@ export function createDiscordChannel(config?: {
 
   return new DiscordChannel({
     token,
-    monitoredChannels: config?.monitoredChannels  ?? [],
-    monitoredGuildIds: config?.monitoredGuildIds  ?? [],
-    monitorDMs:        config?.monitorDMs          ?? true,
+    monitoredChannels: config?.monitoredChannels ?? [],
+    monitoredGuildIds: config?.monitoredGuildIds ?? [],
+    monitorDMs: config?.monitorDMs ?? true,
   });
 }

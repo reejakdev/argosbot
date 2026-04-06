@@ -26,38 +26,38 @@ import type { KnowledgeDocument } from '../types.js';
 const log = createLogger('knowledge:drive');
 
 const EXPORTABLE: Record<string, string> = {
-  'application/vnd.google-apps.document':     'text/plain',
-  'application/vnd.google-apps.spreadsheet':  'text/csv',
+  'application/vnd.google-apps.document': 'text/plain',
+  'application/vnd.google-apps.spreadsheet': 'text/csv',
   'application/vnd.google-apps.presentation': 'text/plain',
 };
 
 interface DriveSource {
-  name:        string;
-  folderId?:   string;
-  fileIds?:    string[];
+  name: string;
+  folderId?: string;
+  fileIds?: string[];
   refreshDays: number;
 }
 
 interface ServiceAccountKey {
   client_email: string;
-  private_key:  string;
-  token_uri?:   string;
+  private_key: string;
+  token_uri?: string;
 }
 
 // ─── JWT / access token ───────────────────────────────────────────────────────
 
 async function getAccessToken(keyPath: string): Promise<string> {
-  const raw  = readFileSync(keyPath, 'utf-8');
-  const key  = JSON.parse(raw) as ServiceAccountKey;
+  const raw = readFileSync(keyPath, 'utf-8');
+  const key = JSON.parse(raw) as ServiceAccountKey;
   const { GoogleAuth } = await import('googleapis-common');
 
   const auth = new GoogleAuth({
     keyFile: keyPath,
-    scopes:  ['https://www.googleapis.com/auth/drive.readonly'],
+    scopes: ['https://www.googleapis.com/auth/drive.readonly'],
   });
 
   const client = await auth.getClient();
-  const token  = await client.getAccessToken();
+  const token = await client.getAccessToken();
   if (!token.token) throw new Error('Failed to obtain Drive access token');
   return token.token;
   void key; // key read for validation above
@@ -68,7 +68,7 @@ async function getAccessToken(keyPath: string): Promise<string> {
 async function driveGet(path: string, token: string, binary = false): Promise<string | null> {
   const res = await fetch(`https://www.googleapis.com/drive/v3/${path}`, {
     headers: { Authorization: `Bearer ${token}` },
-    signal:  AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(20_000),
   });
 
   if (!res.ok) {
@@ -80,15 +80,15 @@ async function driveGet(path: string, token: string, binary = false): Promise<st
 }
 
 interface DriveFile {
-  id:       string;
-  name:     string;
+  id: string;
+  name: string;
   mimeType: string;
 }
 
 async function listFolder(folderId: string, token: string): Promise<DriveFile[]> {
-  const q        = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
-  const fields   = encodeURIComponent('files(id,name,mimeType)');
-  const raw      = await driveGet(`files?q=${q}&fields=${fields}&pageSize=100`, token);
+  const q = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+  const fields = encodeURIComponent('files(id,name,mimeType)');
+  const raw = await driveGet(`files?q=${q}&fields=${fields}&pageSize=100`, token);
   if (!raw) return [];
 
   const json = JSON.parse(raw) as { files?: DriveFile[] };
@@ -110,17 +110,23 @@ async function exportFile(file: DriveFile, token: string): Promise<string | null
       `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=${encodeURIComponent(exportMime)}`,
       { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) },
     );
-    if (!res.ok) { log.warn(`Export failed for "${file.name}": HTTP ${res.status}`); return null; }
+    if (!res.ok) {
+      log.warn(`Export failed for "${file.name}": HTTP ${res.status}`);
+      return null;
+    }
     return res.text();
   }
 
   if (file.mimeType.startsWith('text/')) {
     // Plain text file — download directly
-    const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
-      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) },
-    );
-    if (!res.ok) { log.warn(`Download failed for "${file.name}": HTTP ${res.status}`); return null; }
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) {
+      log.warn(`Download failed for "${file.name}": HTTP ${res.status}`);
+      return null;
+    }
     return res.text();
   }
 
@@ -136,7 +142,9 @@ export async function fetchGoogleDrive(
   config: Config,
 ): Promise<KnowledgeDocument | null> {
   if (!config.googleDrive?.serviceAccountKeyPath) {
-    log.warn('google-drive source configured but googleDrive.serviceAccountKeyPath is missing — skipping');
+    log.warn(
+      'google-drive source configured but googleDrive.serviceAccountKeyPath is missing — skipping',
+    );
     return null;
   }
 
@@ -160,7 +168,7 @@ export async function fetchGoogleDrive(
   }
 
   for (const fileId of source.fileIds ?? []) {
-    if (files.some(f => f.id === fileId)) continue; // already in folder listing
+    if (files.some((f) => f.id === fileId)) continue; // already in folder listing
     const meta = await getFileMeta(fileId, token);
     if (meta) files.push(meta);
   }
@@ -182,7 +190,9 @@ export async function fetchGoogleDrive(
   }
 
   if (exported === 0) {
-    log.warn(`Drive source "${source.name}": no exportable content (${files.length} file(s) all unsupported format)`);
+    log.warn(
+      `Drive source "${source.name}": no exportable content (${files.length} file(s) all unsupported format)`,
+    );
     return null;
   }
 
@@ -190,9 +200,9 @@ export async function fetchGoogleDrive(
   log.info(`Drive "${source.name}": exported ${exported}/${files.length} file(s)`);
 
   return {
-    key:     `gdrive:${source.folderId ?? source.fileIds?.[0] ?? source.name}`,
-    name:    source.name,
+    key: `gdrive:${source.folderId ?? source.fileIds?.[0] ?? source.name}`,
+    name: source.name,
     content: combined,
-    tags:    ['context', 'google-drive', source.name.toLowerCase().replace(/\s+/g, '_')],
+    tags: ['context', 'google-drive', source.name.toLowerCase().replace(/\s+/g, '_')],
   };
 }

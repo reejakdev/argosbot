@@ -29,7 +29,11 @@ const log = createLogger('approval');
 
 // ─── Telegram bot reference (injected at startup) ─────────────────────────────
 
-type SendMessageFn = (chatId: string, text: string, options?: unknown) => Promise<{ message_id: number }>;
+type SendMessageFn = (
+  chatId: string,
+  text: string,
+  options?: unknown,
+) => Promise<{ message_id: number }>;
 let _sendMessage: SendMessageFn | null = null;
 let _approvalChatId: string = '';
 let _cloudMode = false;
@@ -43,7 +47,9 @@ export function initApprovalGateway(
   _approvalChatId = approvalChatId;
   _cloudMode = cloudMode;
   if (cloudMode) {
-    log.warn('Security: cloudMode=true — Telegram approval fully disabled, YubiKey required for all proposals');
+    log.warn(
+      'Security: cloudMode=true — Telegram approval fully disabled, YubiKey required for all proposals',
+    );
   }
   log.info(`Approval gateway initialized → chat ${approvalChatId}`);
 }
@@ -73,7 +79,7 @@ function formatApprovalMessage(proposal: Proposal): string {
     lines.push(`_${proposal.draftReply.slice(0, 300)}_`);
   }
 
-  const needsYubiKey = proposal.actions.some(a => a.risk === 'medium' || a.risk === 'high');
+  const needsYubiKey = proposal.actions.some((a) => a.risk === 'medium' || a.risk === 'high');
   if (needsYubiKey) {
     lines.push(
       ``,
@@ -97,12 +103,12 @@ function formatApprovalMessage(proposal: Proposal): string {
 export function proposalRequiresYubiKey(actions: ProposedAction[]): boolean {
   // cloudMode: ALL proposals require YubiKey regardless of risk level
   if (_cloudMode) return true;
-  return actions.some(a => a.risk === 'medium' || a.risk === 'high');
+  return actions.some((a) => a.risk === 'medium' || a.risk === 'high');
 }
 
 function buildInlineKeyboard(proposalId: string, actions: ProposedAction[]) {
   const needsYubiKey = proposalRequiresYubiKey(actions);
-  const hasHighRisk  = actions.some(a => a.risk === 'high');
+  const hasHighRisk = actions.some((a) => a.risk === 'high');
 
   if (needsYubiKey) {
     // Telegram cannot approve — only show Reject + snooze + a web app nudge
@@ -142,15 +148,17 @@ const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 export function generateExecutionToken(proposalId: string): string {
   const token = randomBytes(32).toString('hex');
-  const now   = Date.now();
-  const db    = getDb();
+  const now = Date.now();
+  const db = getDb();
 
   // INSERT OR REPLACE — handles the edge case where a token already exists
   // (e.g. re-approval after a snooze). The old token is invalidated.
-  db.prepare(`
+  db.prepare(
+    `
     INSERT OR REPLACE INTO execution_tokens (proposal_id, token, created_at, expires_at, used)
     VALUES (?, ?, ?, ?, 0)
-  `).run(proposalId, token, now, now + TOKEN_TTL_MS);
+  `,
+  ).run(proposalId, token, now, now + TOKEN_TTL_MS);
 
   audit('execution_token_issued', proposalId, 'security');
   log.info(`Execution token issued for proposal ${proposalId.slice(-8)} (TTL: 5min)`);
@@ -169,9 +177,9 @@ export function generateExecutionToken(proposalId: string): string {
 export function validateAndConsumeToken(proposalId: string, token: string): boolean {
   const db = getDb();
 
-  const row = db.prepare(
-    'SELECT token, expires_at, used FROM execution_tokens WHERE proposal_id = ?'
-  ).get(proposalId) as { token: string; expires_at: number; used: number } | undefined;
+  const row = db
+    .prepare('SELECT token, expires_at, used FROM execution_tokens WHERE proposal_id = ?')
+    .get(proposalId) as { token: string; expires_at: number; used: number } | undefined;
 
   if (!row) {
     log.warn(`Execution blocked: no token for proposal ${proposalId.slice(-8)}`);
@@ -204,9 +212,9 @@ export function validateAndConsumeToken(proposalId: string, token: string): bool
   }
 
   // Atomically mark as used — WHERE used = 0 prevents race conditions
-  const result = db.prepare(
-    'UPDATE execution_tokens SET used = 1 WHERE proposal_id = ? AND used = 0'
-  ).run(proposalId);
+  const result = db
+    .prepare('UPDATE execution_tokens SET used = 1 WHERE proposal_id = ? AND used = 0')
+    .run(proposalId);
 
   if (result.changes === 0) {
     // Race condition: another request consumed it between our check and the update
@@ -253,10 +261,12 @@ export async function requestApproval(proposal: Proposal): Promise<ApprovalReque
     expiresAt: proposal.expiresAt,
   };
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO approvals (id, proposal_id, telegram_message_id, status, created_at, expires_at)
     VALUES (?, ?, ?, 'pending', ?, ?)
-  `).run(approval.id, approval.proposalId, tgMessageId ?? null, now, approval.expiresAt);
+  `,
+  ).run(approval.id, approval.proposalId, tgMessageId ?? null, now, approval.expiresAt);
 
   log.info(`Approval ${approval.id} sent for proposal ${proposal.id}`, { tgMessageId });
   audit('approval_requested', approval.id, 'approval', { proposalId: proposal.id });
@@ -269,13 +279,20 @@ export async function requestApproval(proposal: Proposal): Promise<ApprovalReque
 export async function handleCallback(
   callbackData: string,
   callbackId: string,
-  executeApprovedProposal: (proposal: Proposal, actions: ProposedAction[], token: string) => Promise<void>,
+  executeApprovedProposal: (
+    proposal: Proposal,
+    actions: ProposedAction[],
+    token: string,
+  ) => Promise<void>,
 ): Promise<string> {
   const [action, proposalId] = callbackData.split(':');
   if (!proposalId) return 'Invalid callback';
 
   const db = getDb();
-  const proposalRow = db.prepare(`SELECT * FROM proposals WHERE id = ?`).get(proposalId) as Record<string, unknown> | null;
+  const proposalRow = db.prepare(`SELECT * FROM proposals WHERE id = ?`).get(proposalId) as Record<
+    string,
+    unknown
+  > | null;
 
   if (!proposalRow) return `❌ Proposal ${proposalId.slice(-8)} not found`;
 
@@ -309,8 +326,13 @@ export async function handleCallback(
       // exists after a real human approval action. Workers must present it.
       let executionToken = '';
       db.transaction(() => {
-        db.prepare(`UPDATE proposals SET status = 'approved', approved_at = ? WHERE id = ?`).run(now, proposalId);
-        db.prepare(`UPDATE approvals SET status = 'approved', responded_at = ? WHERE proposal_id = ?`).run(now, proposalId);
+        db.prepare(`UPDATE proposals SET status = 'approved', approved_at = ? WHERE id = ?`).run(
+          now,
+          proposalId,
+        );
+        db.prepare(
+          `UPDATE approvals SET status = 'approved', responded_at = ? WHERE proposal_id = ?`,
+        ).run(now, proposalId);
         executionToken = generateExecutionToken(proposalId);
       })();
 
@@ -330,7 +352,7 @@ export async function handleCallback(
       };
 
       // Execute in background — don't block the callback response
-      void executeApprovedProposal(proposal, proposal.actions, executionToken).catch(e => {
+      void executeApprovedProposal(proposal, proposal.actions, executionToken).catch((e) => {
         log.error(`Execution failed for proposal ${proposalId}`, e);
       });
 
@@ -340,7 +362,9 @@ export async function handleCallback(
     case 'reject': {
       db.transaction(() => {
         db.prepare(`UPDATE proposals SET status = 'rejected' WHERE id = ?`).run(proposalId);
-        db.prepare(`UPDATE approvals SET status = 'rejected', responded_at = ? WHERE proposal_id = ?`).run(now, proposalId);
+        db.prepare(
+          `UPDATE approvals SET status = 'rejected', responded_at = ? WHERE proposal_id = ?`,
+        ).run(now, proposalId);
       })();
       log.info(`Proposal ${proposalId} REJECTED`);
       audit('proposal_rejected', proposalId, 'proposal');
@@ -350,7 +374,10 @@ export async function handleCallback(
     case 'snooze': {
       const newExpiry = Date.now() + 60 * 60 * 1000; // +1h
       db.prepare(`UPDATE proposals SET expires_at = ? WHERE id = ?`).run(newExpiry, proposalId);
-      db.prepare(`UPDATE approvals SET expires_at = ? WHERE proposal_id = ?`).run(newExpiry, proposalId);
+      db.prepare(`UPDATE approvals SET expires_at = ? WHERE proposal_id = ?`).run(
+        newExpiry,
+        proposalId,
+      );
       log.info(`Proposal ${proposalId} snoozed 1h`);
       return `⏰ Snoozed — will expire in 1h`;
     }
@@ -358,8 +385,11 @@ export async function handleCallback(
     case 'details': {
       const actions = JSON.parse(proposalRow.actions as string) as ProposedAction[];
       const detail = actions
-        .filter(a => a.risk === 'high')
-        .map(a => `🔴 *${a.type.toUpperCase()}*\n${a.description}\n\`${JSON.stringify(a.payload).slice(0, 200)}\``)
+        .filter((a) => a.risk === 'high')
+        .map(
+          (a) =>
+            `🔴 *${a.type.toUpperCase()}*\n${a.description}\n\`${JSON.stringify(a.payload).slice(0, 200)}\``,
+        )
         .join('\n\n');
       return `🔴 *High-risk action details*\n\n${detail}`;
     }
@@ -375,16 +405,22 @@ export function expireStaleApprovals(): void {
   const db = getDb();
   const now = Date.now();
 
-  const result = db.prepare(`
+  const result = db
+    .prepare(
+      `
     UPDATE approvals SET status = 'expired'
     WHERE status = 'pending' AND expires_at < ?
-  `).run(now);
+  `,
+    )
+    .run(now);
 
   if (result.changes > 0) {
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE proposals SET status = 'expired'
       WHERE status = 'awaiting_approval' AND expires_at < ?
-    `).run(now);
+    `,
+    ).run(now);
 
     log.info(`Expired ${result.changes} stale approval(s)`);
     audit('approvals_expired', undefined, 'approval', { count: result.changes });

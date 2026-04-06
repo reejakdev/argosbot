@@ -33,7 +33,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       try {
         const event = JSON.parse(e.data as string) as WSEvent;
         optionsRef.current.onMessage?.(event);
-      } catch { /* ignore malformed messages */ }
+      } catch {
+        /* ignore malformed messages */
+      }
     };
 
     wsRef.current = ws;

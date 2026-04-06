@@ -64,16 +64,19 @@ Sources:
 
 registerSkill({
   name: 'verify_protocol_address',
-  description: 'Verify that a partner-provided crypto address is officially documented by the named protocol. DOCS FIRST — cross-checks against official documentation only.',
+  description:
+    'Verify that a partner-provided crypto address is officially documented by the named protocol. DOCS FIRST — cross-checks against official documentation only.',
   tool: {
     name: 'verify_protocol_address',
-    description: 'Verify that a crypto address claimed by a partner matches the official documentation of the named protocol. Returns APPROVE / MANUAL REVIEW / REJECT with a score and sources. Use whenever a partner asks to whitelist or use a specific contract/wallet address.',
+    description:
+      'Verify that a crypto address claimed by a partner matches the official documentation of the named protocol. Returns APPROVE / MANUAL REVIEW / REJECT with a score and sources. Use whenever a partner asks to whitelist or use a specific contract/wallet address.',
     input_schema: {
       type: 'object',
       properties: {
         partner_message: {
           type: 'string',
-          description: 'The raw partner message requesting address whitelisting or mentioning an address to use. Include the full message as received.',
+          description:
+            'The raw partner message requesting address whitelisting or mentioning an address to use. Include the full message as received.',
         },
       },
       required: ['partner_message'],
@@ -87,7 +90,8 @@ registerSkill({
 
     // Use the global config to get LLM settings
     const { getConfig } = await import('../../config/index.js');
-    const { llmConfigFromConfig, callWithTools, buildToolResultMessages } = await import('../../llm/index.js');
+    const { llmConfigFromConfig, callWithTools, buildToolResultMessages } =
+      await import('../../llm/index.js');
     const { executeBuiltinTool, BUILTIN_TOOLS } = await import('../../llm/builtin-tools.js');
     const { createLogger } = await import('../../logger.js');
     const log = createLogger('skill:verify-address');
@@ -95,14 +99,14 @@ registerSkill({
     const config = getConfig();
     const llmCfg = {
       ...llmConfigFromConfig(config),
-      temperature: 0,  // deterministic — this is a verification task
-      maxTokens: cfg.maxTokens as number | undefined ?? 2048,
+      temperature: 0, // deterministic — this is a verification task
+      maxTokens: (cfg.maxTokens as number | undefined) ?? 2048,
     };
 
     // Sub-agent tools: web_search + fetch_url only
     type ToolDef = { name: string; description: string; input_schema: unknown };
-    const tools: ToolDef[] = BUILTIN_TOOLS.filter(t =>
-      t.name === 'web_search' || t.name === 'fetch_url'
+    const tools: ToolDef[] = BUILTIN_TOOLS.filter(
+      (t) => t.name === 'web_search' || t.name === 'fetch_url',
     ) as ToolDef[];
 
     const messages: unknown[] = [

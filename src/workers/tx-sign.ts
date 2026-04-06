@@ -25,13 +25,13 @@ const log = createLogger('tx-sign');
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface SignTxInput {
-  chain: string;                    // config key in wallet.chains
-  to: string;                       // recipient address
-  value: string;                    // amount in native token (human-readable, e.g. "0.1")
-  data?: string;                    // optional calldata (hex) for contract calls
-  gasLimit?: string;                // optional override
-  priorityFeeGwei?: string;         // EVM only
-  note?: string;                    // reason / context for audit log
+  chain: string; // config key in wallet.chains
+  to: string; // recipient address
+  value: string; // amount in native token (human-readable, e.g. "0.1")
+  data?: string; // optional calldata (hex) for contract calls
+  gasLimit?: string; // optional override
+  priorityFeeGwei?: string; // EVM only
+  note?: string; // reason / context for audit log
 }
 
 // ─── Daily spend tracking ─────────────────────────────────────────────────────
@@ -40,13 +40,17 @@ function getTodaySpendUsd(chain: string): number {
   const db = getDb();
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  const row = db.prepare(`
+  const row = db
+    .prepare(
+      `
     SELECT COALESCE(SUM(value_usd), 0) as total
     FROM audit_log
     WHERE event = 'tx_signed'
       AND data LIKE ?
       AND created_at >= ?
-  `).get(`%"chain":"${chain}"%`, start.getTime()) as { total: number };
+  `,
+    )
+    .get(`%"chain":"${chain}"%`, start.getTime()) as { total: number };
   return row.total;
 }
 
@@ -58,13 +62,18 @@ async function signAndSendEvm(
   walletCfg: NonNullable<Config['wallet']>,
   config: Config,
 ): Promise<WorkerResult> {
-  const { createPublicClient, createWalletClient, http, parseEther, formatEther } = await import('viem');
+  const { createPublicClient, createWalletClient, http, parseEther, formatEther } =
+    await import('viem');
   const { defineChain } = await import('viem');
 
   const chain = defineChain({
     id: chainCfg.chainId,
     name: input.chain,
-    nativeCurrency: { name: chainCfg.symbol ?? 'ETH', symbol: chainCfg.symbol ?? 'ETH', decimals: 18 },
+    nativeCurrency: {
+      name: chainCfg.symbol ?? 'ETH',
+      symbol: chainCfg.symbol ?? 'ETH',
+      decimals: 18,
+    },
     rpcUrls: { default: { http: [chainCfg.rpc] } },
   });
 
@@ -177,7 +186,8 @@ async function signAndSendSolana(
   walletCfg: NonNullable<Config['wallet']>,
   config: Config,
 ): Promise<WorkerResult> {
-  const { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } = await import('@solana/web3.js');
+  const { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } =
+    await import('@solana/web3.js');
 
   const connection = new Connection(chainCfg.rpc, 'confirmed');
   const keypair = await loadSolanaKeypair(config.dataDir, walletCfg.encryptionSecret);
@@ -232,7 +242,7 @@ async function signAndSendSolana(
   const tx = new Transaction().add(
     SystemProgram.transfer({
       fromPubkey: keypair.publicKey,
-      toPubkey:   recipientPubkey,
+      toPubkey: recipientPubkey,
       lamports,
     }),
   );
@@ -283,7 +293,7 @@ export async function executeSignTx(
   const whitelist = walletCfg.limits?.whitelist ?? [];
   if (whitelist.length > 0) {
     const toNorm = txInput.to.toLowerCase();
-    const allowed = whitelist.some(a => a.toLowerCase() === toNorm);
+    const allowed = whitelist.some((a) => a.toLowerCase() === toNorm);
     if (!allowed) {
       log.warn(`Whitelist rejection: ${txInput.to} not in allowed list`);
       audit('tx_whitelist_rejected', undefined, 'wallet', { chain: txInput.chain, to: txInput.to });

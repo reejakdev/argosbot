@@ -64,7 +64,7 @@ describe('search', () => {
   it('finds a stored memory by keyword', () => {
     storeQuick('TokenA redemption vault address needed', 'task', ['copper']);
     const results = search({ query: 'TokenA redemption vault' });
-    expect(results.some(r => r.content.includes('TokenA'))).toBe(true);
+    expect(results.some((r) => r.content.includes('TokenA'))).toBe(true);
   });
 
   it('returns empty array for unmatched query', () => {
@@ -94,8 +94,9 @@ describe('archive', () => {
     archive(entry.id);
 
     const db = getDb();
-    const row = db.prepare('SELECT archived, expires_at FROM memories WHERE id = ?').get(entry.id) as
-      { archived: number; expires_at: number | null };
+    const row = db
+      .prepare('SELECT archived, expires_at FROM memories WHERE id = ?')
+      .get(entry.id) as { archived: number; expires_at: number | null };
 
     expect(row.archived).toBe(1);
     expect(row.expires_at).toBeNull();
@@ -106,14 +107,16 @@ describe('archive', () => {
 
 describe('purgeExpired', () => {
   it('removes entries past their expiry', () => {
-    const db   = getDb();
+    const db = getDb();
     const ulid = monotonicFactory();
-    const id   = ulid();
+    const id = ulid();
 
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO memories (id, content, tags, category, source_ref, importance, archived, expires_at, created_at)
       VALUES (?, ?, ?, 'general', ?, 5, 0, ?, ?)
-    `).run(id, 'expired entry content', '[]', `test:${id}`, Date.now() - 1_000, Date.now() - 2_000);
+    `,
+    ).run(id, 'expired entry content', '[]', `test:${id}`, Date.now() - 1_000, Date.now() - 2_000);
 
     const count = purgeExpired();
     expect(count).toBeGreaterThanOrEqual(1);
@@ -127,7 +130,7 @@ describe('purgeExpired', () => {
     archive(entry.id);
     purgeExpired();
 
-    const db  = getDb();
+    const db = getDb();
     const row = db.prepare('SELECT id FROM memories WHERE id = ?').get(entry.id);
     expect(row).toBeDefined();
   });
@@ -136,7 +139,7 @@ describe('purgeExpired', () => {
     const entry = storeQuick('far future expiry', 'general', [], 365);
     purgeExpired();
 
-    const db  = getDb();
+    const db = getDb();
     const row = db.prepare('SELECT id FROM memories WHERE id = ?').get(entry.id);
     expect(row).toBeDefined();
   });

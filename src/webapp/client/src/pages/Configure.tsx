@@ -48,13 +48,18 @@ interface ArgosConfig {
   };
   voice?: {
     enabled: boolean; whisperBackend: 'api' | 'local';
-    whisperModel: string; whisperEndpoint: string;
-    ttsEnabled?: boolean; ttsProvider: 'openai' | 'elevenlabs';
+    whisperModel: string; whisperEndpoint: string; whisperApiKey?: string;
+    ttsEnabled?: boolean; ttsProvider: 'openai' | 'elevenlabs' | 'local';
+    localTtsVoice?: string; ttsLanguage?: string;
     openAiTtsModel: string; openAiTtsVoice: string;
     elevenLabsVoiceId?: string;
+    ttsTriggers?: Record<string, string>;
+    immersive?: boolean;
+    display?: { botName?: string; logoUrl?: string; accentColor?: string; port?: number; stars?: boolean };
+    effects?: { reverb?: number; delay?: number; delayTime?: number };
   };
   embeddings?: { enabled: boolean; model: string; baseUrl: string; localOnly?: boolean };
-  mcpServers?: { name: string; type: string; command?: string; url?: string; args?: string[]; enabled: boolean }[];
+  mcpServers?: { name: string; type: string; command?: string; url?: string; args?: string[]; env?: Record<string, string>; enabled: boolean; toolPolicy?: Record<string, string> }[];
   skills?:     { name: string; enabled: boolean; config?: Record<string, unknown> }[];
   agents?:     AgentDef[];
   triage?: {
@@ -65,12 +70,12 @@ interface ArgosConfig {
   memory?: { defaultTtlDays: number; archiveTtlDays: number; purgeIntervalHours: number; autoArchiveThreshold: number };
   approval?: { defaultExpiryMs: number; criticalExpiryMs: number; doubleTapCritical: boolean };
   anonymizer?: { mode: 'regex' | 'none'; knownPersons: string[]; bucketAmounts: boolean; anonymizeCryptoAddresses: boolean };
-  claude?: { customInstructions?: string; planningTemperature: number; maxTokens: number };
+  claude?: { customInstructions?: string; planningTemperature: number; maxTokens: number; maxIterations: number };
   shellExec?: { enabled: boolean; allowedCommands: string[]; workingDir?: string };
   orchestration?: { enabled: boolean; maxSubAgents: number; timeoutSeconds: number };
   channels?: {
     telegram?: {
-      listener?: { mode: string; discoverUnknownChats: boolean; contextWindow?: { waitMs: number; maxMessages: number } };
+      listener?: { mode: string; discoverUnknownChats: boolean; ignoredSenders?: string[]; contextWindow?: { waitMs: number; maxMessages: number } };
       personal?: { approvalChatId?: string };
     };
     slack?: { listener?: { enabled: boolean; pollIntervalSeconds: number; monitorDMs: boolean } };
@@ -218,25 +223,28 @@ function useSave(onSaved?: () => void) {
   const [saving, setSaving] = useState(false);
   const [saved,  setSaved]  = useState(false);
   const [error,  setError]  = useState<string | null>(null);
+  const [needsRestart, setNeedsRestart] = useState(false);
   const save = useCallback(async (data: Record<string, unknown>) => {
-    setSaving(true); setError(null); setSaved(false);
+    setSaving(true); setError(null); setSaved(false); setNeedsRestart(false);
     try {
-      await patch('/configure/config', data);
+      const res = await patch<{ ok: boolean; requiresRestart?: boolean }>('/configure/config', data);
       setSaved(true);
+      if (res.requiresRestart) setNeedsRestart(true);
       onSaved?.();
-      setTimeout(() => setSaved(false), 2500);
+      setTimeout(() => setSaved(false), 4000);
     } catch (e) { setError(String(e)); }
     finally { setSaving(false); }
   }, [onSaved]);
-  return { saving, saved, error, save };
+  return { saving, saved, error, needsRestart, save };
 }
 
-function SaveBar({ saving, saved, error, onSave }: { saving: boolean; saved: boolean; error: string | null; onSave: () => void }) {
+function SaveBar({ saving, saved, error, needsRestart, onSave }: { saving: boolean; saved: boolean; error: string | null; needsRestart?: boolean; onSave: () => void }) {
   return (
     <div className="flex items-center justify-between mt-5 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
       <div style={{ ...inter, fontSize: '0.72rem' }}>
         {error && <span style={{ color: '#ef4444' }}>{error}</span>}
-        {saved && !error && <span style={{ color: '#059669' }}>Saved</span>}
+        {saved && !error && !needsRestart && <span style={{ color: '#059669' }}>Saved</span>}
+        {saved && !error && needsRestart && <span style={{ color: '#d97706' }}>Saved — restart Argos to apply (argos restart)</span>}
       </div>
       <button onClick={onSave} disabled={saving} style={{
         ...mono, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.08em',
@@ -334,7 +342,7 @@ const BADGE_STYLE: Record<string, { color: string; bg: string }> = {
 // ─── Tab: Models ──────────────────────────────────────────────────────────────
 
 function ModelsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) {
-  const { saving, saved, error, save } = useSave(onSaved);
+  const { saving, saved, error, needsRestart, save } = useSave(onSaved);
   const providers = Object.entries(cfg.llm.providers);
   const provOpts   = providers.map(([id, p]) => ({ value: id, label: p.name ?? id }));
 
@@ -535,7 +543,7 @@ function ModelsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void })
         ))}
       </div>
 
-      <SaveBar saving={saving} saved={saved} error={error} onSave={() => save({
+      <SaveBar saving={saving} saved={saved} error={error} needsRestart={needsRestart} onSave={() => save({
         llm: { ...cfg.llm, activeProvider, activeModel,
           fallbackProvider: fallbackProvider || undefined,
           fallbackModel: fallbackModel || undefined, thinking },
@@ -555,7 +563,7 @@ const ROLE_META: Record<string, { desc: string }> = {
 };
 
 function PrivacyTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) {
-  const { saving, saved, error, save } = useSave(onSaved);
+  const { saving, saved, error, needsRestart, save } = useSave(onSaved);
   const provOpts = Object.entries(cfg.llm.providers).map(([id, p]) => ({ value: id, label: p.name ?? id }));
 
   const [privProvider, setPrivProvider] = useState(cfg.privacy.provider ?? '');
@@ -624,7 +632,7 @@ function PrivacyTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }
         <ToggleRow label="Encrypt messages at rest" hint="AES-256-GCM. Key at ~/.argos/message.key. Decrypt: npm run decrypt -- <id>." checked={encryptMsgs} onChange={setEncryptMsgs} />
       </div>
 
-      <SaveBar saving={saving} saved={saved} error={error} onSave={() => save({
+      <SaveBar saving={saving} saved={saved} error={error} needsRestart={needsRestart} onSave={() => save({
         privacy: { provider: privProvider || undefined, model: privModel || undefined, storeRaw, encryptMessages: encryptMsgs, roles },
       })} />
     </div>
@@ -638,16 +646,37 @@ const OPENAI_TTS_MODELS = ['tts-1', 'tts-1-hd'];
 const OPENAI_TTS_VOICES = ['alloy', 'ash', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer'];
 
 function VoiceTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) {
-  const { saving, saved, error, save } = useSave(onSaved);
+  const { saving, saved, error, needsRestart, save } = useSave(onSaved);
   const v = cfg.voice ?? {} as NonNullable<ArgosConfig['voice']>;
 
   const [enabled,         setEnabled]         = useState(v.enabled ?? false);
   const [whisperBackend,  setWhisperBackend]  = useState<'api' | 'local'>(v.whisperBackend ?? 'api');
   const [whisperModel,    setWhisperModel]    = useState(v.whisperModel ?? 'whisper-1');
   const [whisperEndpoint, setWhisperEndpoint] = useState(v.whisperEndpoint ?? '');
+  const [whisperApiKey,   setWhisperApiKey]   = useState(v.whisperApiKey ?? '');
   const [ttsEnabled,      setTtsEnabled]      = useState(v.ttsEnabled ?? false);
-  const [ttsProvider,     setTtsProvider]     = useState<'openai' | 'elevenlabs'>(v.ttsProvider ?? 'openai');
+  const [ttsProvider,     setTtsProvider]     = useState<'openai' | 'elevenlabs' | 'local'>(v.ttsProvider ?? 'local');
   const [ttsModel,        setTtsModel]        = useState(v.openAiTtsModel ?? 'tts-1');
+  const [localTtsVoice,   setLocalTtsVoice]   = useState(v.localTtsVoice ?? '');
+  const [ttsLanguage,     setTtsLanguage]     = useState(v.ttsLanguage ?? 'fr');
+  const [immersive,       setImmersive]       = useState(v.immersive ?? false);
+  const display = v.display ?? {} as Record<string, string>;
+  const [displayName,     setDisplayName]     = useState(display.botName ?? 'Argos');
+  const [displayLogo,     setDisplayLogo]     = useState(display.logoUrl ?? '');
+  const [displayColor,    setDisplayColor]    = useState(display.accentColor ?? '#4f6eff');
+  const [displayPort,     setDisplayPort]     = useState(display.port ?? 3005);
+  const [displayStars,   setDisplayStars]    = useState(display.stars ?? false);
+  const fx = v.effects ?? {} as Record<string, number>;
+  const [fxReverb,        setFxReverb]        = useState(fx.reverb ?? 0);
+  const [fxDelay,         setFxDelay]         = useState(fx.delay ?? 0);
+  const [fxDelayTime,     setFxDelayTime]     = useState(fx.delayTime ?? 0.3);
+  const triggers = v.ttsTriggers ?? {} as Record<string, string>;
+  const [trgAlways,       setTrgAlways]       = useState(triggers.always ?? 'off');
+  const [trgOnVoice,      setTrgOnVoice]      = useState(triggers.onVoiceMessage ?? 'channel');
+  const [trgOnTask,       setTrgOnTask]       = useState(triggers.onTask ?? 'off');
+  const [trgOnAlert,      setTrgOnAlert]      = useState(triggers.onAlert ?? 'off');
+  const [trgOnTodo,       setTrgOnTodo]       = useState(triggers.onTodo ?? 'off');
+  const [trgOnBriefing,   setTrgOnBriefing]   = useState(triggers.onBriefing ?? 'off');
   const [ttsVoice,        setTtsVoice]        = useState(v.openAiTtsVoice ?? 'nova');
   const [elVoiceId,       setElVoiceId]       = useState(v.elevenLabsVoiceId ?? '');
   const [embEnabled,      setEmbEnabled]      = useState(cfg.embeddings?.enabled ?? false);
@@ -664,23 +693,39 @@ function VoiceTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) 
         <div className="flex gap-3 flex-wrap">
           <FieldRow label="Backend">
             <Select value={whisperBackend} onChange={v => setWhisperBackend(v as 'api' | 'local')}
-              options={[{ value: 'api', label: 'OpenAI API' }, { value: 'local', label: 'Local (faster-whisper / whisper.cpp)' }]}
-              style={{ minWidth: 240 }} />
+              options={[
+                { value: 'api', label: 'Cloud API (OpenAI, Groq, etc.)' },
+                { value: 'local', label: 'Local (faster-whisper / whisper.cpp)' },
+              ]}
+              style={{ minWidth: 260 }} />
           </FieldRow>
           <FieldRow label="Model">
-            <Select value={whisperModel} onChange={setWhisperModel}
-              options={WHISPER_MODELS.map(m => ({ value: m, label: m }))} style={{ minWidth: 130 }} />
+            {whisperBackend === 'api'
+              ? <Select value={whisperModel} onChange={setWhisperModel}
+                  options={[
+                    { value: 'whisper-1', label: 'whisper-1 (OpenAI)' },
+                    { value: 'whisper-large-v3', label: 'whisper-large-v3 (Groq)' },
+                    { value: 'whisper-large-v3-turbo', label: 'whisper-large-v3-turbo (Groq)' },
+                    { value: 'distil-whisper-large-v3-en', label: 'distil-whisper-large-v3-en (Groq)' },
+                  ]} style={{ minWidth: 220 }} />
+              : <Select value={whisperModel} onChange={setWhisperModel}
+                  options={WHISPER_MODELS.map(m => ({ value: m, label: m }))} style={{ minWidth: 130 }} />}
           </FieldRow>
         </div>
+        {whisperBackend === 'api' && (
+          <FieldRow label="API endpoint" hint="OpenAI: https://api.openai.com/v1 — Groq: https://api.groq.com/openai/v1">
+            <Input value={whisperEndpoint} onChange={setWhisperEndpoint} placeholder="https://api.groq.com/openai/v1" />
+          </FieldRow>
+        )}
         {whisperBackend === 'local' && (
           <FieldRow label="Local endpoint" hint="default: http://localhost:8000">
             <Input value={whisperEndpoint} onChange={setWhisperEndpoint} placeholder="http://localhost:8000" />
           </FieldRow>
         )}
         {whisperBackend === 'api' && (
-          <div style={{ ...inter, fontSize: '0.68rem', color: 'var(--text2)' }}>
-            API key: set <code style={mono}>OPENAI_API_KEY</code> in Secrets tab.
-          </div>
+          <FieldRow label="API key" hint="Groq, OpenAI, ou autre provider compatible Whisper">
+            <Input value={whisperApiKey} onChange={setWhisperApiKey} placeholder="gsk_... or sk-..." style={{ width: 320 }} />
+          </FieldRow>
         )}
       </div>
 
@@ -689,11 +734,36 @@ function VoiceTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) 
           <SectionTitle>TTS — Text to Speech</SectionTitle>
           <Toggle checked={ttsEnabled} onChange={setTtsEnabled} label="Enabled" />
         </div>
-        <FieldRow label="Provider">
-          <Select value={ttsProvider} onChange={v => setTtsProvider(v as 'openai' | 'elevenlabs')}
-            options={[{ value: 'openai', label: 'OpenAI TTS' }, { value: 'elevenlabs', label: 'ElevenLabs' }]}
-            style={{ minWidth: 180 }} />
-        </FieldRow>
+        <div className="flex gap-3 flex-wrap">
+          <FieldRow label="Provider">
+            <Select value={ttsProvider} onChange={v => setTtsProvider(v as 'openai' | 'elevenlabs' | 'local')}
+              options={[
+                { value: 'local', label: 'Local (macOS say / espeak)' },
+                { value: 'openai', label: 'OpenAI TTS' },
+                { value: 'elevenlabs', label: 'ElevenLabs' },
+              ]}
+              style={{ minWidth: 220 }} />
+          </FieldRow>
+          <FieldRow label="Language">
+            <Select value={ttsLanguage} onChange={setTtsLanguage}
+              options={[
+                { value: 'fr', label: 'Français' },
+                { value: 'en', label: 'English' },
+                { value: 'es', label: 'Español' },
+                { value: 'de', label: 'Deutsch' },
+                { value: 'it', label: 'Italiano' },
+                { value: 'pt', label: 'Português' },
+                { value: 'ja', label: '日本語' },
+                { value: 'zh', label: '中文' },
+              ]}
+              style={{ minWidth: 140 }} />
+          </FieldRow>
+        </div>
+        {ttsProvider === 'local' && (
+          <FieldRow label="Voice name" hint="macOS: run `say -v ?` to list voices. Leave empty for default.">
+            <Input value={localTtsVoice} onChange={setLocalTtsVoice} placeholder="Thomas" style={{ width: 180 }} />
+          </FieldRow>
+        )}
         {ttsProvider === 'openai' && (
           <div className="flex gap-3 flex-wrap">
             <FieldRow label="Model">
@@ -714,6 +784,106 @@ function VoiceTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) 
             </div>
           </>
         )}
+
+        {/* Triggers — per-trigger output routing */}
+        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+          <div style={{ ...mono, fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: 'var(--text2)', marginBottom: '0.5rem' }}>
+            Voice triggers — choose output per event
+          </div>
+          {([
+            ['Always',          'Every response',                     trgAlways,     setTrgAlways],
+            ['On voice message','When user sends a voice message',    trgOnVoice,    setTrgOnVoice],
+            ['On new task',     'When a task is assigned',            trgOnTask,     setTrgOnTask],
+            ['On alert',        'On alerts and notifications',        trgOnAlert,    setTrgOnAlert],
+            ['On todo',         'On todo updates',                    trgOnTodo,     setTrgOnTodo],
+            ['On briefing',     'Morning/evening recaps',             trgOnBriefing, setTrgOnBriefing],
+          ] as [string, string, string, (v: string) => void][]).map(([label, hint, val, setter]) => (
+            <div key={label} className="flex items-center gap-3 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
+              <div className="flex-1">
+                <div style={{ ...inter, fontSize: '0.75rem', fontWeight: 600, color: 'var(--text)' }}>{label}</div>
+                <div style={{ ...inter, fontSize: '0.62rem', color: 'var(--text2)' }}>{hint}</div>
+              </div>
+              <Select value={val} onChange={setter}
+                options={[
+                  { value: 'off',      label: 'Off' },
+                  { value: 'machine',  label: 'Machine' },
+                  { value: 'channel',  label: 'Channel' },
+                  { value: 'webspeak', label: 'Webspeak' },
+                  { value: 'both',     label: 'Machine + Channel' },
+                  { value: 'all',      label: 'All' },
+                ]} style={{ minWidth: 140 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Immersive Experience */}
+      <div style={cardStyle}>
+        <div className="flex items-center justify-between mb-1">
+          <SectionTitle>Immersive Experience</SectionTitle>
+          <Toggle checked={immersive} onChange={setImmersive} label="Enabled" />
+        </div>
+        <div style={{ ...inter, fontSize: '0.68rem', color: 'var(--text2)', lineHeight: 1.5 }}>
+          {immersive
+            ? 'Argos Display is active. Open it on any screen to visualize responses with real-time voice and effects.'
+            : 'Unlock Argos Display — a visual voice interface with spatial audio effects. Stream responses to a dedicated screen with real-time voice visualization.'}
+        </div>
+
+        {immersive && (
+          <div className="mt-2 mb-3 px-3 py-2" style={{ background: 'rgba(79,110,255,0.08)', border: '1px solid rgba(79,110,255,0.2)', borderRadius: '6px' }}>
+            <div style={{ ...mono, fontSize: '0.68rem', color: '#4f6eff' }}>
+              <a href={'/display'} target="_blank" rel="noopener" style={{ color: '#4f6eff', textDecoration: 'none' }}>
+                {window.location.origin}/display
+              </a>
+              <span style={{ color: 'var(--text2)', marginLeft: '0.75rem' }}>
+                or http://localhost:{displayPort}
+              </span>
+            </div>
+            <div style={{ ...inter, fontSize: '0.6rem', color: 'var(--text2)', marginTop: '0.25rem' }}>
+              Requires restart after enabling. Set a trigger to "Webspeak" or "All" to stream voice here.
+            </div>
+          </div>
+        )}
+
+        {immersive && (
+          <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+            <div style={{ ...mono, fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: 'var(--text2)', marginBottom: '0.5rem' }}>
+              Display
+            </div>
+            <div className="flex gap-3 flex-wrap">
+              <FieldRow label="Bot name">
+                <Input value={displayName} onChange={setDisplayName} placeholder="Argos" style={{ width: 160 }} />
+              </FieldRow>
+              <FieldRow label="Accent color">
+                <Input value={displayColor} onChange={setDisplayColor} placeholder="#4f6eff" style={{ width: 100 }} />
+              </FieldRow>
+              <FieldRow label="Port">
+                <Input value={String(displayPort)} onChange={v => setDisplayPort(Number(v) || 3005)} placeholder="3005" style={{ width: 80 }} />
+              </FieldRow>
+            </div>
+            <FieldRow label="Logo URL" hint="Image URL or data URI. Leave empty for default orb.">
+              <Input value={displayLogo} onChange={setDisplayLogo} placeholder="https://example.com/logo.png" />
+            </FieldRow>
+            <ToggleRow label="Star field" hint="Animated star background. Off = clean dark mode with halo + scanlines." checked={displayStars} onChange={setDisplayStars} />
+
+            <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+              <div style={{ ...mono, fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' as const, color: 'var(--text2)', marginBottom: '0.5rem' }}>
+                Audio Effects
+              </div>
+              <div className="flex gap-4 flex-wrap">
+                <FieldRow label="Reverb" hint="0 = dry, 100 = full wet">
+                  <NumberInput value={fxReverb} onChange={setFxReverb} min={0} max={100} step={5} />
+                </FieldRow>
+                <FieldRow label="Delay" hint="0 = off, 100 = full wet">
+                  <NumberInput value={fxDelay} onChange={setFxDelay} min={0} max={100} step={5} />
+                </FieldRow>
+                <FieldRow label="Delay time (s)">
+                  <NumberInput value={fxDelayTime} onChange={setFxDelayTime} min={0} max={2} step={0.05} />
+                </FieldRow>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={cardStyle}>
@@ -732,8 +902,27 @@ function VoiceTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) 
         </div>
       </div>
 
-      <SaveBar saving={saving} saved={saved} error={error} onSave={() => save({
-        voice: { enabled, whisperBackend, whisperModel, whisperEndpoint, ttsEnabled, ttsProvider, openAiTtsModel: ttsModel, openAiTtsVoice: ttsVoice, ...(ttsProvider === 'elevenlabs' && elVoiceId ? { elevenLabsVoiceId: elVoiceId } : {}) },
+      <SaveBar saving={saving} saved={saved} error={error} needsRestart={needsRestart} onSave={() => save({
+        voice: {
+          enabled, whisperBackend, whisperModel, whisperEndpoint,
+          ...(whisperApiKey ? { whisperApiKey } : {}),
+          ttsEnabled, ttsProvider, ttsLanguage,
+          ...(ttsProvider === 'local' && localTtsVoice ? { localTtsVoice } : {}),
+          openAiTtsModel: ttsModel, openAiTtsVoice: ttsVoice,
+          ...(ttsProvider === 'elevenlabs' && elVoiceId ? { elevenLabsVoiceId: elVoiceId } : {}),
+          ttsTriggers: {
+            always: trgAlways, onVoiceMessage: trgOnVoice,
+            onTask: trgOnTask, onAlert: trgOnAlert,
+            onTodo: trgOnTodo, onBriefing: trgOnBriefing,
+          },
+          immersive,
+          display: {
+            botName: displayName, accentColor: displayColor,
+            port: displayPort, stars: displayStars,
+            ...(displayLogo ? { logoUrl: displayLogo } : {}),
+          },
+          effects: { reverb: fxReverb, delay: fxDelay, delayTime: fxDelayTime },
+        },
         embeddings: { enabled: embEnabled, model: embModel, baseUrl: embBaseUrl },
       })} />
     </div>
@@ -743,7 +932,7 @@ function VoiceTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) 
 // ─── Tab: Channels ────────────────────────────────────────────────────────────
 
 function ChannelsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) {
-  const { saving, saved, error, save } = useSave(onSaved);
+  const { saving, saved, error, needsRestart, save } = useSave(onSaved);
   const ch = cfg.channels ?? {};
   const tg = ch.telegram ?? {};
   const sl = ch.slack ?? {};
@@ -753,6 +942,7 @@ function ChannelsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
   const [tgDiscover,       setTgDiscover]       = useState(tg.listener?.discoverUnknownChats ?? false);
   const [tgWaitMs,         setTgWaitMs]         = useState(tg.listener?.contextWindow?.waitMs ?? 30000);
   const [tgMaxMsgs,        setTgMaxMsgs]        = useState(tg.listener?.contextWindow?.maxMessages ?? 5);
+  const [tgIgnoredSenders, setTgIgnoredSenders] = useState((tg.listener?.ignoredSenders ?? []).join(', '));
   const [tgApprovalChat,   setTgApprovalChat]   = useState(tg.personal?.approvalChatId ?? 'me');
   const [slEnabled,        setSlEnabled]        = useState(sl.listener?.enabled ?? false);
   const [slPollSec,        setSlPollSec]        = useState(sl.listener?.pollIntervalSeconds ?? 60);
@@ -794,6 +984,9 @@ function ChannelsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
           <Input value={tgApprovalChat} onChange={setTgApprovalChat} placeholder="me" style={{ width: 200 }} />
         </FieldRow>
         <ToggleRow label="Discover unknown chats" hint="Notify when an unknown sender messages. Creates a proposal to add them to monitored list." checked={tgDiscover} onChange={setTgDiscover} />
+        <FieldRow label="Ignored senders" hint="Usernames (sans @) ou IDs, séparés par virgule. Leurs messages ne créent pas de tâches.">
+          <Input value={tgIgnoredSenders} onChange={setTgIgnoredSenders} placeholder="botname, 123456789" />
+        </FieldRow>
         <div className="flex gap-4 mt-3 flex-wrap">
           <FieldRow label="Context window — wait (ms)">
             <NumberInput value={tgWaitMs} onChange={setTgWaitMs} min={1000} max={300000} step={1000} />
@@ -841,13 +1034,13 @@ function ChannelsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
         </div>
       </div>
 
-      <SaveBar saving={saving} saved={saved} error={error} onSave={() => save({
+      <SaveBar saving={saving} saved={saved} error={error} needsRestart={needsRestart} onSave={() => save({
         notifications: { preferredChannel: preferredChannel || undefined },
         channels: {
           ...cfg.channels,
           telegram: {
             ...tg,
-            listener: { ...tg.listener, mode: tgMode, discoverUnknownChats: tgDiscover, contextWindow: { waitMs: tgWaitMs, maxMessages: tgMaxMsgs } },
+            listener: { ...tg.listener, mode: tgMode, discoverUnknownChats: tgDiscover, ignoredSenders: tgIgnoredSenders.split(',').map(s => s.trim().toLowerCase()).filter(Boolean), contextWindow: { waitMs: tgWaitMs, maxMessages: tgMaxMsgs } },
             personal: { ...tg.personal, approvalChatId: tgApprovalChat },
           },
           slack: { ...sl, listener: { enabled: slEnabled, pollIntervalSeconds: slPollSec, monitorDMs: slMonitorDMs } },
@@ -862,7 +1055,7 @@ function ChannelsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
 // ─── Tab: Pipeline ────────────────────────────────────────────────────────────
 
 function PipelineTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) {
-  const { saving, saved, error, save } = useSave(onSaved);
+  const { saving, saved, error, needsRestart, save } = useSave(onSaved);
 
   // System
   const [readOnly,   setReadOnly]   = useState(cfg.readOnly ?? true);
@@ -899,6 +1092,7 @@ function PipelineTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
   // Claude
   const [customInstr,     setCustomInstr]     = useState(cfg.claude?.customInstructions ?? '');
   const [planTemp,        setPlanTemp]        = useState(cfg.claude?.planningTemperature ?? 0.3);
+  const [maxIter,         setMaxIter]         = useState(cfg.claude?.maxIterations ?? 12);
 
   // Shell exec
   const [shellEnabled,  setShellEnabled]  = useState(cfg.shellExec?.enabled ?? false);
@@ -1000,6 +1194,9 @@ function PipelineTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
         <FieldRow label="Planning temperature" hint="0 = deterministic · 1 = creative">
           <NumberInput value={planTemp} onChange={setPlanTemp} min={0} max={1} step={0.1} />
         </FieldRow>
+        <FieldRow label="Max tool-loop iterations" hint="Max tool calls per message before stopping. Default: 12. Increase for complex multi-step tasks.">
+          <NumberInput value={maxIter} onChange={setMaxIter} min={4} max={50} step={1} />
+        </FieldRow>
       </div>
 
       {/* Shell exec */}
@@ -1028,7 +1225,7 @@ function PipelineTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
         </div>
       </div>
 
-      <SaveBar saving={saving} saved={saved} error={error} onSave={() => save({
+      <SaveBar saving={saving} saved={saved} error={error} needsRestart={needsRestart} onSave={() => save({
         readOnly, logLevel,
         security:     { cloudMode },
         triage:       { enabled: triageEnabled, myHandles, ignoreOwnTeam, mentionOnly },
@@ -1036,7 +1233,7 @@ function PipelineTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
         memory:       { defaultTtlDays: memTtl, archiveTtlDays: memArchive, autoArchiveThreshold: memThreshold },
         approval:     { defaultExpiryMs: appExpiry * 60000, criticalExpiryMs: appCritExpiry * 60000, doubleTapCritical: doubleTap },
         anonymizer:   { mode: anonMode, bucketAmounts, anonymizeCryptoAddresses: anonCrypto, knownPersons },
-        claude:       { customInstructions: customInstr || undefined, planningTemperature: planTemp },
+        claude:       { customInstructions: customInstr || undefined, planningTemperature: planTemp, maxIterations: maxIter },
         shellExec:    { enabled: shellEnabled, allowedCommands: allowedCmds, workingDir: shellWorkdir || undefined },
         orchestration:{ enabled: orchEnabled, maxSubAgents: maxAgents, timeoutSeconds: orchTimeout },
       })} />
@@ -1099,7 +1296,7 @@ function AgentForm({ agent, onChange, onDone, providers }:
 }
 
 function AgentsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) {
-  const { saving, saved, error, save } = useSave(onSaved);
+  const { saving, saved, error, needsRestart, save } = useSave(onSaved);
   const [agents,    setAgents]    = useState<AgentDef[]>(cfg.agents ?? []);
   const [editing,   setEditing]   = useState<number | 'new' | null>(null);
   const [draftAgent,setDraftAgent]= useState<Partial<AgentDef>>({});
@@ -1186,29 +1383,170 @@ function AgentsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void })
         ))}
       </div>
 
-      <SaveBar saving={saving} saved={saved} error={error} onSave={() => save({ agents })} />
+      <SaveBar saving={saving} saved={saved} error={error} needsRestart={needsRestart} onSave={() => save({ agents })} />
     </div>
   );
 }
 
 // ─── Tab: MCP & Skills ────────────────────────────────────────────────────────
 
+interface CatalogEntry {
+  name: string;
+  description: string;
+  category: string;
+  type: string;
+  official: boolean;
+  package?: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  envVars?: string[];
+  installNote?: string;
+  docsUrl?: string;
+  enabled: boolean;
+}
+
 interface PluginsData {
   skills:     { name: string; description: string; enabled: boolean }[];
-  mcpServers: { name: string; description: string; enabled: boolean; type: string }[];
+  mcpServers: CatalogEntry[];
+}
+
+const CATEGORY_ICONS: Record<string, string> = {
+  search:        '🔍',
+  productivity:  '📋',
+  dev:           '💻',
+  database:      '🗄️',
+  browser:       '🌐',
+  storage:       '📁',
+  communication: '💬',
+  finance:       '💳',
+  infra:         '☁️',
+  ai:            '🤖',
+  security:      '🔐',
+  other:         '🔧',
+};
+
+const CATEGORY_ORDER = ['search', 'productivity', 'dev', 'security', 'browser', 'database', 'storage', 'communication', 'finance', 'infra', 'ai', 'other'];
+
+interface McpToolMeta {
+  serverName: string;
+  tools: { name: string; readOnlyHint: boolean; destructiveHint: boolean }[];
 }
 
 type McpServerConfig = NonNullable<ArgosConfig['mcpServers']>[number];
+type PolicyValue = 'allow' | 'approve' | 'block';
+
+const POLICY_LABELS: Record<PolicyValue, string> = { allow: 'Allow', approve: 'Approve', block: 'Block' };
+const POLICY_COLORS: Record<PolicyValue, string> = {
+  allow:   '#059669',
+  approve: '#d97706',
+  block:   '#ef4444',
+};
+
+function PolicyToggle({ value, onChange }: { value: PolicyValue; onChange: (v: PolicyValue) => void }) {
+  const policies: PolicyValue[] = ['allow', 'approve', 'block'];
+  return (
+    <div className="flex" style={{ borderRadius: 5, overflow: 'hidden', border: '1px solid var(--border)' }}>
+      {policies.map(p => (
+        <button key={p} onClick={() => onChange(p)} style={{
+          ...mono, fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.05em',
+          textTransform: 'uppercase' as const,
+          padding: '0.2rem 0.45rem',
+          border: 'none',
+          borderRight: p !== 'block' ? '1px solid var(--border)' : 'none',
+          cursor: 'pointer',
+          background: value === p ? POLICY_COLORS[p] : 'transparent',
+          color: value === p ? 'white' : 'var(--text2)',
+          transition: 'background 0.1s',
+        }}>{POLICY_LABELS[p]}</button>
+      ))}
+    </div>
+  );
+}
+
+function ToolPolicySection({ serverName, tools, policy, onChange }: {
+  serverName: string;
+  tools: McpToolMeta['tools'];
+  policy: Record<string, PolicyValue>;
+  onChange: (policy: Record<string, PolicyValue>) => void;
+}) {
+  const defaultPolicy: PolicyValue = (policy['default'] as PolicyValue) ?? 'approve';
+
+  function setToolPolicy(toolName: string, val: PolicyValue) {
+    // If same as default, remove the override
+    if (val === defaultPolicy && toolName !== 'default') {
+      const next = { ...policy };
+      delete next[toolName];
+      onChange(next);
+    } else {
+      onChange({ ...policy, [toolName]: val });
+    }
+  }
+
+  return (
+    <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+      <div style={{ ...inter, fontSize: '0.68rem', color: 'var(--text2)', marginBottom: '0.6rem' }}>
+        Tool policy for <span style={{ ...mono, color: 'var(--text)' }}>{serverName}</span>
+        <span style={{ marginLeft: '0.5rem', fontSize: '0.62rem' }}>— Allow = auto-execute · Approve = needs confirmation · Block = disabled</span>
+      </div>
+      {/* Default policy */}
+      <div className="flex items-center gap-3 py-1.5" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div style={{ ...mono, fontSize: '0.68rem', fontWeight: 700, color: 'var(--text)', flex: 1 }}>
+          Default (all unlisted tools)
+        </div>
+        <PolicyToggle value={defaultPolicy} onChange={v => onChange({ ...policy, default: v })} />
+      </div>
+      {/* Per-tool overrides */}
+      {tools.map(t => {
+        const effectivePolicy: PolicyValue = (policy[t.name] as PolicyValue) ?? defaultPolicy;
+        const isOverride = policy[t.name] != null;
+        return (
+          <div key={t.name} className="flex items-center gap-3 py-1.5" style={{ borderBottom: '1px solid var(--border)' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ ...mono, fontSize: '0.68rem', color: isOverride ? 'var(--text)' : 'var(--text2)' }}>{t.name}</span>
+              {t.readOnlyHint && <span style={{ ...mono, fontSize: '0.56rem', color: '#059669', marginLeft: '0.4rem', background: 'rgba(5,150,105,0.1)', padding: '0.1rem 0.3rem', borderRadius: 3 }}>read-only</span>}
+            </div>
+            <PolicyToggle value={effectivePolicy} onChange={v => setToolPolicy(t.name, v)} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function PluginsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) {
-  const { saving, saved, error, save } = useSave(onSaved);
-  const [plugins,   setPlugins]   = useState<PluginsData | null>(null);
-  const [mcpList,   setMcpList]   = useState<McpServerConfig[]>(cfg.mcpServers ?? []);
-  const [skillList, setSkillList] = useState(cfg.skills ?? []);
-  const [newMcp,    setNewMcp]    = useState({ name: '', type: 'stdio', command: '', url: '', args: '' });
-  const [addingMcp, setAddingMcp] = useState(false);
+  const { saving, saved, error, needsRestart, save } = useSave(onSaved);
+  const [plugins,      setPlugins]      = useState<PluginsData | null>(null);
+  const [mcpList,      setMcpList]      = useState<McpServerConfig[]>(cfg.mcpServers ?? []);
+  const [skillList,    setSkillList]    = useState(cfg.skills ?? []);
+  const [newMcp,       setNewMcp]       = useState({ name: '', type: 'stdio', command: '', url: '', args: '' });
+  const [addingMcp,    setAddingMcp]    = useState(false);
+  const [mcpToolMeta,  setMcpToolMeta]  = useState<McpToolMeta[]>([]);
+  const [expandedPolicy, setExpandedPolicy] = useState<string | null>(null);
 
   useEffect(() => { get<PluginsData>('/plugins').then(setPlugins).catch(() => {}); }, []);
+  useEffect(() => { get<McpToolMeta[]>('/mcp/tools').then(setMcpToolMeta).catch(() => {}); }, []);
+
+  // Check if a catalog server is already in mcpList (configured)
+  const configuredNames = new Set(mcpList.map(s => s.name));
+
+  function enableCatalogServer(entry: CatalogEntry) {
+    if (configuredNames.has(entry.name)) {
+      // Toggle existing
+      setMcpList(prev => prev.map(s => s.name === entry.name ? { ...s, enabled: !s.enabled } : s));
+    } else {
+      // Add from catalog
+      const server: McpServerConfig = {
+        name: entry.name,
+        type: entry.type as 'stdio' | 'url',
+        enabled: true,
+        ...(entry.command ? { command: entry.command } : {}),
+        ...(entry.url ? { url: entry.url } : {}),
+        ...(entry.args?.length ? { args: entry.args } : {}),
+      };
+      setMcpList(prev => [...prev, server]);
+    }
+  }
 
   function addMcpServer() {
     if (!newMcp.name.trim()) return;
@@ -1223,62 +1561,161 @@ function PluginsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }
     setAddingMcp(false);
   }
 
+  // Group catalog by category
+  const catalog = plugins?.mcpServers ?? [];
+  const catalogByCategory: Record<string, CatalogEntry[]> = {};
+  for (const entry of catalog) {
+    const cat = entry.category || 'other';
+    if (!catalogByCategory[cat]) catalogByCategory[cat] = [];
+    catalogByCategory[cat].push(entry);
+  }
+  const sortedCategories = CATEGORY_ORDER.filter(c => catalogByCategory[c]?.length);
+
+  // Custom servers = in mcpList but not in catalog
+  const catalogNames = new Set(catalog.map(e => e.name));
+  const customServers = mcpList.filter(s => !catalogNames.has(s.name));
+
   return (
     <div className="flex flex-col gap-4">
-      {/* MCP */}
+      {/* MCP Catalog */}
       <div style={cardStyle}>
-        <div className="flex items-center justify-between mb-3">
-          <SectionTitle>MCP Servers — external tool providers</SectionTitle>
-          <button onClick={() => setAddingMcp(a => !a)} style={{
-            ...mono, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em',
-            textTransform: 'uppercase' as const,
-            background: 'transparent', border: '1px solid var(--border)', borderRadius: '5px',
-            padding: '0.3rem 0.7rem', cursor: 'pointer', color: 'var(--text2)',
-          }}>+ Add</button>
-        </div>
+        <SectionTitle>MCP Servers — external tool providers</SectionTitle>
 
-        {addingMcp && (
-          <div className="mb-4 p-3" style={{ background: 'rgba(79,110,255,0.04)', borderRadius: '8px', border: '1px solid rgba(79,110,255,0.15)' }}>
-            <div className="flex gap-2 flex-wrap mb-2">
-              <FieldRow label="Name">
-                <Input value={newMcp.name} onChange={v => setNewMcp(p => ({ ...p, name: v }))} placeholder="filesystem" style={{ width: 140 }} />
-              </FieldRow>
-              <FieldRow label="Type">
-                <Select value={newMcp.type} onChange={v => setNewMcp(p => ({ ...p, type: v }))}
-                  options={[{ value: 'stdio', label: 'stdio' }, { value: 'url', label: 'URL / SSE' }]} />
-              </FieldRow>
-            </div>
-            {newMcp.type === 'stdio'
-              ? <FieldRow label="Command"><Input value={newMcp.command} onChange={v => setNewMcp(p => ({ ...p, command: v }))} placeholder="npx @modelcontextprotocol/server-filesystem" /></FieldRow>
-              : <FieldRow label="URL"><Input value={newMcp.url} onChange={v => setNewMcp(p => ({ ...p, url: v }))} placeholder="http://localhost:8080/sse" /></FieldRow>}
-            <FieldRow label="Args (space-separated)">
-              <Input value={newMcp.args} onChange={v => setNewMcp(p => ({ ...p, args: v }))} placeholder="/home/user/data /tmp" />
-            </FieldRow>
-            <div className="flex gap-2 mt-1">
-              <button onClick={addMcpServer} style={{ ...mono, fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' as const, background: '#4f6eff', color: 'white', border: 'none', borderRadius: '5px', padding: '0.35rem 0.9rem', cursor: 'pointer' }}>Add</button>
-              <button onClick={() => setAddingMcp(false)} style={{ ...mono, fontSize: '0.62rem', background: 'transparent', border: '1px solid var(--border)', borderRadius: '5px', padding: '0.35rem 0.9rem', cursor: 'pointer', color: 'var(--text2)' }}>Cancel</button>
-            </div>
-          </div>
-        )}
+        {!plugins && <div style={{ ...inter, fontSize: '0.72rem', color: 'var(--text2)', padding: '1rem 0' }}>Loading catalog…</div>}
 
-        {mcpList.length === 0 && !addingMcp && (
-          <div style={{ ...inter, fontSize: '0.72rem', color: 'var(--text2)', textAlign: 'center', padding: '1.5rem 0' }}>
-            No MCP servers. Connect filesystem, browser, database, or any MCP-compatible tool.
-          </div>
-        )}
-
-        {mcpList.map((s, i) => (
-          <div key={i} className="flex items-center gap-3 py-2.5" style={{ borderBottom: '1px solid var(--border)' }}>
-            <Toggle checked={s.enabled} onChange={() => setMcpList(prev => prev.map((x, j) => j === i ? { ...x, enabled: !x.enabled } : x))} />
-            <div className="flex-1 min-w-0">
-              <div style={{ ...inter, fontSize: '0.775rem', fontWeight: 600, color: 'var(--text)' }}>{s.name}</div>
-              <div style={{ ...mono, fontSize: '0.62rem', color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {s.type} · {s.command ?? s.url ?? '—'} {s.args?.length ? s.args.join(' ') : ''}
-              </div>
+        {sortedCategories.map(cat => (
+          <div key={cat} className="mt-3">
+            <div style={{ ...mono, fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' as const, color: 'var(--text2)', marginBottom: '0.4rem' }}>
+              {CATEGORY_ICONS[cat] ?? '🔧'} {cat}
             </div>
-            <button onClick={() => setMcpList(prev => prev.filter((_, j) => j !== i))} style={{ background: 'transparent', border: 'none', color: '#ef444480', cursor: 'pointer', fontSize: '0.8rem', padding: '0.2rem' }}>✕</button>
+            {catalogByCategory[cat].map(entry => {
+              const configured = mcpList.find(s => s.name === entry.name);
+              const isEnabled = configured?.enabled ?? false;
+              const serverTools = mcpToolMeta.find(m => m.serverName === entry.name);
+              const isExpanded = expandedPolicy === entry.name;
+              return (
+                <div key={entry.name} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <div className="flex items-center gap-3 py-2">
+                    <Toggle checked={isEnabled} onChange={() => enableCatalogServer(entry)} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span style={{ ...inter, fontSize: '0.775rem', fontWeight: 600, color: 'var(--text)' }}>{entry.name}</span>
+                        {entry.official && <span style={{ ...mono, fontSize: '0.5rem', fontWeight: 700, color: '#059669', background: 'rgba(5,150,105,0.08)', padding: '0.05rem 0.3rem', borderRadius: 3, letterSpacing: '0.04em' }}>OFFICIAL</span>}
+                      </div>
+                      <div style={{ ...inter, fontSize: '0.68rem', color: 'var(--text2)', lineHeight: 1.4 }}>{entry.description}</div>
+                      {entry.envVars?.length ? (
+                        <div style={{ ...mono, fontSize: '0.58rem', color: 'var(--text2)', marginTop: '0.15rem', opacity: 0.7 }}>
+                          needs: {entry.envVars.join(', ')}
+                        </div>
+                      ) : null}
+                      {isEnabled && entry.installNote && (
+                        <div style={{ ...inter, fontSize: '0.62rem', color: '#d97706', marginTop: '0.25rem', lineHeight: 1.4 }}>
+                          {entry.installNote}
+                        </div>
+                      )}
+                    </div>
+                    {serverTools && (
+                      <button onClick={() => setExpandedPolicy(isExpanded ? null : entry.name)} style={{
+                        ...mono, fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.05em',
+                        textTransform: 'uppercase' as const,
+                        background: isExpanded ? 'rgba(79,110,255,0.1)' : 'transparent',
+                        border: '1px solid var(--border)', borderRadius: '4px',
+                        padding: '0.2rem 0.5rem', cursor: 'pointer', color: '#4f6eff',
+                      }}>Policy ({serverTools.tools.length})</button>
+                    )}
+                  </div>
+                  {isExpanded && serverTools && configured && (
+                    <ToolPolicySection
+                      serverName={entry.name}
+                      tools={serverTools.tools}
+                      policy={(configured.toolPolicy ?? {}) as Record<string, PolicyValue>}
+                      onChange={pol => setMcpList(prev => prev.map(x => x.name === entry.name ? { ...x, toolPolicy: pol } : x))}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         ))}
+
+        {/* Custom servers (not in catalog) */}
+        {customServers.length > 0 && (
+          <div className="mt-3">
+            <div style={{ ...mono, fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' as const, color: 'var(--text2)', marginBottom: '0.4rem' }}>
+              🔧 Custom
+            </div>
+            {customServers.map(s => {
+              const i = mcpList.findIndex(x => x.name === s.name);
+              const serverTools = mcpToolMeta.find(m => m.serverName === s.name);
+              const isExpanded = expandedPolicy === s.name;
+              return (
+                <div key={s.name} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <div className="flex items-center gap-3 py-2.5">
+                    <Toggle checked={s.enabled} onChange={() => setMcpList(prev => prev.map((x, j) => j === i ? { ...x, enabled: !x.enabled } : x))} />
+                    <div className="flex-1 min-w-0">
+                      <div style={{ ...inter, fontSize: '0.775rem', fontWeight: 600, color: 'var(--text)' }}>{s.name}</div>
+                      <div style={{ ...mono, fontSize: '0.62rem', color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {s.type} · {s.command ?? s.url ?? '—'} {s.args?.length ? s.args.join(' ') : ''}
+                      </div>
+                    </div>
+                    {serverTools && (
+                      <button onClick={() => setExpandedPolicy(isExpanded ? null : s.name)} style={{
+                        ...mono, fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.05em',
+                        textTransform: 'uppercase' as const,
+                        background: isExpanded ? 'rgba(79,110,255,0.1)' : 'transparent',
+                        border: '1px solid var(--border)', borderRadius: '4px',
+                        padding: '0.2rem 0.5rem', cursor: 'pointer', color: '#4f6eff',
+                      }}>Policy ({serverTools.tools.length})</button>
+                    )}
+                    <button onClick={() => setMcpList(prev => prev.filter((_, j) => j !== i))} style={{ background: 'transparent', border: 'none', color: '#ef444480', cursor: 'pointer', fontSize: '0.8rem', padding: '0.2rem' }}>✕</button>
+                  </div>
+                  {isExpanded && serverTools && (
+                    <ToolPolicySection
+                      serverName={s.name}
+                      tools={serverTools.tools}
+                      policy={(s.toolPolicy ?? {}) as Record<string, PolicyValue>}
+                      onChange={pol => setMcpList(prev => prev.map((x, j) => j === i ? { ...x, toolPolicy: pol } : x))}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Add custom */}
+        <div className="mt-3 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+          {!addingMcp ? (
+            <button onClick={() => setAddingMcp(true)} style={{
+              ...mono, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em',
+              textTransform: 'uppercase' as const,
+              background: 'transparent', border: '1px dashed var(--border)', borderRadius: '5px',
+              padding: '0.4rem 0.9rem', cursor: 'pointer', color: 'var(--text2)', width: '100%',
+            }}>+ Add custom MCP server</button>
+          ) : (
+            <div className="p-3" style={{ background: 'rgba(79,110,255,0.04)', borderRadius: '8px', border: '1px solid rgba(79,110,255,0.15)' }}>
+              <div className="flex gap-2 flex-wrap mb-2">
+                <FieldRow label="Name">
+                  <Input value={newMcp.name} onChange={v => setNewMcp(p => ({ ...p, name: v }))} placeholder="my-server" style={{ width: 140 }} />
+                </FieldRow>
+                <FieldRow label="Type">
+                  <Select value={newMcp.type} onChange={v => setNewMcp(p => ({ ...p, type: v }))}
+                    options={[{ value: 'stdio', label: 'stdio' }, { value: 'url', label: 'URL / SSE' }]} />
+                </FieldRow>
+              </div>
+              {newMcp.type === 'stdio'
+                ? <FieldRow label="Command"><Input value={newMcp.command} onChange={v => setNewMcp(p => ({ ...p, command: v }))} placeholder="npx @my/mcp-server" /></FieldRow>
+                : <FieldRow label="URL"><Input value={newMcp.url} onChange={v => setNewMcp(p => ({ ...p, url: v }))} placeholder="http://localhost:8080/sse" /></FieldRow>}
+              <FieldRow label="Args (space-separated)">
+                <Input value={newMcp.args} onChange={v => setNewMcp(p => ({ ...p, args: v }))} placeholder="/home/user/data /tmp" />
+              </FieldRow>
+              <div className="flex gap-2 mt-1">
+                <button onClick={addMcpServer} style={{ ...mono, fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' as const, background: '#4f6eff', color: 'white', border: 'none', borderRadius: '5px', padding: '0.35rem 0.9rem', cursor: 'pointer' }}>Add</button>
+                <button onClick={() => setAddingMcp(false)} style={{ ...mono, fontSize: '0.62rem', background: 'transparent', border: '1px solid var(--border)', borderRadius: '5px', padding: '0.35rem 0.9rem', cursor: 'pointer', color: 'var(--text2)' }}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Skills */}
@@ -1303,7 +1740,7 @@ function PluginsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }
         })}
       </div>
 
-      <SaveBar saving={saving} saved={saved} error={error} onSave={() => save({ mcpServers: mcpList, skills: skillList })} />
+      <SaveBar saving={saving} saved={saved} error={error} needsRestart={needsRestart} onSave={() => save({ mcpServers: mcpList, skills: skillList })} />
     </div>
   );
 }

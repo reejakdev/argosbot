@@ -28,17 +28,17 @@ const log = createLogger('agents');
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface AgentDefinition {
-  name:              string;
-  description:       string;
-  systemPrompt:      string;
-  tools:             string[];
-  linkedChannels?:   string[];
-  maxIterations:     number;
-  temperature:       number;
-  maxTokens:         number;
-  enabled:           boolean;
-  provider?:         string;
-  model?:            string;
+  name: string;
+  description: string;
+  systemPrompt: string;
+  tools: string[];
+  linkedChannels?: string[];
+  maxIterations: number;
+  temperature: number;
+  maxTokens: number;
+  enabled: boolean;
+  provider?: string;
+  model?: string;
   isolatedWorkspace: boolean;
 }
 
@@ -53,6 +53,7 @@ export function getAgentForChannel(channelType: string, chatId: string): string 
 // ─── Per-agent LLM config ─────────────────────────────────────────────────────
 
 function buildAgentLlmConfig(def: AgentDefinition, config: Config): LLMConfig {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { llmConfigFromConfig } = require('../llm/index.js') as typeof import('../llm/index.js');
   const base = llmConfigFromConfig(config);
 
@@ -62,7 +63,7 @@ function buildAgentLlmConfig(def: AgentDefinition, config: Config): LLMConfig {
   }
 
   const providerKey = def.provider ?? config.llm.activeProvider;
-  const model       = def.model ?? config.llm.activeModel;
+  const model = def.model ?? config.llm.activeModel;
   const providerDef = config.llm.providers[providerKey];
 
   if (!providerDef) {
@@ -70,17 +71,18 @@ function buildAgentLlmConfig(def: AgentDefinition, config: Config): LLMConfig {
     return { ...base, temperature: def.temperature, maxTokens: def.maxTokens };
   }
 
-  const provider  = providerDef.api === 'anthropic' ? 'anthropic' as const : 'compatible' as const;
-  const authMode  = (providerDef.auth as AuthMode) ?? 'api-key';
+  const provider =
+    providerDef.api === 'anthropic' ? ('anthropic' as const) : ('compatible' as const);
+  const authMode = (providerDef.auth as AuthMode) ?? 'api-key';
 
   return {
     provider,
     model,
-    apiKey:      providerDef.apiKey ?? '',
+    apiKey: providerDef.apiKey ?? '',
     authMode,
-    baseUrl:     providerDef.baseUrl,
+    baseUrl: providerDef.baseUrl,
     temperature: def.temperature,
-    maxTokens:   def.maxTokens,
+    maxTokens: def.maxTokens,
   };
 }
 
@@ -96,7 +98,7 @@ async function executeWithWorkspace(
   config: Config,
 ): Promise<string> {
   const { executeBuiltinTool } = await import('../llm/builtin-tools.js');
-  const { executeSkill }       = await import('../skills/registry.js');
+  const { executeSkill } = await import('../skills/registry.js');
 
   let input = toolInput;
 
@@ -141,10 +143,8 @@ async function resolveTools(toolNames: string[], config: Config): Promise<ToolDe
   const { BUILTIN_TOOLS } = await import('../llm/builtin-tools.js');
   const { getEnabledSkills } = await import('../skills/registry.js');
 
-  const builtinMap = new Map(BUILTIN_TOOLS.map(t => [t.name, t as ToolDef]));
-  const skillMap   = new Map(
-    getEnabledSkills(config.skills).map(s => [s.name, s.tool as ToolDef]),
-  );
+  const builtinMap = new Map(BUILTIN_TOOLS.map((t) => [t.name, t as ToolDef]));
+  const skillMap = new Map(getEnabledSkills(config.skills).map((s) => [s.name, s.tool as ToolDef]));
 
   if (toolNames.includes('*')) return BUILTIN_TOOLS as ToolDef[];
 
@@ -165,14 +165,14 @@ export async function runAgent(
   config: Config,
 ): Promise<SkillResult> {
   const { callWithTools, buildToolResultMessages } = await import('../llm/index.js');
-  const { BUILTIN_TOOLS }       = await import('../llm/builtin-tools.js');
-  const { getEnabledSkills }    = await import('../skills/registry.js');
+  const { BUILTIN_TOOLS } = await import('../llm/builtin-tools.js');
+  const { getEnabledSkills } = await import('../skills/registry.js');
 
   const llmCfg = buildAgentLlmConfig(def, config);
-  const tools  = await resolveTools(def.tools, config);
+  const tools = await resolveTools(def.tools, config);
 
-  const builtinNames = new Set(BUILTIN_TOOLS.map(t => t.name));
-  const skillNames   = new Set(getEnabledSkills(config.skills).map(s => s.name));
+  const builtinNames = new Set(BUILTIN_TOOLS.map((t) => t.name));
+  const skillNames = new Set(getEnabledSkills(config.skills).map((s) => s.name));
 
   // System prompt + workspace context injected automatically
   const systemPrompt = def.isolatedWorkspace
@@ -181,7 +181,7 @@ export async function runAgent(
 
   const messages: unknown[] = [{ role: 'user', content: input }];
 
-  let output     = '';
+  let output = '';
   let iterations = 0;
 
   while (iterations < def.maxIterations) {
@@ -196,7 +196,12 @@ export async function runAgent(
     for (const call of step.toolCalls) {
       log.debug(`Agent "${def.name}" [${providerLabel(def, config)}] tool: ${call.name}`);
       const result = await executeWithWorkspace(
-        call.name, call.input as Record<string, unknown>, def, builtinNames, skillNames, config,
+        call.name,
+        call.input as Record<string, unknown>,
+        def,
+        builtinNames,
+        skillNames,
+        config,
       );
       feedbacks.push({ id: call.id, content: result });
     }
@@ -206,22 +211,24 @@ export async function runAgent(
 
   if (!output) return { success: false, output: `Agent "${def.name}" returned no output.` };
 
-  log.info(`Agent "${def.name}" [${providerLabel(def, config)}] done in ${iterations} iteration(s)`);
+  log.info(
+    `Agent "${def.name}" [${providerLabel(def, config)}] done in ${iterations} iteration(s)`,
+  );
   return { success: true, output };
 }
 
 function providerLabel(def: AgentDefinition, config: Config): string {
   const p = def.provider ?? config.llm.activeProvider;
-  const m = def.model    ?? config.llm.activeModel;
+  const m = def.model ?? config.llm.activeModel;
   return `${p}/${m}`;
 }
 
 // ─── Trigger evaluation ───────────────────────────────────────────────────────
 
 interface TriggerCondition {
-  keywords?:     string[];
-  categories?:   string[];
-  channels?:     string[];
+  keywords?: string[];
+  categories?: string[];
+  channels?: string[];
   minImportance?: number;
 }
 
@@ -235,7 +242,7 @@ function matchesTrigger(
   // keywords — any match (OR)
   if (condition.keywords?.length) {
     const lower = text.toLowerCase();
-    if (!condition.keywords.some(k => lower.includes(k.toLowerCase()))) return false;
+    if (!condition.keywords.some((k) => lower.includes(k.toLowerCase()))) return false;
   }
   // categories — any match (OR)
   if (condition.categories?.length) {
@@ -270,9 +277,7 @@ export function getTriggeredAgents(
     const triggers = agent.triggers ?? [];
     if (!triggers.length) continue;
 
-    const matched = triggers.some(t =>
-      matchesTrigger(t, text, channel, category, importance),
-    );
+    const matched = triggers.some((t) => matchesTrigger(t, text, channel, category, importance));
 
     if (matched) triggered.push(agent as AgentDefinition);
   }
@@ -283,8 +288,11 @@ export function getTriggeredAgents(
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
 export async function loadUserAgents(config: Config): Promise<void> {
-  const agents = (config.agents ?? []).filter(a => a.enabled !== false);
-  if (!agents.length) { log.debug('No user agents configured'); return; }
+  const agents = (config.agents ?? []).filter((a) => a.enabled !== false);
+  if (!agents.length) {
+    log.debug('No user agents configured');
+    return;
+  }
 
   const { registerSkill } = await import('../skills/registry.js');
 
@@ -292,15 +300,18 @@ export async function loadUserAgents(config: Config): Promise<void> {
     const def = agent as AgentDefinition;
 
     registerSkill({
-      name:        def.name,
+      name: def.name,
       description: def.description,
       tool: {
-        name:        def.name,
+        name: def.name,
         description: def.description,
         input_schema: {
           type: 'object',
           properties: {
-            input: { type: 'string', description: 'Task, question, or context to pass to this agent' },
+            input: {
+              type: 'string',
+              description: 'Task, question, or context to pass to this agent',
+            },
           },
           required: ['input'],
         },
@@ -308,7 +319,7 @@ export async function loadUserAgents(config: Config): Promise<void> {
       handler: async (skillInput) => runAgent(def, String(skillInput.input ?? ''), config),
     });
 
-    const alreadyInSkills = config.skills.some(s => s.name === def.name);
+    const alreadyInSkills = config.skills.some((s) => s.name === def.name);
     if (!alreadyInSkills) config.skills.push({ name: def.name, enabled: true, config: {} });
 
     for (const channelRef of def.linkedChannels ?? []) {
@@ -316,7 +327,9 @@ export async function loadUserAgents(config: Config): Promise<void> {
     }
 
     const provLabel = def.provider ? `${def.provider}/${def.model ?? 'default'}` : 'global';
-    log.info(`Agent "${def.name}" registered — model: ${provLabel}, workspace: ${def.isolatedWorkspace ? 'isolated' : 'shared'}`);
+    log.info(
+      `Agent "${def.name}" registered — model: ${provLabel}, workspace: ${def.isolatedWorkspace ? 'isolated' : 'shared'}`,
+    );
   }
 
   log.info(`${agents.length} user agent(s) loaded`);

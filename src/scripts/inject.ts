@@ -33,15 +33,15 @@ import { loadBuiltinSkills } from '../skills/registry.js';
 const args = process.argv.slice(2);
 const getArg = (name: string, def: string) => {
   const i = args.indexOf(name);
-  return i >= 0 ? args[i + 1] ?? def : def;
+  return i >= 0 ? (args[i + 1] ?? def) : def;
 };
 
-const PARTNER      = getArg('--partner', 'TestPartner');
-const CHAT_ID      = getArg('--chat', 'inject-test-0001');
-const CHANNEL      = getArg('--channel', 'telegram') as 'telegram' | 'whatsapp' | 'email';
-const WINDOW_MS    = Number(getArg('--window-ms', '5000'));
+const PARTNER = getArg('--partner', 'TestPartner');
+const CHAT_ID = getArg('--chat', 'inject-test-0001');
+const CHANNEL = getArg('--channel', 'telegram') as 'telegram' | 'whatsapp' | 'email';
+const WINDOW_MS = Number(getArg('--window-ms', '5000'));
 const ONE_SHOT_MSG = getArg('--msg', '');
-const FLUSH_NOW    = args.includes('--flush');
+const FLUSH_NOW = args.includes('--flush');
 
 // ─── Boot ──────────────────────────────────────────────────────────────────────
 
@@ -50,9 +50,9 @@ initDb(getDataDir());
 await loadUlid();
 await loadBuiltinSkills();
 
-const llmConfig     = llmConfigFromConfig(config, { maxTokens: config.claude.maxTokens });
+const llmConfig = llmConfigFromConfig(config, { maxTokens: config.claude.maxTokens });
 const privacyConfig = buildPrivacyLlmConfig(config, { maxTokens: config.claude.maxTokens });
-const anonymizer    = new Anonymizer(config.anonymizer);
+const anonymizer = new Anonymizer(config.anonymizer);
 
 // Capture notifications → stdout
 const notifications: string[] = [];
@@ -72,9 +72,8 @@ const windowCfg = {
   maxMessages: config.channels.telegram.listener.contextWindow.maxMessages,
 };
 
-const windowManager = new ContextWindowManager(
-  windowCfg,
-  (window) => processWindow(llmConfig, privacyConfig, config, anonymizer, window),
+const windowManager = new ContextWindowManager(windowCfg, (window) =>
+  processWindow(llmConfig, privacyConfig, config, anonymizer, window),
 );
 
 // ─── Inject helper ────────────────────────────────────────────────────────────
@@ -84,21 +83,25 @@ let msgCounter = 0;
 async function inject(content: string) {
   msgCounter++;
   const msg = buildRawMessage({
-    channel:     CHANNEL,
-    chatId:      CHAT_ID,
-    chatName:    PARTNER,
-    chatType:    'dm',
-    senderId:    'inject-user-001',
-    senderName:  PARTNER,
+    channel: CHANNEL,
+    chatId: CHAT_ID,
+    chatName: PARTNER,
+    chatType: 'dm',
+    senderId: 'inject-user-001',
+    senderName: PARTNER,
     partnerName: PARTNER,
     content,
-    timestamp:   Date.now(),
+    timestamp: Date.now(),
   });
 
-  console.log(`\n[${msgCounter}] → Injecting: "${content.slice(0, 120)}${content.length > 120 ? '…' : ''}"`);
+  console.log(
+    `\n[${msgCounter}] → Injecting: "${content.slice(0, 120)}${content.length > 120 ? '…' : ''}"`,
+  );
 
   await ingestMessage(msg, llmConfig, privacyConfig, config, anonymizer, windowManager);
-  console.log(`    ✓ Ingested (id: ${msg.id.slice(-8)}) — window closes in ${WINDOW_MS / 1000}s of inactivity`);
+  console.log(
+    `    ✓ Ingested (id: ${msg.id.slice(-8)}) — window closes in ${WINDOW_MS / 1000}s of inactivity`,
+  );
 }
 
 // ─── One-shot mode ─────────────────────────────────────────────────────────────
@@ -106,7 +109,7 @@ async function inject(content: string) {
 if (ONE_SHOT_MSG) {
   await inject(ONE_SHOT_MSG);
   console.log(`\nWaiting ${WINDOW_MS}ms for window to close…`);
-  await new Promise(r => setTimeout(r, WINDOW_MS + 2000));
+  await new Promise((r) => setTimeout(r, WINDOW_MS + 2000));
   process.exit(0);
 }
 
@@ -136,7 +139,10 @@ const prompt = () => rl.question(`${PARTNER}> `, handleLine);
 
 async function handleLine(line: string) {
   const input = line.trim();
-  if (!input) { prompt(); return; }
+  if (!input) {
+    prompt();
+    return;
+  }
 
   if (input === '/exit' || input === '/quit') {
     console.log('Flushing windows before exit…');
@@ -155,10 +161,24 @@ async function handleLine(line: string) {
   if (input === '/stats') {
     const { getDb } = await import('../db/index.js');
     const db = getDb();
-    const tasks    = (db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE status IN ('open','in_progress')`).get() as { c: number }).c;
-    const proposals = (db.prepare(`SELECT COUNT(*) as c FROM proposals WHERE status = 'proposed'`).get() as { c: number }).c;
-    const memories  = (db.prepare(`SELECT COUNT(*) as c FROM memories WHERE expires_at > ?`).get(Date.now()) as { c: number }).c;
-    console.log(`\nStats — open tasks: ${tasks} | pending proposals: ${proposals} | active memories: ${memories}`);
+    const tasks = (
+      db
+        .prepare(`SELECT COUNT(*) as c FROM tasks WHERE status IN ('open','in_progress')`)
+        .get() as { c: number }
+    ).c;
+    const proposals = (
+      db.prepare(`SELECT COUNT(*) as c FROM proposals WHERE status = 'proposed'`).get() as {
+        c: number;
+      }
+    ).c;
+    const memories = (
+      db.prepare(`SELECT COUNT(*) as c FROM memories WHERE expires_at > ?`).get(Date.now()) as {
+        c: number;
+      }
+    ).c;
+    console.log(
+      `\nStats — open tasks: ${tasks} | pending proposals: ${proposals} | active memories: ${memories}`,
+    );
     prompt();
     return;
   }

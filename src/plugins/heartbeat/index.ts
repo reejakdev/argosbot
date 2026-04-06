@@ -21,7 +21,7 @@ const log = createLogger('plugin:heartbeat');
 
 export function createHeartbeatPlugin(): ArgosPlugin {
   return {
-    name:        'heartbeat',
+    name: 'heartbeat',
     description: 'Proactive monitoring — wakes up on a schedule to check if anything needs doing',
 
     async onBoot(ctx: PluginContext): Promise<void> {
@@ -30,8 +30,8 @@ export function createHeartbeatPlugin(): ArgosPlugin {
       // Register the handler used by agent-created cron jobs
       registerHandler('proactive_plan', async (jobConfig) => {
         await runProactivePlan(config, {
-          prompt:             String(jobConfig.prompt ?? ''),
-          label:              String(jobConfig.description ?? 'agent_cron'),
+          prompt: String(jobConfig.prompt ?? ''),
+          label: String(jobConfig.description ?? 'agent_cron'),
           sendToApprovalChat: ctx.notify,
         });
       });
@@ -42,12 +42,11 @@ export function createHeartbeatPlugin(): ArgosPlugin {
       }
 
       const intervalMin = config.heartbeat.intervalMinutes ?? 60;
-      const cronExpr = intervalMin < 60
-        ? `*/${intervalMin} * * * *`
-        : `0 */${Math.round(intervalMin / 60)} * * *`;
+      const cronExpr =
+        intervalMin < 60 ? `*/${intervalMin} * * * *` : `0 */${Math.round(intervalMin / 60)} * * *`;
 
       upsertCronJob('heartbeat', cronExpr, 'proactive_plan', {
-        prompt:      config.heartbeat.prompt ?? '',
+        prompt: config.heartbeat.prompt ?? '',
         description: 'heartbeat',
       });
 

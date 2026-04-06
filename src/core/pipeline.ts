@@ -67,30 +67,44 @@ export async function ingestMessage(
 ): Promise<void> {
   log.debug(`Ingesting message from ${msg.partnerName ?? msg.chatId}`, {
     channel: msg.channel,
-    length:  msg.content.length,
+    length: msg.content.length,
   });
 
   // Persist raw reference (no content stored — just metadata + hash)
-  const db     = getDb();
+  const db = getDb();
   const crypto = await import('crypto');
   const contentHash = crypto.createHash('sha256').update(msg.content).digest('hex');
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT OR IGNORE INTO messages
     (id, source, channel, chat_id, partner_name, sender_id, sender_name, content_hash, received_at, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-  `).run(
-    msg.id, msg.source, msg.channel, msg.chatId, msg.partnerName ?? null,
-    msg.senderId ?? null, msg.senderName ?? null,
-    contentHash, msg.receivedAt,
+  `,
+  ).run(
+    msg.id,
+    msg.source,
+    msg.channel,
+    msg.chatId,
+    msg.partnerName ?? null,
+    msg.senderId ?? null,
+    msg.senderName ?? null,
+    contentHash,
+    msg.receivedAt,
   );
 
   // ── Phase 1: fast regex injection screen on RAW content (no LLM, no privacy risk) ──
   const fast = fastScreen(msg.content);
   if (!fast.safe) {
     log.warn(`Injection blocked from ${msg.chatId}`, { patterns: fast.patterns });
-    audit('injection_detected', msg.chatId, 'message', { patterns: fast.patterns, preview: msg.content.slice(0, 200) });
-    db.prepare(`UPDATE messages SET status = 'blocked', processed_at = ? WHERE id = ?`).run(Date.now(), msg.id);
+    audit('injection_detected', msg.chatId, 'message', {
+      patterns: fast.patterns,
+      preview: msg.content.slice(0, 200),
+    });
+    db.prepare(`UPDATE messages SET status = 'blocked', processed_at = ? WHERE id = ?`).run(
+      Date.now(),
+      msg.id,
+    );
     return;
   }
 
@@ -128,7 +142,10 @@ export async function ingestMessage(
       } else {
         log.warn(`LLM injection detected from ${msg.chatId}`, { patterns: deep.injectionPatterns });
       }
-      db.prepare(`UPDATE messages SET status = 'blocked', processed_at = ? WHERE id = ?`).run(Date.now(), msg.id);
+      db.prepare(`UPDATE messages SET status = 'blocked', processed_at = ? WHERE id = ?`).run(
+        Date.now(),
+        msg.id,
+      );
       return;
     }
   }
@@ -143,13 +160,16 @@ export async function ingestMessage(
     const { getAgentForChannel, runAgent } = await import('../agents/index.js');
     const agentName = getAgentForChannel(msg.channel, msg.chatId);
     if (agentName) {
-      const agentDef = (config.agents ?? []).find(a => a.name === agentName);
+      const agentDef = (config.agents ?? []).find((a) => a.name === agentName);
       if (agentDef?.enabled !== false) {
         log.info(`Routing message to agent "${agentName}" (channel: ${msg.channel}:${msg.chatId})`);
-        db.prepare(`UPDATE messages SET status = 'processed', processed_at = ? WHERE id = ?`).run(Date.now(), msg.id);
+        db.prepare(`UPDATE messages SET status = 'processed', processed_at = ? WHERE id = ?`).run(
+          Date.now(),
+          msg.id,
+        );
         runAgent(agentDef as import('../agents/index.js').AgentDefinition, anon.text, config)
-          .then(result => _sendToApprovalChat(`🤖 *${agentName}*\n\n${result.output}`))
-          .catch(e => log.warn(`Agent "${agentName}" error:`, e));
+          .then((result) => _sendToApprovalChat(`🤖 *${agentName}*\n\n${result.output}`))
+          .catch((e) => log.warn(`Agent "${agentName}" error:`, e));
         return; // skip normal window/planner
       }
     }
@@ -172,8 +192,9 @@ export async function ingestMessage(
     }
   }
 
-  db.prepare(`UPDATE messages SET status = 'windowed', anon_lookup = ?, anon_content = ?, encrypted_content = ? WHERE id = ?`)
-    .run(JSON.stringify(anon.lookup), anon.text, encryptedContent, msg.id);
+  db.prepare(
+    `UPDATE messages SET status = 'windowed', anon_lookup = ?, anon_content = ?, encrypted_content = ? WHERE id = ?`,
+  ).run(JSON.stringify(anon.lookup), anon.text, encryptedContent, msg.id);
 
   // Plugin hooks — non-blocking, after sanitize+anonymize
   // msg.content = raw (injection-safe), msg.anonText = anonymized
@@ -189,24 +210,28 @@ export async function ingestMessage(
   // preventing the race condition where the window closes before triage completes.
   if (config.triage?.enabled) {
     const { triage: runTriage } = await import('./triage.js');
-    const { triageSink }        = await import('./triage-sink.js');
-    const triagePromise = runTriage(msg, config, llmConfig, privacyConfig).then(async triageResult => {
-      if (!triageResult) return;
-      // Flag message so the window processor skips planner (triage already handled it)
-      db.prepare(`UPDATE messages SET status = 'triaged' WHERE id = ?`).run(msg.id);
-      await triageSink(triageResult, config, _sendToApprovalChat, llmConfig);
-    }).catch(e => log.warn('Triage error (non-blocking):', e));
+    const { triageSink } = await import('./triage-sink.js');
+    const triagePromise = runTriage(msg, config, llmConfig, privacyConfig)
+      .then(async (triageResult) => {
+        if (!triageResult) return;
+        // Flag message so the window processor skips planner (triage already handled it)
+        db.prepare(`UPDATE messages SET status = 'triaged' WHERE id = ?`).run(msg.id);
+        await triageSink(triageResult, config, _sendToApprovalChat, llmConfig);
+      })
+      .catch((e) => log.warn('Triage error (non-blocking):', e));
     _triageInFlight.set(msg.id, triagePromise as Promise<void>);
   }
 
   // Completion detection — non-blocking, checks if new message resolves open tasks
-  checkTaskCompletion(msg, anon.text, llmConfig, privacyConfig, config)
-    .catch(e => log.warn('Completion detection error (non-blocking):', e));
+  checkTaskCompletion(msg, anon.text, llmConfig, privacyConfig, config).catch((e) =>
+    log.warn('Completion detection error (non-blocking):', e),
+  );
 
   // Proactive whitelist verification — if partner has an open tx_request task and
   // replies with a URL, auto-run verification and notify owner immediately.
-  checkWhitelistUrl(msg, llmConfig)
-    .catch(e => log.warn('Whitelist URL check error (non-blocking):', e));
+  checkWhitelistUrl(msg, llmConfig).catch((e) =>
+    log.warn('Whitelist URL check error (non-blocking):', e),
+  );
 }
 
 // ─── Proactive whitelist URL detection ───────────────────────────────────────
@@ -214,10 +239,7 @@ export async function ingestMessage(
 // message contains a URL (typically "here are the docs"), automatically run the
 // whitelist verifier and push the result to the owner — no manual trigger needed.
 
-async function checkWhitelistUrl(
-  msg: RawMessage,
-  llmConfig: LLMConfig,
-): Promise<void> {
+async function checkWhitelistUrl(msg: RawMessage, llmConfig: LLMConfig): Promise<void> {
   // Quick URL scan on raw content — skip if no HTTP link present
   const urlRegex = /https?:\/\/[^\s<>"]+/g;
   const urls = msg.content.match(urlRegex);
@@ -225,19 +247,23 @@ async function checkWhitelistUrl(
 
   // Check for open tx_request task from this chat
   const db = getDb();
-  const openTask = db.prepare(`
+  const openTask = db
+    .prepare(
+      `
     SELECT id, title FROM tasks
     WHERE chat_id = ? AND category = 'tx_request' AND status IN ('open', 'in_progress')
     ORDER BY detected_at DESC
     LIMIT 1
-  `).get(msg.chatId) as { id: string; title: string } | undefined;
+  `,
+    )
+    .get(msg.chatId) as { id: string; title: string } | undefined;
 
   if (!openTask) return;
 
   log.info(`Proactive whitelist check triggered — partner sent URL in active tx_request chat`, {
-    taskId:  openTask.id,
+    taskId: openTask.id,
     partner: msg.partnerName ?? msg.chatId,
-    urls:    urls.slice(0, 3),
+    urls: urls.slice(0, 3),
   });
 
   const { verifyWhitelistDocs, formatVerificationNotif } = await import('./whitelist-verifier.js');
@@ -248,10 +274,10 @@ async function checkWhitelistUrl(
   await _sendToApprovalChat(header + formatVerificationNotif(verif));
 
   audit('whitelist_auto_verify', openTask.id, 'task', {
-    partner:  msg.partnerName ?? msg.chatId,
+    partner: msg.partnerName ?? msg.chatId,
     decision: verif.decision,
-    score:    verif.score,
-    urls:     urls.slice(0, 3),
+    score: verif.score,
+    urls: urls.slice(0, 3),
   });
 }
 
@@ -267,13 +293,21 @@ async function checkTaskCompletion(
   config: Config,
 ): Promise<void> {
   const db = getDb();
-  const openTasks = db.prepare(`
+  const openTasks = db
+    .prepare(
+      `
     SELECT id, title, description FROM tasks
     WHERE chat_id = ?
       AND (channel = ? OR channel IS NULL)
       AND (status = 'open' OR status = 'in_progress')
     LIMIT 10
-  `).all(msg.chatId, msg.channel ?? msg.source) as Array<{ id: string; title: string; description: string | null }>;
+  `,
+    )
+    .all(msg.chatId, msg.channel ?? msg.source) as Array<{
+    id: string;
+    title: string;
+    description: string | null;
+  }>;
 
   if (openTasks.length === 0) return;
 
@@ -282,7 +316,7 @@ async function checkTaskCompletion(
   // Use privacy LLM if configured, otherwise primary — keep raw content local
   const activeLlm = privacyConfig ?? llmConfigFromConfig(config);
 
-  const taskList = openTasks.map(t => `- [${t.id}] ${t.title}`).join('\n');
+  const taskList = openTasks.map((t) => `- [${t.id}] ${t.title}`).join('\n');
 
   const response = await llmCall(activeLlm, [
     {
@@ -304,16 +338,19 @@ If no tasks are resolved, return {"completed": [], "reasoning": ""}`,
 
   const now = Date.now();
   for (const taskId of result.completed) {
-    if (!openTasks.some(t => t.id === taskId)) continue; // safety check
-    db.prepare(`UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?`)
-      .run(now, taskId);
+    if (!openTasks.some((t) => t.id === taskId)) continue; // safety check
+    db.prepare(`UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?`).run(
+      now,
+      taskId,
+    );
     // Cancel any pending draft reply proposals linked to this task
-    db.prepare(`UPDATE proposals SET status = 'cancelled' WHERE task_id = ? AND status = 'proposed'`)
-      .run(taskId);
+    db.prepare(
+      `UPDATE proposals SET status = 'cancelled' WHERE task_id = ? AND status = 'proposed'`,
+    ).run(taskId);
     log.info(`Task auto-completed: ${taskId} — ${result.reasoning?.slice(0, 80)}`);
     audit('task_auto_completed', taskId, 'task', {
-      by:        msg.senderName ?? msg.partnerName,
-      channel:   msg.channel,
+      by: msg.senderName ?? msg.partnerName,
+      channel: msg.channel,
       reasoning: result.reasoning?.slice(0, 200),
     });
   }
@@ -335,22 +372,26 @@ export async function processWindow(
 
   log.info(`Processing window ${window.id}`, {
     messages: window.messages.length,
-    partner:  window.partnerName,
+    partner: window.partnerName,
   });
 
   // If all messages in this window were handled by triage, skip the planner
   // to avoid duplicate proposals and noisy notifications.
-  const windowMsgIds: string[] = window.messages.map(m => m.originalId).filter(Boolean);
+  const windowMsgIds: string[] = window.messages.map((m) => m.originalId).filter(Boolean);
   if (windowMsgIds.length > 0 && config.triage?.enabled) {
     // Await any in-flight triage promises so we don't check triaged status
     // before triage has finished writing — fixes the race condition.
-    await Promise.allSettled(windowMsgIds.map(id => _triageInFlight.get(id) ?? Promise.resolve()));
-    windowMsgIds.forEach(id => _triageInFlight.delete(id));
+    await Promise.allSettled(
+      windowMsgIds.map((id) => _triageInFlight.get(id) ?? Promise.resolve()),
+    );
+    windowMsgIds.forEach((id) => _triageInFlight.delete(id));
 
     const placeholders = windowMsgIds.map(() => '?').join(',');
-    const triaged = getDb().prepare(
-      `SELECT COUNT(*) as n FROM messages WHERE id IN (${placeholders}) AND status = 'triaged'`,
-    ).get(...windowMsgIds) as { n: number };
+    const triaged = getDb()
+      .prepare(
+        `SELECT COUNT(*) as n FROM messages WHERE id IN (${placeholders}) AND status = 'triaged'`,
+      )
+      .get(...windowMsgIds) as { n: number };
     if (triaged.n === windowMsgIds.length) {
       log.debug(`Window ${window.id} fully triaged — skipping planner`);
       return;
@@ -363,18 +404,21 @@ export async function processWindow(
 
   // Store memory
   storeMemory(result.summary, result, window, {
-    defaultTtlDays:      config.memory.defaultTtlDays,
-    archiveTtlDays:      config.memory.archiveTtlDays,
+    defaultTtlDays: config.memory.defaultTtlDays,
+    archiveTtlDays: config.memory.archiveTtlDays,
     autoArchiveThreshold: config.memory.autoArchiveThreshold,
+    storeRaw: config.privacy.storeRaw,
   });
 
   // Entity extraction — fire-and-forget, non-blocking, only for important messages
-  const kgConfig = (config as unknown as { knowledgeGraph?: { enabled?: boolean; minImportance?: number } }).knowledgeGraph;
+  const kgConfig = (
+    config as unknown as { knowledgeGraph?: { enabled?: boolean; minImportance?: number } }
+  ).knowledgeGraph;
   if (kgConfig?.enabled && (result.importance ?? 0) >= (kgConfig.minImportance ?? 5)) {
-    const anonText  = window.messages.map(m => m.content).join('\n');
+    const anonText = window.messages.map((m) => m.content).join('\n');
     const windowRef = window.id;
-    const chan       = window.channel;
-    const cId        = window.chatId;
+    const chan = window.channel;
+    const cId = window.chatId;
     Promise.resolve()
       .then(async () => {
         const { extractEntities } = await import('../knowledge-graph/extractor.js');
@@ -387,35 +431,51 @@ export async function processWindow(
         }
         for (const rel of relations) {
           const fromId = entityIds.get(rel.from);
-          const toId   = entityIds.get(rel.to);
+          const toId = entityIds.get(rel.to);
           if (fromId && toId) addRelation(fromId, toId, rel.relation, rel.context, windowRef);
         }
       })
-      .catch(e => log.warn(`KG extraction failed: ${e}`));
+      .catch((e) => log.warn(`KG extraction failed: ${e}`));
   }
 
   // Vectorize full conversation — fire-and-forget, enables semantic retrieval over 30d rolling window
   const { vectorizeConversationAsync } = await import('../memory/store.js');
-  vectorizeConversationAsync(window, result).catch(e => log.warn('Conversation vectorization failed:', e));
+  vectorizeConversationAsync(window, result).catch((e) =>
+    log.warn('Conversation vectorization failed:', e),
+  );
 
   // Save task only when the owner is directly addressed.
   // Hard gate: if none of the owner's handles/name appear in the raw message text,
   // only create a task if isMyTask is explicitly true (LLM is very confident).
   // This prevents tasks from conversations between other people where the owner is just CC'd.
-  const myHandles  = config.triage?.myHandles ?? [];
-  const ownerName  = config.owner?.name ?? '';
-  const rawText    = window.messages.map(m => m.content).join(' ').toLowerCase();
-  const ownerMentioned = result.isMyTask
-    || myHandles.some(h => rawText.includes(h.toLowerCase().replace(/^@/, '')))
-    || (ownerName && rawText.includes(ownerName.toLowerCase()));
+  const myHandles = config.triage?.myHandles ?? [];
+  const ownerName = config.owner?.name ?? '';
+  const rawText = window.messages
+    .map((m) => m.content)
+    .join(' ')
+    .toLowerCase();
+  const ownerMentioned =
+    result.isMyTask ||
+    myHandles.some((h) => rawText.includes(h.toLowerCase().replace(/^@/, ''))) ||
+    (ownerName && rawText.includes(ownerName.toLowerCase()));
 
-  const ownerInvolved = ownerMentioned
-    || (result.taskScope === 'my_task' && result.ownerConfidence >= 0.8)
-    || (result.category === 'client_request' && result.isMyTask && result.ownerConfidence >= 0.7);
+  const ownerInvolved =
+    ownerMentioned ||
+    (result.taskScope === 'my_task' && result.ownerConfidence >= 0.8) ||
+    (result.category === 'client_request' && result.isMyTask && result.ownerConfidence >= 0.7);
 
-  if (ownerInvolved && (result.category === 'task' || result.category === 'tx_request' || result.category === 'client_request')) {
+  if (
+    ownerInvolved &&
+    (result.category === 'task' ||
+      result.category === 'tx_request' ||
+      result.category === 'client_request')
+  ) {
     const taskId = saveTask(result.summary.slice(0, 120), result, window);
-    broadcastEvent('task_created', { id: taskId, summary: result.summary, partner: window.partnerName });
+    broadcastEvent('task_created', {
+      id: taskId,
+      summary: result.summary,
+      partner: window.partnerName,
+    });
   }
 
   // Keyword suggestion — fire-and-forget, non-blocking
@@ -436,7 +496,7 @@ export async function processWindow(
   // Agents whose trigger conditions match this message run in parallel here.
   // Their output is appended to the window context so the planner can use it
   // without re-doing the same work.
-  const triggerText = window.messages.map(m => m.content).join('\n');
+  const triggerText = window.messages.map((m) => m.content).join('\n');
   {
     const { getTriggeredAgents, runAgent } = await import('../agents/index.js');
     const triggered = getTriggeredAgents(
@@ -448,10 +508,12 @@ export async function processWindow(
     );
 
     if (triggered.length > 0) {
-      log.info(`${triggered.length} agent trigger(s) matched for window ${window.id}: ${triggered.map(a => a.name).join(', ')}`);
+      log.info(
+        `${triggered.length} agent trigger(s) matched for window ${window.id}: ${triggered.map((a) => a.name).join(', ')}`,
+      );
 
       const agentResults = await Promise.allSettled(
-        triggered.map(def => runAgent(def, triggerText, config)),
+        triggered.map((def) => runAgent(def, triggerText, config)),
       );
 
       const injections: string[] = [];
@@ -484,30 +546,35 @@ export async function processWindow(
       const preview = window.messages[0]?.content?.slice(0, 120) ?? '';
       await _sendToApprovalChat(
         `📬 *${partner}* — ${result.category} (imp: ${result.importance}/10, ${result.urgency})\n${summary}\n\n_"${preview}${preview.length >= 120 ? '…' : ''}"_\n\n⚠️ No action was proposed — check /tasks or reply manually.`,
-      ).catch(e => log.warn('Fallback notify failed:', e));
+      ).catch((e) => log.warn('Fallback notify failed:', e));
     }
     return;
   }
 
   // Auto-execute owner workspace actions (Notion, tasks, reminders)
-  const autoActions     = proposal.actions.filter(a => !a.requiresApproval);
-  const approvalActions = proposal.actions.filter(a =>  a.requiresApproval);
+  const autoActions = proposal.actions.filter((a) => !a.requiresApproval);
+  const approvalActions = proposal.actions.filter((a) => a.requiresApproval);
 
   if (autoActions.length > 0) {
     const { executeProposal } = await import('../workers/index.js');
     const { generateExecutionToken } = await import('../gateway/approval.js');
     const autoToken = generateExecutionToken(proposal.id);
     log.info(`Auto-executing ${autoActions.length} action(s) (owner workspace)`);
-    await executeProposal({ ...proposal, actions: autoActions }, autoActions, config, _sendToApprovalChat, autoToken)
-      .catch(e => log.error('Auto-execution failed', e));
+    await executeProposal(
+      { ...proposal, actions: autoActions },
+      autoActions,
+      config,
+      _sendToApprovalChat,
+      autoToken,
+    ).catch((e) => log.error('Auto-execution failed', e));
     audit('auto_executed', proposal.id, 'proposal', {
-      actions: autoActions.map(a => a.description),
+      actions: autoActions.map((a) => a.description),
     });
 
     // Notify owner immediately for task/reminder creations
-    const taskActions = autoActions.filter(a => ['create_task', 'set_reminder'].includes(
-      (a.payload as { tool?: string })?.tool ?? ''
-    ));
+    const taskActions = autoActions.filter((a) =>
+      ['create_task', 'set_reminder'].includes((a.payload as { tool?: string })?.tool ?? ''),
+    );
     for (const a of taskActions) {
       const input = (a.payload as { input?: Record<string, unknown> })?.input ?? {};
       const title = String(input.title ?? input.message ?? a.description).slice(0, 120);
@@ -529,12 +596,10 @@ export async function processWindow(
 // When a relevant message is processed but its tags don't match any existing
 // keyword, suggest 1 new keyword to the owner so they can expand their triage rules.
 
-async function suggestKeyword(
-  result: ClassificationResult,
-  config: Config,
-): Promise<void> {
+async function suggestKeyword(result: ClassificationResult, config: Config): Promise<void> {
   // Only suggest when the message was relevant enough
-  if ((result.importance ?? 0) < 5 || result.category === 'ignore' || result.category === 'info') return;
+  if ((result.importance ?? 0) < 5 || result.category === 'ignore' || result.category === 'info')
+    return;
   if (!result.tags?.length) return;
 
   // Collect all known keywords (teams + whitelist + myHandles)
@@ -547,7 +612,9 @@ async function suggestKeyword(
   for (const h of config.triage?.myHandles ?? []) known.add(h.toLowerCase());
 
   // Tags that aren't in the known set
-  const newTags = result.tags.filter(t => !known.has(t.toLowerCase()) && t.length > 2 && t.length < 30);
+  const newTags = result.tags.filter(
+    (t) => !known.has(t.toLowerCase()) && t.length > 2 && t.length < 30,
+  );
   if (!newTags.length) return;
 
   // Pick one at random — variety > determinism here
@@ -555,28 +622,27 @@ async function suggestKeyword(
 
   await _sendToApprovalChat(
     `💡 *Keyword suggéré:* \`${pick}\`\n` +
-    `_Ajouté via: "${result.summary.slice(0, 80)}"_\n` +
-    `→ /add_keyword pour l'ajouter à une équipe`,
+      `_Ajouté via: "${result.summary.slice(0, 80)}"_\n` +
+      `→ /add_keyword pour l'ajouter à une équipe`,
   ).catch(() => {});
 }
 
 // ─── Daily briefing ───────────────────────────────────────────────────────────
 
-export async function sendDailyBriefing(
-  config: Config,
-  telegram: TelegramChannel,
-): Promise<void> {
+export async function sendDailyBriefing(config: Config, telegram: TelegramChannel): Promise<void> {
   const db = getDb();
 
-  const openTasks = db.prepare(
-    `SELECT COUNT(*) as c FROM tasks WHERE status = 'open'`,
-  ).get() as { c: number };
-  const pendingApprovals = db.prepare(
-    `SELECT COUNT(*) as c FROM approvals WHERE status = 'pending'`,
-  ).get() as { c: number };
-  const myTasks = db.prepare(
-    `SELECT * FROM tasks WHERE status = 'open' AND is_my_task = 1 ORDER BY detected_at DESC LIMIT 5`,
-  ).all() as Array<{ title: string; partner_name: string | null }>;
+  const openTasks = db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE status = 'open'`).get() as {
+    c: number;
+  };
+  const pendingApprovals = db
+    .prepare(`SELECT COUNT(*) as c FROM approvals WHERE status = 'pending'`)
+    .get() as { c: number };
+  const myTasks = db
+    .prepare(
+      `SELECT * FROM tasks WHERE status = 'open' AND is_my_task = 1 ORDER BY detected_at DESC LIMIT 5`,
+    )
+    .all() as Array<{ title: string; partner_name: string | null }>;
 
   const lines = [
     `☀️ *Argos Morning Briefing*`,

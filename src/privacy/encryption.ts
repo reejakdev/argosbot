@@ -20,8 +20,8 @@ import { createLogger } from '../logger.js';
 const log = createLogger('encryption');
 
 const KEY_PATH = join(homedir(), '.argos', 'message.key');
-const IV_LEN   = 12;   // 96-bit IV for GCM
-const TAG_LEN  = 16;   // 128-bit auth tag
+const IV_LEN = 12; // 96-bit IV for GCM
+const TAG_LEN = 16; // 128-bit auth tag
 
 let _key: Buffer | null = null;
 
@@ -45,7 +45,9 @@ export function loadEncryptionKey(): Buffer {
     mkdirSync(dir, { recursive: true });
     _key = randomBytes(32);
     writeFileSync(KEY_PATH, _key, { mode: 0o600 });
-    try { chmodSync(KEY_PATH, 0o600); } catch {}
+    try {
+      chmodSync(KEY_PATH, 0o600);
+    } catch {}
     log.info('Generated new encryption key at ~/.argos/message.key — back this up securely');
   }
 
@@ -59,10 +61,10 @@ export function loadEncryptionKey(): Buffer {
  * Returns a base64url string: IV || authTag || ciphertext
  */
 export function encryptMessage(plaintext: string, key: Buffer): string {
-  const iv     = randomBytes(IV_LEN);
+  const iv = randomBytes(IV_LEN);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
 
-  const ct  = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const ct = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
 
   // IV (12) + tag (16) + ciphertext
@@ -79,9 +81,9 @@ export function decryptMessage(encrypted: string, key: Buffer): string {
 
   if (blob.length < IV_LEN + TAG_LEN) throw new Error('encrypted_content too short');
 
-  const iv      = blob.subarray(0, IV_LEN);
-  const tag     = blob.subarray(IV_LEN, IV_LEN + TAG_LEN);
-  const ct      = blob.subarray(IV_LEN + TAG_LEN);
+  const iv = blob.subarray(0, IV_LEN);
+  const tag = blob.subarray(IV_LEN, IV_LEN + TAG_LEN);
+  const ct = blob.subarray(IV_LEN + TAG_LEN);
   const decipher = createDecipheriv('aes-256-gcm', key, iv);
   decipher.setAuthTag(tag);
 

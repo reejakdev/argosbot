@@ -28,14 +28,16 @@ export async function fetchUrl(source: ContextUrl): Promise<KnowledgeDocument | 
       text = await res.text();
     }
 
-    const header  = `[${source.name}]\nSource: ${source.url}\n\n`;
+    const header = `[${source.name}]\nSource: ${source.url}\n\n`;
     const isLarge = text.length > 8000;
 
     return {
-      key:      `url:${source.url}`,
-      name:     source.name,
-      content:  header + (isLarge ? text.slice(0, 2000) + '\n\n[…full content indexed in vector store]' : text),
-      tags:     ['context', 'url', source.name.toLowerCase().replace(/\s+/g, '_')],
+      key: `url:${source.url}`,
+      name: source.name,
+      content:
+        header +
+        (isLarge ? text.slice(0, 2000) + '\n\n[…full content indexed in vector store]' : text),
+      tags: ['context', 'url', source.name.toLowerCase().replace(/\s+/g, '_')],
       fullText: isLarge ? header + text : undefined,
     };
   } catch (e) {

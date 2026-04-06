@@ -25,9 +25,9 @@ type AuditRow = {
   entry_hash: string | null;
 };
 
-const rows = db.prepare(
-  'SELECT * FROM audit_log WHERE entry_hash IS NOT NULL ORDER BY created_at ASC'
-).all() as AuditRow[];
+const rows = db
+  .prepare('SELECT * FROM audit_log WHERE entry_hash IS NOT NULL ORDER BY created_at ASC')
+  .all() as AuditRow[];
 
 if (rows.length === 0) {
   console.log('No hashed audit entries found (entries pre-migration 16 are excluded).');

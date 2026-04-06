@@ -30,21 +30,29 @@ import { monotonicFactory } from 'ulid';
 import type { Channel } from './registry.js';
 import type { RawMessage } from '../../types.js';
 
-const log  = createLogger('slack');
+const log = createLogger('slack');
 const ulid = monotonicFactory();
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 export interface SlackConfig {
-  userToken:         string;
+  userToken: string;
   monitoredChannels: Array<{ channelId: string; name: string; tags?: string[] }>;
-  monitorDMs:        boolean;
+  monitorDMs: boolean;
   pollIntervalSeconds: number;
 }
 
 type SlackWebClient = {
   conversations: {
-    list:    (opts: Record<string, unknown>) => Promise<{ channels?: Array<{ id: string; name: string; is_member?: boolean; is_im?: boolean; is_mpim?: boolean }> }>;
+    list: (opts: Record<string, unknown>) => Promise<{
+      channels?: Array<{
+        id: string;
+        name: string;
+        is_member?: boolean;
+        is_im?: boolean;
+        is_mpim?: boolean;
+      }>;
+    }>;
     history: (opts: Record<string, unknown>) => Promise<{ messages?: Array<SlackMessage> }>;
   };
   users: {
@@ -56,14 +64,14 @@ type SlackWebClient = {
 };
 
 type SlackMessage = {
-  type:        string;
-  subtype?:    string;
-  text?:       string;
-  user?:       string;
-  bot_id?:     string;
-  ts:          string;
-  thread_ts?:  string;
-  channel?:    string;
+  type: string;
+  subtype?: string;
+  text?: string;
+  user?: string;
+  bot_id?: string;
+  ts: string;
+  thread_ts?: string;
+  channel?: string;
 };
 
 // ─── Link extraction ──────────────────────────────────────────────────────────
@@ -80,14 +88,15 @@ function extractLinks(text: string): string[] {
 export class SlackChannel implements Channel {
   readonly name = 'slack';
 
-  private config:        SlackConfig;
-  private webClient:     SlackWebClient | null = null;
-  private onMessageCb:   ((msg: RawMessage) => Promise<void>) | null = null;
-  private pollTimer:     ReturnType<typeof setInterval> | null = null;
-  private botUserId:     string | null = null;
-  private userCache:     Map<string, string> = new Map();
+  private config: SlackConfig;
+  private webClient: SlackWebClient | null = null;
+  private onMessageCb: ((msg: RawMessage) => Promise<void>) | null = null;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private botUserId: string | null = null;
+  private userCache: Map<string, string> = new Map();
+  private static readonly MAX_USER_CACHE = 1000;
   // cursor per channelId: last ts seen — only fetch messages newer than this
-  private cursors:       Map<string, string> = new Map();
+  private cursors: Map<string, string> = new Map();
 
   constructor(config: SlackConfig) {
     this.config = config;
@@ -99,7 +108,9 @@ export class SlackChannel implements Channel {
 
   async start(): Promise<void> {
     try {
-      const { WebClient } = await import('@slack/web-api') as unknown as { WebClient: new (token: string) => SlackWebClient };
+      const { WebClient } = (await import('@slack/web-api')) as unknown as {
+        WebClient: new (token: string) => SlackWebClient;
+      };
       this.webClient = new WebClient(this.config.userToken);
 
       // Identify self to skip own messages
@@ -117,7 +128,7 @@ export class SlackChannel implements Channel {
       // Start polling loop
       const intervalMs = this.config.pollIntervalSeconds * 1000;
       this.pollTimer = setInterval(() => {
-        this.poll().catch(e => log.warn('Slack poll error:', e));
+        this.poll().catch((e) => log.warn('Slack poll error:', e));
       }, intervalMs);
 
       log.info(`Slack user-token polling started (every ${this.config.pollIntervalSeconds}s)`);
@@ -154,7 +165,11 @@ export class SlackChannel implements Channel {
     if (!this.webClient) return [];
 
     if (this.config.monitoredChannels.length > 0) {
-      return this.config.monitoredChannels.map(c => ({ id: c.channelId, name: c.name, isDM: false }));
+      return this.config.monitoredChannels.map((c) => ({
+        id: c.channelId,
+        name: c.name,
+        isDM: false,
+      }));
     }
 
     const result: Array<{ id: string; name: string; isDM: boolean }> = [];
@@ -162,9 +177,9 @@ export class SlackChannel implements Channel {
     try {
       // Public + private channels the user is in
       const chRes = await this.webClient.conversations.list({
-        types:            'public_channel,private_channel',
+        types: 'public_channel,private_channel',
         exclude_archived: true,
-        limit:            200,
+        limit: 200,
       });
       for (const ch of chRes.channels ?? []) {
         if (ch.is_member && ch.id) result.push({ id: ch.id, name: ch.name, isDM: false });
@@ -202,7 +217,7 @@ export class SlackChannel implements Channel {
         const res = await this.webClient.conversations.history({
           channel: ch.id,
           oldest,
-          limit:   50,
+          limit: 50,
         });
         messages = res.messages ?? [];
       } catch (e) {
@@ -231,27 +246,29 @@ export class SlackChannel implements Channel {
         const ts = Math.round(parseFloat(msg.ts) * 1000);
 
         const raw: RawMessage = {
-          id:          ulid(),
-          source:      'slack',
-          channel:     'slack',
-          chatId:      ch.id,
-          chatName:    ch.name,
-          chatType:    ch.isDM ? 'dm' : (msg.thread_ts ? 'thread' : 'channel'),
+          id: ulid(),
+          source: 'slack',
+          channel: 'slack',
+          chatId: ch.id,
+          chatName: ch.name,
+          chatType: ch.isDM ? 'dm' : msg.thread_ts ? 'thread' : 'channel',
           partnerName: senderName ?? ch.name,
           senderName,
-          senderId:    msg.user,
-          content:     msg.text!,
-          links:       extractLinks(msg.text!),
-          receivedAt:  Date.now(),
-          timestamp:   ts,
+          senderId: msg.user,
+          content: msg.text!,
+          links: extractLinks(msg.text!),
+          receivedAt: Date.now(),
+          timestamp: ts,
           meta: {
-            slack_channel:    ch.id,
-            slack_ts:         msg.ts,
-            slack_thread_ts:  msg.thread_ts,
+            slack_channel: ch.id,
+            slack_ts: msg.ts,
+            slack_thread_ts: msg.thread_ts,
           },
         };
 
-        log.info(`Slack message from ${senderName ?? 'unknown'} in ${ch.name}: ${msg.text!.slice(0, 60)}`);
+        log.info(
+          `Slack message from ${senderName ?? 'unknown'} in ${ch.name}: ${msg.text!.slice(0, 60)}`,
+        );
 
         try {
           await this.onMessageCb(raw);
@@ -265,9 +282,14 @@ export class SlackChannel implements Channel {
   private async resolveUser(userId: string): Promise<string> {
     if (this.userCache.has(userId)) return this.userCache.get(userId)!;
     try {
-      const res  = await this.webClient!.users.info({ user: userId });
+      const res = await this.webClient!.users.info({ user: userId });
       const name = res.user?.real_name ?? res.user?.name ?? userId;
       this.userCache.set(userId, name);
+      // LRU eviction
+      if (this.userCache.size > SlackChannel.MAX_USER_CACHE) {
+        const oldest = this.userCache.keys().next().value;
+        if (oldest !== undefined) this.userCache.delete(oldest);
+      }
       return name;
     } catch {
       return userId;
@@ -278,8 +300,8 @@ export class SlackChannel implements Channel {
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 export function createSlackChannel(config?: {
-  monitoredChannels?:  Array<{ channelId: string; name: string; tags?: string[] }>;
-  monitorDMs?:         boolean;
+  monitoredChannels?: Array<{ channelId: string; name: string; tags?: string[] }>;
+  monitorDMs?: boolean;
   pollIntervalSeconds?: number;
 }): SlackChannel | null {
   const userToken = process.env.SLACK_USER_TOKEN;
@@ -291,8 +313,8 @@ export function createSlackChannel(config?: {
 
   return new SlackChannel({
     userToken,
-    monitoredChannels:   config?.monitoredChannels   ?? [],
-    monitorDMs:          config?.monitorDMs           ?? true,
-    pollIntervalSeconds: config?.pollIntervalSeconds  ?? 60,
+    monitoredChannels: config?.monitoredChannels ?? [],
+    monitorDMs: config?.monitorDMs ?? true,
+    pollIntervalSeconds: config?.pollIntervalSeconds ?? 60,
   });
 }

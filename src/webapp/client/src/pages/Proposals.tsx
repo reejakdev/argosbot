@@ -173,24 +173,34 @@ export default function Proposals() {
             </div>
 
             {/* Context summary */}
-            <p
-              className="text-sm leading-relaxed mb-3"
-              style={{ color: '#111827', fontFamily: "'Inter', sans-serif" }}
+            <div
+              className="mb-3"
+              style={{
+                maxHeight: '120px',
+                overflowY: 'auto',
+                color: '#111827',
+                fontFamily: "'Inter', sans-serif",
+                fontSize: '0.875rem',
+                lineHeight: 1.6,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
             >
               {p.context_summary}
-            </p>
+            </div>
 
             {/* Plan / reasoning */}
-            {p.plan && (
+            {p.plan && p.plan !== 'run_script' && (
               <div className="mb-3">
                 <div className="label-mono mb-1.5">Reasoning</div>
                 <p
-                  className="text-xs leading-relaxed overflow-hidden"
+                  className="text-xs leading-relaxed"
                   style={{
                     fontFamily: "'Inter', sans-serif",
                     color: 'var(--text2)',
-                    maxHeight: 72,
-                    WebkitMaskImage: 'linear-gradient(to bottom, black 55%, transparent)',
+                    maxHeight: '72px',
+                    overflowY: 'auto',
+                    whiteSpace: 'pre-wrap',
                   }}
                 >
                   {p.plan}
@@ -264,19 +274,48 @@ export default function Proposals() {
                         </span>
                       </div>
                       {a.details && (
-                        <pre
-                          className="text-xs overflow-auto mt-1"
+                        <div
                           style={{
-                            fontFamily: "'JetBrains Mono', monospace",
-                            color: 'var(--text2)',
-                            maxHeight: 80,
-                            whiteSpace: 'pre-wrap',
-                            lineHeight: 1.5,
-                            fontSize: '0.65rem',
+                            marginTop: '0.375rem',
+                            border: '1px solid rgba(79,110,255,0.18)',
+                            borderRadius: '5px',
+                            background: '#1a1a2e',
+                            overflow: 'hidden',
                           }}
                         >
-                          {a.details.slice(0, 300)}
-                        </pre>
+                          {a.lang && (
+                            <div
+                              style={{
+                                padding: '0.15rem 0.5rem',
+                                background: 'rgba(79,110,255,0.15)',
+                                fontFamily: "'JetBrains Mono', monospace",
+                                fontSize: '0.55rem',
+                                color: '#8090d0',
+                                letterSpacing: '0.06em',
+                                textTransform: 'uppercase',
+                                borderBottom: '1px solid rgba(79,110,255,0.18)',
+                              }}
+                            >
+                              {a.lang}
+                            </div>
+                          )}
+                          <pre
+                            style={{
+                              fontFamily: "'JetBrains Mono', monospace",
+                              fontSize: '0.7rem',
+                              color: '#c8d3f5',
+                              lineHeight: 1.6,
+                              margin: 0,
+                              padding: '0.5rem 0.65rem',
+                              overflowX: 'auto',
+                              overflowY: 'auto',
+                              maxHeight: '160px',
+                              whiteSpace: 'pre',
+                            }}
+                          >
+                            {a.details}
+                          </pre>
+                        </div>
                       )}
                     </div>
                   ))}

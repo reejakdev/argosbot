@@ -12,7 +12,7 @@
 
 import { readFileSync, existsSync, statSync } from 'fs';
 import path from 'path';
-import os   from 'os';
+import os from 'os';
 import { createLogger } from '../../logger.js';
 import type { KnowledgeDocument } from '../types.js';
 
@@ -21,12 +21,23 @@ const log = createLogger('knowledge:file');
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB (docx/xlsx can be larger)
 
 const TEXT_EXTENSIONS = new Set([
-  '.txt', '.md', '.ts', '.js', '.json', '.csv', '.yaml', '.yml', '.toml', '.env', '.sh', '.py',
+  '.txt',
+  '.md',
+  '.ts',
+  '.js',
+  '.json',
+  '.csv',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.env',
+  '.sh',
+  '.py',
 ]);
 
 export async function fetchFile(opts: {
   filePath: string;
-  name:     string;
+  name: string;
   refreshDays?: number;
 }): Promise<KnowledgeDocument | null> {
   const resolved = resolvePath(opts.filePath);
@@ -67,16 +78,18 @@ export async function fetchFile(opts: {
       text = readFileSync(resolved, 'utf8');
     }
 
-    const header  = `[${opts.name}]\nSource: ${resolved}\n\n`;
+    const header = `[${opts.name}]\nSource: ${resolved}\n\n`;
     const isLarge = text.length > 8000;
 
     log.info(`Indexed file: ${resolved} (${text.length} chars)`);
 
     return {
-      key:      `file:${resolved}`,
-      name:     opts.name,
-      content:  header + (isLarge ? text.slice(0, 2000) + '\n\n[…full content indexed in vector store]' : text),
-      tags:     ['context', 'file', ext.slice(1) || 'txt'],
+      key: `file:${resolved}`,
+      name: opts.name,
+      content:
+        header +
+        (isLarge ? text.slice(0, 2000) + '\n\n[…full content indexed in vector store]' : text),
+      tags: ['context', 'file', ext.slice(1) || 'txt'],
       fullText: isLarge ? header + text : undefined,
     };
   } catch (e) {
@@ -108,9 +121,7 @@ function resolvePath(filePath: string): string | null {
   const dataDir = process.env.DATA_DIR ?? path.join(home, '.argos');
 
   // Expand ~ shorthand
-  const expanded = filePath.startsWith('~/')
-    ? path.join(home, filePath.slice(2))
-    : filePath;
+  const expanded = filePath.startsWith('~/') ? path.join(home, filePath.slice(2)) : filePath;
 
   // Resolve relative paths from data dir
   const resolved = path.isAbsolute(expanded)

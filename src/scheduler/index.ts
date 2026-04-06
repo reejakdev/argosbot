@@ -45,7 +45,9 @@ const activeTasks = new Map<string, cron.ScheduledTask>();
 
 export function startAll(): void {
   const db = getDb();
-  const jobs = db.prepare(`SELECT * FROM cron_jobs WHERE enabled = 1`).all() as Array<Record<string, unknown>>;
+  const jobs = db.prepare(`SELECT * FROM cron_jobs WHERE enabled = 1`).all() as Array<
+    Record<string, unknown>
+  >;
 
   log.info(`Starting ${jobs.length} cron job(s)`);
 
@@ -67,19 +69,42 @@ function startJob(job: CronJob): void {
     return;
   }
 
-  const task = cron.schedule(job.schedule, async () => {
-    await runJob(job);
-  }, { timezone: 'Europe/Paris' });
+  const task = cron.schedule(
+    job.schedule,
+    async () => {
+      await runJob(job);
+    },
+    { timezone: 'Europe/Paris' },
+  );
 
   activeTasks.set(job.id, task);
   log.info(`Scheduled: ${job.name} [${job.schedule}]`);
 }
+
+const _cronErrorCounts = new Map<string, number>();
 
 async function runJob(job: CronJob): Promise<void> {
   const handler = handlers.get(job.handler);
   if (!handler) {
     log.error(`No handler registered for: ${job.handler}`);
     return;
+  }
+
+  // Exponential backoff on repeated failures
+  const errorCount = _cronErrorCounts.get(job.id) ?? 0;
+  if (errorCount > 0) {
+    const backoffMs = Math.min(1000 * 2 ** (errorCount - 1), 3600_000); // max 1h
+    const lastRun = (
+      getDb().prepare('SELECT last_run FROM cron_jobs WHERE id = ?').get(job.id) as {
+        last_run: number | null;
+      }
+    )?.last_run;
+    if (lastRun && Date.now() - lastRun < backoffMs) {
+      log.debug(
+        `Cron ${job.name}: backing off (${errorCount} failures, next in ${Math.round(backoffMs / 1000)}s)`,
+      );
+      return;
+    }
   }
 
   log.info(`Running cron job: ${job.name}`);
@@ -90,11 +115,22 @@ async function runJob(job: CronJob): Promise<void> {
 
     const db = getDb();
     db.prepare(`UPDATE cron_jobs SET last_run = ? WHERE id = ?`).run(Date.now(), job.id);
+    _cronErrorCounts.delete(job.id); // reset on success
 
     audit('cron_job_run', job.id, 'cron_job', { name: job.name, durationMs: Date.now() - start });
   } catch (e) {
-    log.error(`Cron job ${job.name} failed`, e);
-    audit('cron_job_error', job.id, 'cron_job', { name: job.name, error: String(e) });
+    const newCount = errorCount + 1;
+    _cronErrorCounts.set(job.id, newCount);
+    const db = getDb();
+    db.prepare(`UPDATE cron_jobs SET last_run = ? WHERE id = ?`).run(Date.now(), job.id);
+
+    log.error(`Cron job ${job.name} failed (attempt ${newCount})`, e);
+    audit('cron_job_error', job.id, 'cron_job', {
+      name: job.name,
+      error: String(e),
+      errorCount: newCount,
+      nextBackoffMs: Math.min(1000 * 2 ** newCount, 3600_000),
+    });
   }
 }
 
@@ -107,36 +143,60 @@ export function upsertCronJob(
   config: Record<string, unknown> = {},
 ): CronJob {
   const db = getDb();
-  const existing = db.prepare(`SELECT * FROM cron_jobs WHERE name = ?`).get(name) as Record<string, unknown> | null;
+  const existing = db.prepare(`SELECT * FROM cron_jobs WHERE name = ?`).get(name) as Record<
+    string,
+    unknown
+  > | null;
 
   if (existing) {
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE cron_jobs SET schedule = ?, handler = ?, config = ?, enabled = 1 WHERE name = ?
-    `).run(schedule, handler, JSON.stringify(config), name);
-    const updated = db.prepare(`SELECT * FROM cron_jobs WHERE name = ?`).get(name) as Record<string, unknown>;
+    `,
+    ).run(schedule, handler, JSON.stringify(config), name);
+    const updated = db.prepare(`SELECT * FROM cron_jobs WHERE name = ?`).get(name) as Record<
+      string,
+      unknown
+    >;
     const job = rowToJob(updated);
     startJob(job);
     return job;
   }
 
   const id = ulid();
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO cron_jobs (id, name, schedule, handler, config, enabled, created_at)
     VALUES (?, ?, ?, ?, ?, 1, ?)
-  `).run(id, name, schedule, handler, JSON.stringify(config), Date.now());
+  `,
+  ).run(id, name, schedule, handler, JSON.stringify(config), Date.now());
 
-  const job: CronJob = { id, name, schedule, handler, config, enabled: true, createdAt: Date.now() };
+  const job: CronJob = {
+    id,
+    name,
+    schedule,
+    handler,
+    config,
+    enabled: true,
+    createdAt: Date.now(),
+  };
   startJob(job);
   return job;
 }
 
 export function disableCronJob(name: string): void {
   const db = getDb();
-  const job = db.prepare(`SELECT * FROM cron_jobs WHERE name = ?`).get(name) as Record<string, unknown> | null;
+  const job = db.prepare(`SELECT * FROM cron_jobs WHERE name = ?`).get(name) as Record<
+    string,
+    unknown
+  > | null;
   if (!job) return;
   db.prepare(`UPDATE cron_jobs SET enabled = 0 WHERE name = ?`).run(name);
   const task = activeTasks.get(job.id as string);
-  if (task) { task.stop(); activeTasks.delete(job.id as string); }
+  if (task) {
+    task.stop();
+    activeTasks.delete(job.id as string);
+  }
   log.info(`Disabled cron job: ${name}`);
 }
 
@@ -144,10 +204,12 @@ export function disableCronJob(name: string): void {
 
 export function emitEvent(key: string, payload?: Record<string, unknown>): void {
   const db = getDb();
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO chain_events (id, event_key, payload, emitted_at, consumed)
     VALUES (?, ?, ?, ?, 0)
-  `).run(ulid(), key, payload ? JSON.stringify(payload) : null, Date.now());
+  `,
+  ).run(ulid(), key, payload ? JSON.stringify(payload) : null, Date.now());
 
   log.debug(`Event emitted: ${key}`, payload);
 }
@@ -158,9 +220,13 @@ export function checkConditions(keys: string[]): boolean {
   const db = getDb();
 
   for (const key of keys) {
-    const event = db.prepare(`
+    const event = db
+      .prepare(
+        `
       SELECT id FROM chain_events WHERE event_key = ? AND consumed = 0 LIMIT 1
-    `).get(key);
+    `,
+      )
+      .get(key);
     if (!event) return false;
   }
   return true;
@@ -170,7 +236,9 @@ export function checkConditions(keys: string[]): boolean {
 export function consumeEvents(keys: string[]): void {
   const db = getDb();
   for (const key of keys) {
-    db.prepare(`UPDATE chain_events SET consumed = 1 WHERE event_key = ? AND consumed = 0`).run(key);
+    db.prepare(`UPDATE chain_events SET consumed = 1 WHERE event_key = ? AND consumed = 0`).run(
+      key,
+    );
   }
 }
 
@@ -207,14 +275,16 @@ export async function checkConditionalTriggers(): Promise<void> {
   const now = Date.now();
 
   // Remove expired
-  const expired = conditionalTriggers.filter(t => t.expiresAt < now);
+  const expired = conditionalTriggers.filter((t) => t.expiresAt < now);
   for (const t of expired) {
     log.warn(`Conditional trigger ${t.id} expired`);
     conditionalTriggers.splice(conditionalTriggers.indexOf(t), 1);
   }
 
   // Check ready
-  const ready = conditionalTriggers.filter(t => t.expiresAt >= now && checkConditions(t.conditions));
+  const ready = conditionalTriggers.filter(
+    (t) => t.expiresAt >= now && checkConditions(t.conditions),
+  );
 
   for (const trigger of ready) {
     log.info(`Firing conditional trigger ${trigger.id}`, { conditions: trigger.conditions });
@@ -237,20 +307,30 @@ export function registerBuiltinJobs(
   sendDailyBriefing: () => Promise<void>,
   refreshContext?: () => Promise<void>,
 ): void {
-  registerHandler('memory_purge',    async () => { purgeExpiredMemory(); });
-  registerHandler('approval_expiry', async () => { expireApprovals(); });
-  registerHandler('daily_briefing',  async () => { await sendDailyBriefing(); });
-  registerHandler('check_triggers',  async () => { await checkConditionalTriggers(); });
+  registerHandler('memory_purge', async () => {
+    purgeExpiredMemory();
+  });
+  registerHandler('approval_expiry', async () => {
+    expireApprovals();
+  });
+  registerHandler('daily_briefing', async () => {
+    await sendDailyBriefing();
+  });
+  registerHandler('check_triggers', async () => {
+    await checkConditionalTriggers();
+  });
   if (refreshContext) {
-    registerHandler('context_refresh', async () => { await refreshContext(); });
+    registerHandler('context_refresh', async () => {
+      await refreshContext();
+    });
   }
 
-  upsertCronJob('memory_purge',    '0 3 * * *',  'memory_purge');       // 03:00 daily
-  upsertCronJob('approval_expiry', '*/5 * * * *', 'approval_expiry');    // every 5min
-  upsertCronJob('daily_briefing',  '0 8 * * 1-5', 'daily_briefing');     // 08:00 weekdays
-  upsertCronJob('check_triggers',  '* * * * *',   'check_triggers');     // every minute
+  upsertCronJob('memory_purge', '0 3 * * *', 'memory_purge'); // 03:00 daily
+  upsertCronJob('approval_expiry', '*/5 * * * *', 'approval_expiry'); // every 5min
+  upsertCronJob('daily_briefing', '0 8 * * 1-5', 'daily_briefing'); // 08:00 weekdays
+  upsertCronJob('check_triggers', '* * * * *', 'check_triggers'); // every minute
   if (refreshContext) {
-    upsertCronJob('context_refresh', '0 4 * * *', 'context_refresh');    // 04:00 daily
+    upsertCronJob('context_refresh', '0 4 * * *', 'context_refresh'); // 04:00 daily
   }
 }
 
@@ -262,7 +342,7 @@ function rowToJob(row: Record<string, unknown>): CronJob {
     name: row.name as string,
     schedule: row.schedule as string,
     handler: row.handler as string,
-    config: JSON.parse(row.config as string ?? '{}') as Record<string, unknown>,
+    config: JSON.parse((row.config as string) ?? '{}') as Record<string, unknown>,
     enabled: Boolean(row.enabled),
     lastRun: row.last_run as number | undefined,
     nextRun: row.next_run as number | undefined,

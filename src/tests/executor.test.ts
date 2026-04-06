@@ -85,10 +85,12 @@ function insertProposal(opts: {
   executionCount?: number;
 }): void {
   const db = getDb();
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO proposals (id, context_summary, plan, actions, status, created_at, expires_at, execution_count)
     VALUES (?, ?, ?, ?, 'approved', ?, ?, ?)
-  `).run(
+  `,
+  ).run(
     opts.id,
     'Test context summary',
     'Test plan',
@@ -117,13 +119,18 @@ afterAll(() => {
 describe('security gate', () => {
   it('missing token → execution blocked, returns error', async () => {
     const id = uid();
-    insertProposal({ id, actions: [{ tool: 'write_file', input: { path: 'test.txt', content: 'hi' } }] });
+    insertProposal({
+      id,
+      actions: [{ tool: 'write_file', input: { path: 'test.txt', content: 'hi' } }],
+    });
     const notifications: string[] = [];
 
     const result = await executeApprovedProposal(
       id,
       llmConfig,
-      async (t) => { notifications.push(t); },
+      async (t) => {
+        notifications.push(t);
+      },
       '', // no token
     );
 
@@ -134,28 +141,32 @@ describe('security gate', () => {
 
   it('wrong token → execution blocked', async () => {
     const id = uid();
-    insertProposal({ id, actions: [{ tool: 'write_file', input: { path: 'test.txt', content: 'hi' } }] });
+    insertProposal({
+      id,
+      actions: [{ tool: 'write_file', input: { path: 'test.txt', content: 'hi' } }],
+    });
     generateExecutionToken(id); // generate real token but use wrong one
 
-    const result = await executeApprovedProposal(
-      id, llmConfig, async () => {}, 'a'.repeat(64),
-    );
+    const result = await executeApprovedProposal(id, llmConfig, async () => {}, 'a'.repeat(64));
 
     expect(result.success).toBe(false);
   });
 
   it('expired token → execution blocked', async () => {
     const id = uid();
-    insertProposal({ id, actions: [{ tool: 'write_file', input: { path: 'test.txt', content: 'hi' } }] });
+    insertProposal({
+      id,
+      actions: [{ tool: 'write_file', input: { path: 'test.txt', content: 'hi' } }],
+    });
     generateExecutionToken(id);
-    getDb().prepare('UPDATE execution_tokens SET expires_at = ? WHERE proposal_id = ?')
+    getDb()
+      .prepare('UPDATE execution_tokens SET expires_at = ? WHERE proposal_id = ?')
       .run(Date.now() - 1000, id);
-    const tokenRow = getDb().prepare('SELECT token FROM execution_tokens WHERE proposal_id = ?')
+    const tokenRow = getDb()
+      .prepare('SELECT token FROM execution_tokens WHERE proposal_id = ?')
       .get(id) as { token: string };
 
-    const result = await executeApprovedProposal(
-      id, llmConfig, async () => {}, tokenRow.token,
-    );
+    const result = await executeApprovedProposal(id, llmConfig, async () => {}, tokenRow.token);
 
     expect(result.success).toBe(false);
   });
@@ -166,12 +177,14 @@ describe('security gate', () => {
 describe('idempotency', () => {
   it('execution_count > 0 → blocked as duplicate', async () => {
     const id = uid();
-    insertProposal({ id, actions: [{ tool: 'write_file', input: { path: 'dup.txt', content: 'hi' } }], executionCount: 1 });
+    insertProposal({
+      id,
+      actions: [{ tool: 'write_file', input: { path: 'dup.txt', content: 'hi' } }],
+      executionCount: 1,
+    });
     const token = generateExecutionToken(id);
 
-    const result = await executeApprovedProposal(
-      id, llmConfig, async () => {}, token,
-    );
+    const result = await executeApprovedProposal(id, llmConfig, async () => {}, token);
 
     expect(result.success).toBe(false);
     expect(result.errors[0]).toContain('Already executed');
@@ -185,7 +198,9 @@ describe('write_file action', () => {
     const id = uid();
     insertProposal({
       id,
-      actions: [{ tool: 'write_file', input: { path: 'output/hello.txt', content: 'hello world' } }],
+      actions: [
+        { tool: 'write_file', input: { path: 'output/hello.txt', content: 'hello world' } },
+      ],
     });
     const token = generateExecutionToken(id);
 
@@ -195,7 +210,9 @@ describe('write_file action', () => {
     expect(result.errors).toHaveLength(0);
     expect(existsSync(join(tmpDir, 'output/hello.txt'))).toBe(true);
     expect(readFileSync(join(tmpDir, 'output/hello.txt'), 'utf8')).toBe('hello world');
-    const row = getDb().prepare('SELECT status FROM proposals WHERE id = ?').get(id) as { status: string };
+    const row = getDb().prepare('SELECT status FROM proposals WHERE id = ?').get(id) as {
+      status: string;
+    };
     expect(row.status).toBe('executed');
   });
 
@@ -211,8 +228,10 @@ describe('write_file action', () => {
 
     expect(result.success).toBe(false);
     expect(result.errors[0]).toContain('traversal');
-    const row = getDb().prepare('SELECT status FROM proposals WHERE id = ?').get(id) as { status: string };
-    expect(row.status).toBe('partial');
+    const row = getDb().prepare('SELECT status FROM proposals WHERE id = ?').get(id) as {
+      status: string;
+    };
+    expect(row.status).toBe('failed'); // all actions failed → 'failed' (not 'partial')
   });
 
   it('absolute path → blocked', async () => {
@@ -247,7 +266,9 @@ describe('action outcomes', () => {
     const result = await executeApprovedProposal(id, llmConfig, async () => {}, token);
 
     expect(result.success).toBe(true);
-    const row = getDb().prepare('SELECT status FROM proposals WHERE id = ?').get(id) as { status: string };
+    const row = getDb().prepare('SELECT status FROM proposals WHERE id = ?').get(id) as {
+      status: string;
+    };
     expect(row.status).toBe('executed');
   });
 
@@ -266,8 +287,10 @@ describe('action outcomes', () => {
 
     expect(result.success).toBe(false);
     expect(result.results.length).toBeGreaterThan(0); // at least one succeeded
-    expect(result.errors.length).toBeGreaterThan(0);  // at least one failed
-    const row = getDb().prepare('SELECT status FROM proposals WHERE id = ?').get(id) as { status: string };
+    expect(result.errors.length).toBeGreaterThan(0); // at least one failed
+    const row = getDb().prepare('SELECT status FROM proposals WHERE id = ?').get(id) as {
+      status: string;
+    };
     expect(row.status).toBe('partial');
   });
 
@@ -280,7 +303,14 @@ describe('action outcomes', () => {
     const token = generateExecutionToken(id);
     const notifications: string[] = [];
 
-    await executeApprovedProposal(id, llmConfig, async (t) => { notifications.push(t); }, token);
+    await executeApprovedProposal(
+      id,
+      llmConfig,
+      async (t) => {
+        notifications.push(t);
+      },
+      token,
+    );
 
     expect(notifications.length).toBeGreaterThan(0);
     expect(notifications[0]).toContain('executed');
@@ -296,7 +326,9 @@ describe('action outcomes', () => {
 
     await executeApprovedProposal(id, llmConfig, async () => {}, token);
 
-    const row = getDb().prepare('SELECT execution_count FROM proposals WHERE id = ?').get(id) as { execution_count: number };
+    const row = getDb().prepare('SELECT execution_count FROM proposals WHERE id = ?').get(id) as {
+      execution_count: number;
+    };
     expect(row.execution_count).toBe(1);
   });
 });

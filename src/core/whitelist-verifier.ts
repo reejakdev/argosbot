@@ -26,20 +26,20 @@ const log = createLogger('whitelist-verifier');
 export type WhitelistDecision = 'APPROVE' | 'MANUAL_REVIEW' | 'REJECT';
 
 export interface WhitelistVerification {
-  decision:  WhitelistDecision;
-  protocol:  string;
-  chain:     string;
-  address:   string;
-  reason:    string;
-  summary:   string;
-  why:       string;
-  score:     number;          // 0.00–1.00
+  decision: WhitelistDecision;
+  protocol: string;
+  chain: string;
+  address: string;
+  reason: string;
+  summary: string;
+  why: string;
+  score: number; // 0.00–1.00
   sources: {
-    docs?:        string;
-    website?:     string;
-    matchPages?:  string[];
+    docs?: string;
+    website?: string;
+    matchPages?: string[];
   };
-  rawOutput: string;          // full LLM response for debugging
+  rawOutput: string; // full LLM response for debugging
   timedOut?: boolean;
 }
 
@@ -133,7 +133,8 @@ const VERIFIER_TOOLS = [
   },
   {
     name: 'fetch_url',
-    description: 'Fetch and read the text content of a URL (HTML is stripped). Use this to browse official documentation pages.',
+    description:
+      'Fetch and read the text content of a URL (HTML is stripped). Use this to browse official documentation pages.',
     input_schema: {
       type: 'object',
       properties: {
@@ -144,12 +145,16 @@ const VERIFIER_TOOLS = [
   },
   {
     name: 'explorer_api',
-    description: 'Query a block explorer JSON API to get verified contract metadata (name, source, creator). Works on all Etherscan-compatible explorers. Pass the address and the explorer base URL (e.g. "https://api.etherscan.io", "https://api.basescan.org", "https://api.hyperevmscan.io").',
+    description:
+      'Query a block explorer JSON API to get verified contract metadata (name, source, creator). Works on all Etherscan-compatible explorers. Pass the address and the explorer base URL (e.g. "https://api.etherscan.io", "https://api.basescan.org", "https://api.hyperevmscan.io").',
     input_schema: {
       type: 'object',
       properties: {
-        address:      { type: 'string', description: 'Contract address (0x...)' },
-        explorer_api: { type: 'string', description: 'Base API URL, e.g. https://api.etherscan.io' },
+        address: { type: 'string', description: 'Contract address (0x...)' },
+        explorer_api: {
+          type: 'string',
+          description: 'Base API URL, e.g. https://api.etherscan.io',
+        },
       },
       required: ['address', 'explorer_api'],
     },
@@ -162,22 +167,29 @@ function parseVerifierOutput(raw: string): Omit<WhitelistVerification, 'rawOutpu
   const text = raw.trim();
 
   // Decision line: ✅/⚠️/❌ DECISION — Protocol — Chain
-  const decisionMatch = text.match(/^([✅⚠️❌])\s*(APPROVE|MANUAL_REVIEW|MANUAL REVIEW|REJECT)\s*[—–-]\s*([^\n—–-]+?)\s*[—–-]\s*([^\n]+)/im);
-  const rawDec   = (decisionMatch?.[2] ?? 'MANUAL_REVIEW').toUpperCase().replace(' ', '_');
-  const decision = (['APPROVE', 'MANUAL_REVIEW', 'REJECT'].includes(rawDec) ? rawDec : 'MANUAL_REVIEW') as WhitelistDecision;
+  const decisionMatch = text.match(
+    /^([✅⚠️❌])\s*(APPROVE|MANUAL_REVIEW|MANUAL REVIEW|REJECT)\s*[—–-]\s*([^\n—–-]+?)\s*[—–-]\s*([^\n]+)/im,
+  );
+  const rawDec = (decisionMatch?.[2] ?? 'MANUAL_REVIEW').toUpperCase().replace(' ', '_');
+  const decision = (
+    ['APPROVE', 'MANUAL_REVIEW', 'REJECT'].includes(rawDec) ? rawDec : 'MANUAL_REVIEW'
+  ) as WhitelistDecision;
   const protocol = decisionMatch?.[3]?.trim() ?? 'unknown';
-  const chain    = decisionMatch?.[4]?.trim() ?? 'unknown';
+  const chain = decisionMatch?.[4]?.trim() ?? 'unknown';
 
   // Extract fields
-  const summaryMatch   = text.match(/Summary:\s*(.+)/i);
-  const scoreMatch     = text.match(/Score:\s*([\d.]+)/i);
-  const docsMatch      = text.match(/Docs:\s*(https?:\/\/\S+)/i);
-  const websiteMatch   = text.match(/Website:\s*(https?:\/\/\S+)/i);
+  const summaryMatch = text.match(/Summary:\s*(.+)/i);
+  const scoreMatch = text.match(/Score:\s*([\d.]+)/i);
+  const docsMatch = text.match(/Docs:\s*(https?:\/\/\S+)/i);
+  const websiteMatch = text.match(/Website:\s*(https?:\/\/\S+)/i);
   const matchPageMatch = text.match(/Match pages?:\s*(.+)/i);
-  const whyMatch       = text.match(/Why[^\n]*:\n([\s\S]*?)(?=Score:|Sources:|$)/i);
+  const whyMatch = text.match(/Why[^\n]*:\n([\s\S]*?)(?=Score:|Sources:|$)/i);
 
   const matchPages = matchPageMatch?.[1]
-    ? matchPageMatch[1].split(',').map(u => u.trim()).filter(u => u.startsWith('http'))
+    ? matchPageMatch[1]
+        .split(',')
+        .map((u) => u.trim())
+        .filter((u) => u.startsWith('http'))
     : [];
 
   // Address extraction — from the raw text (agent should echo it back in summary or Why)
@@ -187,14 +199,14 @@ function parseVerifierOutput(raw: string): Omit<WhitelistVerification, 'rawOutpu
     decision,
     protocol,
     chain,
-    address:  addrMatch?.[1] ?? 'missing address',
-    reason:   'see summary',
-    summary:  summaryMatch?.[1]?.trim() ?? text.slice(0, 120),
-    why:      whyMatch?.[1]?.trim() ?? '',
-    score:    Math.min(1, Math.max(0, parseFloat(scoreMatch?.[1] ?? '0.30'))),
-    sources:  {
-      docs:       docsMatch?.[1],
-      website:    websiteMatch?.[1],
+    address: addrMatch?.[1] ?? 'missing address',
+    reason: 'see summary',
+    summary: summaryMatch?.[1]?.trim() ?? text.slice(0, 120),
+    why: whyMatch?.[1]?.trim() ?? '',
+    score: Math.min(1, Math.max(0, parseFloat(scoreMatch?.[1] ?? '0.30'))),
+    sources: {
+      docs: docsMatch?.[1],
+      website: websiteMatch?.[1],
       matchPages: matchPages.length > 0 ? matchPages : undefined,
     },
   };
@@ -212,9 +224,9 @@ export async function verifyWhitelistDocs(
   log.info(`Whitelist verification starting for message: "${partnerMessage.slice(0, 80)}"`);
 
   try {
-    const { runToolLoop }              = await import('../llm/tool-loop.js');
-    const { callAnthropicBearerRaw }   = await import('../llm/index.js');
-    const { executeBuiltinTool }       = await import('../llm/builtin-tools.js');
+    const { runToolLoop } = await import('../llm/tool-loop.js');
+    const { callAnthropicBearerRaw } = await import('../llm/index.js');
+    const { executeBuiltinTool } = await import('../llm/builtin-tools.js');
 
     // Restrict executor to web_search + fetch_url + explorer_api — no side effects
     const safeExecutor = async (name: string, input: Record<string, unknown>) => {
@@ -222,40 +234,78 @@ export async function verifyWhitelistDocs(
         return executeBuiltinTool(name, input);
       }
       if (name === 'explorer_api') {
-        const address     = input.address as string;
+        const address = input.address as string;
         const explorerApi = (input.explorer_api as string).replace(/\/$/, '');
         try {
           // Etherscan-compatible: /api?module=contract&action=getsourcecode
           const url = `${explorerApi}/api?module=contract&action=getsourcecode&address=${address}`;
-          const res = await fetch(url, { headers: { 'User-Agent': 'argos-verifier/1.0' }, signal: AbortSignal.timeout(10_000) });
-          const json = await res.json() as { status: string; result: Array<{ ContractName?: string; CompilerVersion?: string; ABI?: string }> };
+          const res = await fetch(url, {
+            headers: { 'User-Agent': 'argos-verifier/1.0' },
+            signal: AbortSignal.timeout(10_000),
+          });
+          const json = (await res.json()) as {
+            status: string;
+            result: Array<{ ContractName?: string; CompilerVersion?: string; ABI?: string }>;
+          };
           if (json.status === '1' && json.result?.[0]) {
-            const r = json.result[0] as { ContractName?: string; CompilerVersion?: string; ABI?: string };
+            const r = json.result[0] as {
+              ContractName?: string;
+              CompilerVersion?: string;
+              ABI?: string;
+            };
             // Also fetch deployer via getcontractcreation
             let deployer = 'unknown';
             try {
-              const creatorRes = await fetch(`${explorerApi}/api?module=contract&action=getcontractcreation&contractaddresses=${address}`, { signal: AbortSignal.timeout(5_000) });
-              const creatorJson = await creatorRes.json() as { status: string; result: Array<{ contractCreator?: string }> };
-              if (creatorJson.status === '1') deployer = creatorJson.result[0]?.contractCreator ?? 'unknown';
-            } catch { /* non-fatal */ }
-            return { output: `ContractName: ${r.ContractName ?? 'unknown'}\nCompiler: ${r.CompilerVersion ?? 'unknown'}\nVerified: yes\nDeployer: ${deployer}` };
+              const creatorRes = await fetch(
+                `${explorerApi}/api?module=contract&action=getcontractcreation&contractaddresses=${address}`,
+                { signal: AbortSignal.timeout(5_000) },
+              );
+              const creatorJson = (await creatorRes.json()) as {
+                status: string;
+                result: Array<{ contractCreator?: string }>;
+              };
+              if (creatorJson.status === '1')
+                deployer = creatorJson.result[0]?.contractCreator ?? 'unknown';
+            } catch {
+              /* non-fatal */
+            }
+            return {
+              output: `ContractName: ${r.ContractName ?? 'unknown'}\nCompiler: ${r.CompilerVersion ?? 'unknown'}\nVerified: yes\nDeployer: ${deployer}`,
+            };
           }
           // Blockscout format fallback: /api/v2/smart-contracts/{address}
           const baseUrl = explorerApi.replace(/\/api$/, '');
           const bsUrl = `${baseUrl}/api/v2/smart-contracts/${address}`;
-          const bsRes = await fetch(bsUrl, { headers: { 'User-Agent': 'argos-verifier/1.0' }, signal: AbortSignal.timeout(10_000) });
+          const bsRes = await fetch(bsUrl, {
+            headers: { 'User-Agent': 'argos-verifier/1.0' },
+            signal: AbortSignal.timeout(10_000),
+          });
           if (bsRes.ok) {
-            const bsJson = await bsRes.json() as { name?: string; compiler_version?: string; is_verified?: boolean; deployed_bytecode?: unknown };
+            const bsJson = (await bsRes.json()) as {
+              name?: string;
+              compiler_version?: string;
+              is_verified?: boolean;
+              deployed_bytecode?: unknown;
+            };
             // Blockscout: get deployer via /api/v2/addresses/{address}
             let deployer = 'unknown';
             try {
-              const addrRes = await fetch(`${baseUrl}/api/v2/addresses/${address}`, { signal: AbortSignal.timeout(5_000) });
+              const addrRes = await fetch(`${baseUrl}/api/v2/addresses/${address}`, {
+                signal: AbortSignal.timeout(5_000),
+              });
               if (addrRes.ok) {
-                const addrJson = await addrRes.json() as { creator_address_hash?: string; creation_tx_hash?: string };
+                const addrJson = (await addrRes.json()) as {
+                  creator_address_hash?: string;
+                  creation_tx_hash?: string;
+                };
                 deployer = addrJson.creator_address_hash ?? 'unknown';
               }
-            } catch { /* non-fatal */ }
-            return { output: `ContractName: ${bsJson.name ?? 'unknown'}\nCompiler: ${bsJson.compiler_version ?? 'unknown'}\nVerified: ${bsJson.is_verified ?? false}\nDeployer: ${deployer}` };
+            } catch {
+              /* non-fatal */
+            }
+            return {
+              output: `ContractName: ${bsJson.name ?? 'unknown'}\nCompiler: ${bsJson.compiler_version ?? 'unknown'}\nVerified: ${bsJson.is_verified ?? false}\nDeployer: ${deployer}`,
+            };
           }
           return { output: `No verified contract found at ${explorerApi} for ${address}` };
         } catch (e) {
@@ -274,7 +324,7 @@ export async function verifyWhitelistDocs(
       SYSTEM_PROMPT,
       [
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user',   content: `Partner whitelist request:\n\n${partnerMessage}` },
+        { role: 'user', content: `Partner whitelist request:\n\n${partnerMessage}` },
       ],
       VERIFIER_TOOLS,
       safeExecutor,
@@ -288,25 +338,24 @@ export async function verifyWhitelistDocs(
     log.debug(`Verifier raw output:\n${raw}`);
 
     return { ...parseVerifierOutput(raw), rawOutput: raw };
-
   } catch (e) {
     const isTimeout = e instanceof Error && e.message === 'TIMEOUT';
     log.warn(`Whitelist verification ${isTimeout ? 'timed out' : 'failed'}: ${e}`);
 
     return {
-      decision:  'MANUAL_REVIEW',
-      protocol:  'unknown',
-      chain:     'unknown',
-      address:   'unknown',
-      reason:    'verification failed',
-      summary:   isTimeout
+      decision: 'MANUAL_REVIEW',
+      protocol: 'unknown',
+      chain: 'unknown',
+      address: 'unknown',
+      reason: 'verification failed',
+      summary: isTimeout
         ? 'Verification timed out — manual review required.'
         : `Verification error: ${(e as Error).message?.slice(0, 80)}`,
-      why:       '',
-      score:     0.10,
-      sources:   {},
+      why: '',
+      score: 0.1,
+      sources: {},
       rawOutput: '',
-      timedOut:  isTimeout,
+      timedOut: isTimeout,
     };
   }
 }
@@ -315,11 +364,11 @@ export async function verifyWhitelistDocs(
 
 export function formatVerificationNotif(v: WhitelistVerification): string {
   const icons: Record<WhitelistDecision, string> = {
-    APPROVE:       '✅',
+    APPROVE: '✅',
     MANUAL_REVIEW: '⚠️',
-    REJECT:        '❌',
+    REJECT: '❌',
   };
-  const icon     = icons[v.decision];
+  const icon = icons[v.decision];
   const clampedScore = Math.max(0, Math.min(1, v.score));
   const filled = Math.round(clampedScore * 10);
   const scoreBar = '█'.repeat(filled) + '░'.repeat(10 - filled);

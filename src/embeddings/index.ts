@@ -22,10 +22,7 @@ const log = createLogger('embeddings');
 /**
  * Embed a single text string. Returns a Float32Array of the embedding vector.
  */
-export async function embed(
-  text: string,
-  config: EmbeddingsConfig,
-): Promise<Float32Array> {
+export async function embed(text: string, config: EmbeddingsConfig): Promise<Float32Array> {
   const url = `${config.baseUrl.replace(/\/$/, '')}/v1/embeddings`;
 
   const res = await fetch(url, {
@@ -43,7 +40,7 @@ export async function embed(
     throw new Error(`Embedding API ${res.status}: ${body.slice(0, 200)}`);
   }
 
-  const data = await res.json() as {
+  const data = (await res.json()) as {
     data: Array<{ embedding: number[] }>;
   };
 
@@ -70,9 +67,11 @@ export async function embedBatch(
 // ─── Math ─────────────────────────────────────────────────────────────────────
 
 export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-  let dot = 0, normA = 0, normB = 0;
+  let dot = 0,
+    normA = 0,
+    normB = 0;
   for (let i = 0; i < a.length; i++) {
-    dot   += a[i] * b[i];
+    dot += a[i] * b[i];
     normA += a[i] * a[i];
     normB += b[i] * b[i];
   }

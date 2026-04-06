@@ -19,8 +19,14 @@ const log = createLogger('llm');
 let _bearerQueue: Promise<unknown> = Promise.resolve();
 
 function withBearerQueue<T>(fn: () => Promise<T>): Promise<T> {
-  const next = _bearerQueue.then(() => fn(), () => fn());
-  _bearerQueue = next.then(() => {}, () => {});
+  const next = _bearerQueue.then(
+    () => fn(),
+    () => fn(),
+  );
+  _bearerQueue = next.then(
+    () => {},
+    () => {},
+  );
   return next;
 }
 
@@ -46,6 +52,7 @@ export interface LLMConfig {
   baseUrl?: string;
   maxTokens?: number;
   temperature?: number;
+  maxIterations?: number;
   /** OAuth tokens for auto-refresh (bearer mode only) */
   oauthTokens?: OAuthTokens;
   /** Called when tokens are refreshed — persist to config */
@@ -95,52 +102,52 @@ export interface LLMResponse {
 
 export const MODELS = {
   // Anthropic
-  CLAUDE_OPUS:    'claude-opus-4-6',
-  CLAUDE_SONNET:  'claude-sonnet-4-6',
-  CLAUDE_HAIKU:   'claude-haiku-4-5-20251001',
+  CLAUDE_OPUS: 'claude-opus-4-6',
+  CLAUDE_SONNET: 'claude-sonnet-4-6',
+  CLAUDE_HAIKU: 'claude-haiku-4-5-20251001',
   // OpenAI
-  GPT4O:          'gpt-4o',
-  GPT4O_MINI:     'gpt-4o-mini',
-  O1:             'o1',
-  O3_MINI:        'o3-mini',
+  GPT4O: 'gpt-4o',
+  GPT4O_MINI: 'gpt-4o-mini',
+  O1: 'o1',
+  O3_MINI: 'o3-mini',
   // Common compatible
-  MISTRAL_LARGE:  'mistral-large-latest',
-  LLAMA3:         'llama3.2',
+  MISTRAL_LARGE: 'mistral-large-latest',
+  LLAMA3: 'llama3.2',
   // Alibaba Qwen
-  QWEN_PLUS:      'qwen-plus',
-  QWEN_TURBO:     'qwen-turbo',
-  QWEN_MAX:       'qwen-max',
+  QWEN_PLUS: 'qwen-plus',
+  QWEN_TURBO: 'qwen-turbo',
+  QWEN_MAX: 'qwen-max',
 } as const;
 
 // ─── Base URLs for well-known providers ──────────────────────────────────────
 
 const PROVIDER_BASE_URLS: Record<string, string> = {
-  gemini:     'https://generativelanguage.googleapis.com/v1beta/openai',
-  mistral:    'https://api.mistral.ai/v1',
-  groq:       'https://api.groq.com/openai/v1',
-  deepseek:   'https://api.deepseek.com/v1',
-  xai:        'https://api.x.ai/v1',
-  together:   'https://api.together.xyz/v1',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
+  mistral: 'https://api.mistral.ai/v1',
+  groq: 'https://api.groq.com/openai/v1',
+  deepseek: 'https://api.deepseek.com/v1',
+  xai: 'https://api.x.ai/v1',
+  together: 'https://api.together.xyz/v1',
   perplexity: 'https://api.perplexity.ai',
-  cohere:     'https://api.cohere.ai/compatibility/v1',
-  qwen:       'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-  ollama:     'http://localhost:11434/v1',
-  lmstudio:   'http://localhost:1234/v1',
+  cohere: 'https://api.cohere.ai/compatibility/v1',
+  qwen: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+  ollama: 'http://localhost:11434/v1',
+  lmstudio: 'http://localhost:1234/v1',
 };
 
 const PROVIDER_ENV_KEYS: Record<string, string> = {
-  anthropic:          'ANTHROPIC_API_KEY',
-  'anthropic-oauth':  'ANTHROPIC_AUTH_TOKEN',
-  openai:     'OPENAI_API_KEY',
-  gemini:     'GEMINI_API_KEY',
-  mistral:    'MISTRAL_API_KEY',
-  groq:       'GROQ_API_KEY',
-  deepseek:   'DEEPSEEK_API_KEY',
-  xai:        'XAI_API_KEY',
-  together:   'TOGETHER_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  'anthropic-oauth': 'ANTHROPIC_AUTH_TOKEN',
+  openai: 'OPENAI_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+  mistral: 'MISTRAL_API_KEY',
+  groq: 'GROQ_API_KEY',
+  deepseek: 'DEEPSEEK_API_KEY',
+  xai: 'XAI_API_KEY',
+  together: 'TOGETHER_API_KEY',
   perplexity: 'PERPLEXITY_API_KEY',
-  cohere:     'COHERE_API_KEY',
-  qwen:       'DASHSCOPE_API_KEY',
+  cohere: 'COHERE_API_KEY',
+  qwen: 'DASHSCOPE_API_KEY',
 };
 
 /**
@@ -152,19 +159,20 @@ export function llmConfigFromEnv(overrides: Partial<LLMConfig> = {}): LLMConfig 
   // Try reading from loaded config (set after loadConfig())
   try {
     // Dynamic import avoided — config injects into process.env at load time
-  } catch { /* fallback to env */ }
+  } catch {
+    /* fallback to env */
+  }
 
   const providerId = process.env.LLM_PROVIDER_ID ?? 'anthropic';
-  const provider   = (process.env.LLM_PROVIDER ?? 'anthropic') as LLMProvider;
-  const model      = process.env.LLM_MODEL ?? MODELS.CLAUDE_OPUS;
-  const baseUrl    = process.env.LLM_BASE_URL || PROVIDER_BASE_URLS[providerId];
-  const envKey     = PROVIDER_ENV_KEYS[providerId] ?? 'LLM_API_KEY';
-  const apiKey     = process.env[envKey] ?? process.env.LLM_API_KEY ?? '';
+  const provider = (process.env.LLM_PROVIDER ?? 'anthropic') as LLMProvider;
+  const model = process.env.LLM_MODEL ?? MODELS.CLAUDE_OPUS;
+  const baseUrl = process.env.LLM_BASE_URL || PROVIDER_BASE_URLS[providerId];
+  const envKey = PROVIDER_ENV_KEYS[providerId] ?? 'LLM_API_KEY';
+  const apiKey = process.env[envKey] ?? process.env.LLM_API_KEY ?? '';
   const authMode: AuthMode = (process.env.LLM_AUTH_MODE as AuthMode) ?? 'api-key';
 
   return { provider, model, apiKey, authMode, baseUrl, ...overrides };
 }
-
 
 /**
  * Build LLMConfig directly from a config object (used at startup after loadConfig).
@@ -174,11 +182,19 @@ type LlmCfgShape = {
   activeModel: string;
   fallbackProvider?: string;
   fallbackModel?: string;
-  providers: Record<string, {
-    api?: string; auth?: string; apiKey?: string; baseUrl?: string;
-    oauthAccess?: string; oauthRefresh?: string; oauthExpires?: number;
-    models?: string[];
-  }>;
+  providers: Record<
+    string,
+    {
+      api?: string;
+      auth?: string;
+      apiKey?: string;
+      baseUrl?: string;
+      oauthAccess?: string;
+      oauthRefresh?: string;
+      oauthExpires?: number;
+      models?: string[];
+    }
+  >;
 };
 
 function buildProviderConfig(
@@ -190,24 +206,35 @@ function buildProviderConfig(
   if (!providerDef) return null;
 
   const provider: LLMProvider = providerDef.api === 'anthropic' ? 'anthropic' : 'compatible';
-  const authMode: AuthMode    = (providerDef.auth as AuthMode) ?? 'api-key';
+  const authMode: AuthMode = (providerDef.auth as AuthMode) ?? 'api-key';
   const oauthTokens: OAuthTokens | undefined =
     providerDef.oauthAccess && providerDef.oauthRefresh && providerDef.oauthExpires
-      ? { access: providerDef.oauthAccess, refresh: providerDef.oauthRefresh, expires: providerDef.oauthExpires }
+      ? {
+          access: providerDef.oauthAccess,
+          refresh: providerDef.oauthRefresh,
+          expires: providerDef.oauthExpires,
+        }
       : undefined;
 
   return {
     provider,
     model,
-    apiKey:  providerDef.oauthAccess ?? providerDef.apiKey ?? '',
+    apiKey: providerDef.oauthAccess ?? providerDef.apiKey ?? '',
     authMode,
     baseUrl: providerDef.baseUrl,
     oauthTokens,
   };
 }
 
-export function llmConfigFromConfig(cfg: { llm: LlmCfgShape }, overrides: Partial<LLMConfig> = {}): LLMConfig {
-  const primary = buildProviderConfig(cfg.llm.activeProvider, cfg.llm.activeModel, cfg.llm.providers);
+export function llmConfigFromConfig(
+  cfg: { llm: LlmCfgShape },
+  overrides: Partial<LLMConfig> = {},
+): LLMConfig {
+  const primary = buildProviderConfig(
+    cfg.llm.activeProvider,
+    cfg.llm.activeModel,
+    cfg.llm.providers,
+  );
   if (!primary) {
     log.warn(`LLM provider "${cfg.llm.activeProvider}" not found in config, falling back to env`);
     return llmConfigFromEnv(overrides);
@@ -216,9 +243,10 @@ export function llmConfigFromConfig(cfg: { llm: LlmCfgShape }, overrides: Partia
   // Build fallback config if configured — auto-used by llmCall on 5xx/429/timeout
   let fallback: LLMConfig | undefined;
   if (cfg.llm.fallbackProvider) {
-    const fbModel = cfg.llm.fallbackModel
-      ?? cfg.llm.providers[cfg.llm.fallbackProvider]?.models?.[0 as never] as string | undefined
-      ?? primary.model;
+    const fbModel =
+      cfg.llm.fallbackModel ??
+      (cfg.llm.providers[cfg.llm.fallbackProvider]?.models?.[0 as never] as string | undefined) ??
+      primary.model;
     const fb = buildProviderConfig(cfg.llm.fallbackProvider, fbModel, cfg.llm.providers);
     if (fb) {
       fallback = fb;
@@ -233,10 +261,7 @@ export function llmConfigFromConfig(cfg: { llm: LlmCfgShape }, overrides: Partia
 
 // ─── Anthropic client ─────────────────────────────────────────────────────────
 
-async function callAnthropic(
-  config: LLMConfig,
-  messages: LLMMessage[],
-): Promise<LLMResponse> {
+async function callAnthropic(config: LLMConfig, messages: LLMMessage[]): Promise<LLMResponse> {
   // OAuth (Bearer) mode — use fetch directly since the SDK only supports x-api-key
   if (config.authMode === 'bearer') {
     return callAnthropicBearer(config, messages);
@@ -245,8 +270,8 @@ async function callAnthropic(
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: config.apiKey });
 
-  const systemMsg = messages.find(m => m.role === 'system');
-  const nonSystem = messages.filter(m => m.role !== 'system');
+  const systemMsg = messages.find((m) => m.role === 'system');
+  const nonSystem = messages.filter((m) => m.role !== 'system');
 
   const response = await client.messages.create({
     model: config.model,
@@ -254,22 +279,24 @@ async function callAnthropic(
     ...(config.temperature !== undefined && { temperature: config.temperature }),
     // system is always a plain string for the SDK path
     ...(systemMsg && typeof systemMsg.content === 'string' && { system: systemMsg.content }),
-    messages: nonSystem.map(m => ({
+    messages: nonSystem.map((m) => ({
       role: m.role as 'user' | 'assistant',
       // Pass array content directly (Anthropic SDK accepts image blocks natively)
       content: Array.isArray(m.content)
-        ? (m.content as LLMContentBlock[]).map(b =>
-            b.type === 'image'    ? { type: 'image' as const, source: b.source } :
-            b.type === 'document' ? { type: 'document' as const, source: b.source } :
-            { type: 'text' as const, text: b.text }
+        ? (m.content as LLMContentBlock[]).map((b) =>
+            b.type === 'image'
+              ? { type: 'image' as const, source: b.source }
+              : b.type === 'document'
+                ? { type: 'document' as const, source: b.source }
+                : { type: 'text' as const, text: b.text },
           )
         : m.content,
     })),
   });
 
   const content = response.content
-    .filter(b => b.type === 'text')
-    .map(b => (b as { type: 'text'; text: string }).text)
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
     .join('');
 
   return {
@@ -301,14 +328,18 @@ async function callAnthropicBearer(
   // Required: user-agent claude-cli/2.1.75 | system prompt MUST be exact string as first block
   // Extra system context goes in a SECOND system block (appending to first block = 400)
 
-  const systemMsg = messages.find(m => m.role === 'system');
-  const nonSystem = messages.filter(m => m.role !== 'system');
+  const systemMsg = messages.find((m) => m.role === 'system');
+  const nonSystem = messages.filter((m) => m.role !== 'system');
 
   // First system block MUST be exact. Extra goes in second block (no cache_control).
   // Max 4 cache_control blocks total — use only on first system + last message.
   // First system block MUST be this exact string — OAuth token is validated against Claude Code's format
   const systemBlocks: Array<{ type: string; text: string; cache_control?: { type: string } }> = [
-    { type: 'text', text: 'You are Claude Code, Anthropic\'s official CLI for Claude.', cache_control: { type: 'ephemeral' } },
+    {
+      type: 'text',
+      text: "You are Claude Code, Anthropic's official CLI for Claude.",
+      cache_control: { type: 'ephemeral' },
+    },
   ];
   if (systemMsg?.content) {
     // Argos system prompt goes in the SECOND block (no cache_control on this one)
@@ -317,41 +348,52 @@ async function callAnthropicBearer(
 
   // Only last message gets cache_control to stay under the 4-block limit
   // Filter out empty text messages (array messages with image blocks are never empty)
-  const nonEmpty = nonSystem.filter(m =>
-    Array.isArray(m.content) ? m.content.length > 0 : (m.content as string)?.trim()
+  const nonEmpty = nonSystem.filter((m) =>
+    Array.isArray(m.content) ? m.content.length > 0 : (m.content as string)?.trim(),
   );
   const msgBodies = nonEmpty.map((m, i) => {
     const isLast = i === nonEmpty.length - 1;
     // Array content (multimodal) — pass through; add cache_control to last text block only
     if (Array.isArray(m.content)) {
-      const blocks = (m.content as LLMContentBlock[]).map(b =>
-        b.type === 'image'    ? { type: 'image' as const, source: b.source } :
-        b.type === 'document' ? { type: 'document' as const, source: b.source } :
-        { type: 'text' as const, text: b.text }
+      const blocks = (m.content as LLMContentBlock[]).map((b) =>
+        b.type === 'image'
+          ? { type: 'image' as const, source: b.source }
+          : b.type === 'document'
+            ? { type: 'document' as const, source: b.source }
+            : { type: 'text' as const, text: b.text },
       );
       return { role: m.role, content: blocks };
     }
     return {
       role: m.role,
-      content: [{
-        type: 'text',
-        text: (m.content as string) || '.',
-        ...(isLast ? { cache_control: { type: 'ephemeral' } } : {}),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: (m.content as string) || '.',
+          ...(isLast ? { cache_control: { type: 'ephemeral' } } : {}),
+        },
+      ],
     };
   });
+
+  const isBearer2 = config.authMode === 'bearer' || config.oauthTokens !== undefined;
+  const authHeaders2: Record<string, string> = isBearer2
+    ? {
+        authorization: `Bearer ${accessToken}`,
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'user-agent': 'claude-cli/2.1.75',
+        'x-app': 'cli',
+      }
+    : { 'x-api-key': accessToken };
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'authorization': `Bearer ${accessToken}`,
+      ...authHeaders2,
       'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,mcp-client-2025-04-04',
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'user-agent': 'claude-cli/2.1.75',
-      'x-app': 'cli',
-      'accept': 'application/json',
+      'anthropic-beta': `claude-code-20250219,fine-grained-tool-streaming-2025-05-14,mcp-client-2025-04-04${isBearer2 ? ',oauth-2025-04-20' : ''}`,
+      accept: 'application/json',
     },
     body: JSON.stringify({
       model: config.model,
@@ -360,7 +402,6 @@ async function callAnthropicBearer(
       ...(config.temperature !== undefined && { temperature: config.temperature }),
       system: systemBlocks,
       messages: msgBodies,
-      // MCP servers are handled locally (not via API mcp_servers — Anthropic can't reach localhost)
     }),
   });
 
@@ -384,7 +425,11 @@ async function callAnthropicBearer(
         const msg = evt.message as Record<string, unknown>;
         model = (msg.model as string) ?? model;
         const usage = msg.usage as Record<string, number>;
-        if (usage) inputTokens = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
+        if (usage)
+          inputTokens =
+            (usage.input_tokens ?? 0) +
+            (usage.cache_read_input_tokens ?? 0) +
+            (usage.cache_creation_input_tokens ?? 0);
       } else if (evt.type === 'content_block_delta') {
         const delta = evt.delta as Record<string, string>;
         if (delta?.type === 'text_delta') content += delta.text ?? '';
@@ -392,7 +437,9 @@ async function callAnthropicBearer(
         const usage = (evt as Record<string, unknown>).usage as Record<string, number>;
         if (usage) outputTokens = usage.output_tokens ?? 0;
       }
-    } catch { /* skip malformed SSE lines */ }
+    } catch {
+      /* skip malformed SSE lines */
+    }
   }
 
   return {
@@ -413,7 +460,13 @@ export async function callAnthropicBearerRaw(
   body: Record<string, unknown>,
   onTextDelta?: (delta: string) => void,
 ): Promise<{
-  content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>;
+  content: Array<{
+    type: string;
+    text?: string;
+    id?: string;
+    name?: string;
+    input?: Record<string, unknown>;
+  }>;
   stop_reason: string;
   usage: { input_tokens: number; output_tokens: number };
   model: string;
@@ -427,56 +480,76 @@ export async function callAnthropicBearerRaw(
     });
   }
 
-  const systemBlocks: Array<Record<string, unknown>> = [
-    { type: 'text', text: 'You are Claude Code, Anthropic\'s official CLI for Claude.', cache_control: { type: 'ephemeral' } },
-  ];
+  // OAuth tokens require the Claude Code system prompt — API validates against it
+  const isOAuth = config.authMode === 'bearer' || config.oauthTokens !== undefined;
+  const systemBlocks: Array<Record<string, unknown>> = isOAuth
+    ? [
+        {
+          type: 'text',
+          text: "You are Claude Code, Anthropic's official CLI for Claude.",
+          cache_control: { type: 'ephemeral' },
+        },
+      ]
+    : [];
 
   // Merge system from body if present
   const bodySystem = body.system;
   if (typeof bodySystem === 'string') {
-    systemBlocks.push({ type: 'text', text: bodySystem });
+    systemBlocks.push({
+      type: 'text',
+      text: bodySystem,
+      ...(systemBlocks.length === 0 ? { cache_control: { type: 'ephemeral' } } : {}),
+    });
   }
   delete body.system;
 
   // Ensure messages use cache_control format on last msg only
   // Filter out empty text messages (causes 400)
-  const msgs = (body.messages as Array<Record<string, unknown>>)
-    .filter(m => {
-      if (typeof m.content === 'string' && !m.content.trim()) return false;
-      return true;
-    });
+  const msgs = (body.messages as Array<Record<string, unknown>>).filter((m) => {
+    if (typeof m.content === 'string' && !m.content.trim()) return false;
+    return true;
+  });
   const formattedMsgs = msgs.map((m, i) => {
     if (typeof m.content === 'string') {
       return {
         ...m,
-        content: [{
-          type: 'text',
-          text: m.content || '.',  // fallback to prevent empty block
-          ...(i === msgs.length - 1 ? { cache_control: { type: 'ephemeral' } } : {}),
-        }],
+        content: [
+          {
+            type: 'text',
+            text: m.content || '.', // fallback to prevent empty block
+            ...(i === msgs.length - 1 ? { cache_control: { type: 'ephemeral' } } : {}),
+          },
+        ],
       };
     }
     return m; // already array format (tool_result blocks etc.)
   });
 
+  // Support both OAuth Bearer tokens and regular API keys
+  const isBearer = config.authMode === 'bearer' || config.oauthTokens !== undefined;
+  const authHeaders: Record<string, string> = isBearer
+    ? {
+        authorization: `Bearer ${accessToken}`,
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'user-agent': 'claude-cli/2.1.75',
+        'x-app': 'cli',
+      }
+    : { 'x-api-key': accessToken };
+
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'authorization': `Bearer ${accessToken}`,
+      ...authHeaders,
       'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,mcp-client-2025-04-04',
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'user-agent': 'claude-cli/2.1.75',
-      'x-app': 'cli',
-      'accept': 'application/json',
+      'anthropic-beta': `claude-code-20250219,fine-grained-tool-streaming-2025-05-14,mcp-client-2025-04-04${isBearer ? ',oauth-2025-04-20' : ''}`,
+      accept: 'application/json',
     },
     body: JSON.stringify({
       ...body,
       system: systemBlocks,
       messages: formattedMsgs,
       stream: true,
-      // MCP servers are handled locally (not via API mcp_servers — Anthropic can't reach localhost)
     }),
   });
 
@@ -486,7 +559,13 @@ export async function callAnthropicBearerRaw(
   }
 
   // Parse SSE in streaming fashion — process events as they arrive
-  const content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }> = [];
+  const content: Array<{
+    type: string;
+    text?: string;
+    id?: string;
+    name?: string;
+    input?: Record<string, unknown>;
+  }> = [];
   let stopReason = 'end_turn';
   let model = config.model;
   let inputTokens = 0;
@@ -497,11 +576,20 @@ export async function callAnthropicBearerRaw(
       const msg = evt.message as Record<string, unknown>;
       model = (msg.model as string) ?? model;
       const usage = msg.usage as Record<string, number>;
-      if (usage) inputTokens = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
+      if (usage)
+        inputTokens =
+          (usage.input_tokens ?? 0) +
+          (usage.cache_read_input_tokens ?? 0) +
+          (usage.cache_creation_input_tokens ?? 0);
     } else if (evt.type === 'content_block_start') {
       const block = evt.content_block as Record<string, unknown>;
       if (block.type === 'tool_use') {
-        content.push({ type: 'tool_use', id: block.id as string, name: block.name as string, input: {} });
+        content.push({
+          type: 'tool_use',
+          id: block.id as string,
+          name: block.name as string,
+          input: {},
+        });
       } else {
         content.push({ type: 'text', text: '' });
       }
@@ -514,12 +602,17 @@ export async function callAnthropicBearerRaw(
         if (onTextDelta && text) onTextDelta(text);
       } else if (delta?.type === 'input_json_delta' && last?.type === 'tool_use') {
         const partial = (last as unknown as Record<string, string>)._partialJson ?? '';
-        (last as unknown as Record<string, string>)._partialJson = partial + (delta.partial_json as string);
+        (last as unknown as Record<string, string>)._partialJson =
+          partial + (delta.partial_json as string);
       }
     } else if (evt.type === 'content_block_stop') {
       const last = content[content.length - 1];
       if (last?.type === 'tool_use' && (last as unknown as Record<string, string>)._partialJson) {
-        try { last.input = JSON.parse((last as unknown as Record<string, string>)._partialJson); } catch { /* malformed */ }
+        try {
+          last.input = JSON.parse((last as unknown as Record<string, string>)._partialJson);
+        } catch {
+          /* malformed */
+        }
         delete (last as unknown as Record<string, string>)._partialJson;
       }
     } else if (evt.type === 'message_delta') {
@@ -535,26 +628,36 @@ export async function callAnthropicBearerRaw(
     delete (block as Record<string, unknown>)._partialJson;
   }
 
-  return { content, stop_reason: stopReason, usage: { input_tokens: inputTokens, output_tokens: outputTokens }, model };
+  return {
+    content,
+    stop_reason: stopReason,
+    usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+    model,
+  };
 }
 
 // ─── OpenAI / compatible client ───────────────────────────────────────────────
 
-async function callOpenAICompat(
-  config: LLMConfig,
-  messages: LLMMessage[],
-): Promise<LLMResponse> {
+async function callOpenAICompat(config: LLMConfig, messages: LLMMessage[]): Promise<LLMResponse> {
   const baseURL = config.baseUrl ?? 'https://api.openai.com/v1';
 
   // Convert Anthropic-format image blocks to OpenAI image_url format for non-system messages
-  const mappedMessages = messages.map(m => {
+  const mappedMessages = messages.map((m) => {
     if (Array.isArray(m.content)) {
       return {
         role: m.role,
-        content: (m.content as LLMContentBlock[]).map(b =>
-          b.type === 'image'    ? { type: 'image_url' as const, image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } } :
-          b.type === 'document' ? { type: 'text' as const, text: '[PDF document attached — not supported by this provider]' } :
-          { type: 'text' as const, text: b.text }
+        content: (m.content as LLMContentBlock[]).map((b) =>
+          b.type === 'image'
+            ? {
+                type: 'image_url' as const,
+                image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` },
+              }
+            : b.type === 'document'
+              ? {
+                  type: 'text' as const,
+                  text: '[PDF document attached — not supported by this provider]',
+                }
+              : { type: 'text' as const, text: b.text },
         ),
       };
     }
@@ -582,7 +685,7 @@ async function callOpenAICompat(
     throw new Error(`LLM API error ${response.status}: ${text}`);
   }
 
-  const data = await response.json() as {
+  const data = (await response.json()) as {
     choices: Array<{ message: { content: string } }>;
     model: string;
     usage: { prompt_tokens: number; completion_tokens: number };
@@ -612,17 +715,17 @@ async function callOpenAICompat(
 //   }
 
 export interface NormalizedToolCall {
-  id:    string;
-  name:  string;
+  id: string;
+  name: string;
   input: Record<string, unknown>;
 }
 
 export interface ToolStepResult {
-  text:         string;
-  toolCalls:    NormalizedToolCall[];
+  text: string;
+  toolCalls: NormalizedToolCall[];
   /** true = LLM stopped tool-calling, loop should end */
-  done:         boolean;
-  inputTokens:  number;
+  done: boolean;
+  inputTokens: number;
   outputTokens: number;
   /** Opaque — pass as-is to buildToolResultMessages */
   _rawAssistant: unknown;
@@ -630,10 +733,10 @@ export interface ToolStepResult {
 
 /** Call LLM with tool use. Tools always passed in Anthropic format — converted internally for OpenAI. */
 export async function callWithTools(
-  config:   LLMConfig,
-  system:   string,
+  config: LLMConfig,
+  system: string,
   messages: unknown[],
-  tools:    Array<{ name: string; description: string; input_schema: unknown }>,
+  tools: Array<{ name: string; description: string; input_schema: unknown }>,
 ): Promise<ToolStepResult> {
   if (config.provider === 'anthropic') {
     return _callAnthropicWithTools(config, system, messages, tools);
@@ -643,61 +746,87 @@ export async function callWithTools(
 
 /** Build messages to append after a tool step (provider-specific format). */
 export function buildToolResultMessages(
-  config:       LLMConfig,
+  config: LLMConfig,
   rawAssistant: unknown,
-  results:      Array<{ id: string; content: string }>,
+  results: Array<{ id: string; content: string }>,
 ): unknown[] {
   if (config.provider === 'anthropic') {
-    const blocks = results.map(r => ({ type: 'tool_result', tool_use_id: r.id, content: r.content }));
+    const blocks = results.map((r) => ({
+      type: 'tool_result',
+      tool_use_id: r.id,
+      content: r.content,
+    }));
     return [
       { role: 'assistant', content: rawAssistant },
-      { role: 'user',      content: blocks },
+      { role: 'user', content: blocks },
     ];
   }
   // OpenAI: assistant message (with tool_calls) + individual tool messages
-  const toolMessages = results.map(r => ({ role: 'tool', tool_call_id: r.id, content: r.content }));
+  const toolMessages = results.map((r) => ({
+    role: 'tool',
+    tool_call_id: r.id,
+    content: r.content,
+  }));
   return [rawAssistant as Record<string, unknown>, ...toolMessages];
 }
 
 // ─── Anthropic tool step ─────────────────────────────────────────────────────
 
 async function _callAnthropicWithTools(
-  config:   LLMConfig,
-  system:   string,
+  config: LLMConfig,
+  system: string,
   messages: unknown[],
-  tools:    Array<{ name: string; description: string; input_schema: unknown }>,
+  tools: Array<{ name: string; description: string; input_schema: unknown }>,
 ): Promise<ToolStepResult> {
   const body = {
-    model:      config.model,
+    model: config.model,
     max_tokens: config.maxTokens ?? 4096,
     // Extended thinking: temperature must be omitted when enabled (Anthropic requirement)
     ...(config.thinking?.enabled
       ? { thinking: { type: 'enabled', budget_tokens: config.thinking.budgetTokens ?? 1024 } }
-      : config.temperature !== undefined ? { temperature: config.temperature } : {}),
+      : config.temperature !== undefined
+        ? { temperature: config.temperature }
+        : {}),
     system,
     tools,
     messages,
   };
 
   const { default: AnthropicSDK } = await import('@anthropic-ai/sdk');
-  const raw = config.authMode === 'bearer'
-    ? await callAnthropicBearerRaw(config, body as Record<string, unknown>)
-    : await (new AnthropicSDK({ apiKey: config.apiKey })).messages.create(body as unknown as Parameters<InstanceType<typeof AnthropicSDK>['messages']['create']>[0]);
+  const raw =
+    config.authMode === 'bearer'
+      ? await callAnthropicBearerRaw(config, body as Record<string, unknown>)
+      : await new AnthropicSDK({ apiKey: config.apiKey }).messages.create(
+          body as unknown as Parameters<InstanceType<typeof AnthropicSDK>['messages']['create']>[0],
+        );
 
-  const content = (raw as { content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }> }).content;
+  const content = (
+    raw as {
+      content: Array<{
+        type: string;
+        text?: string;
+        id?: string;
+        name?: string;
+        input?: Record<string, unknown>;
+      }>;
+    }
+  ).content;
   const stopReason = (raw as { stop_reason: string }).stop_reason;
   const usage = (raw as { usage: { input_tokens: number; output_tokens: number } }).usage;
 
-  const text = content.filter(b => b.type === 'text').map(b => b.text ?? '').join('');
+  const text = content
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text ?? '')
+    .join('');
   const toolCalls: NormalizedToolCall[] = content
-    .filter(b => b.type === 'tool_use')
-    .map(b => ({ id: b.id!, name: b.name!, input: (b.input ?? {}) as Record<string, unknown> }));
+    .filter((b) => b.type === 'tool_use')
+    .map((b) => ({ id: b.id!, name: b.name!, input: (b.input ?? {}) as Record<string, unknown> }));
 
   return {
     text,
     toolCalls,
-    done:         stopReason !== 'tool_use',
-    inputTokens:  usage.input_tokens,
+    done: stopReason !== 'tool_use',
+    inputTokens: usage.input_tokens,
     outputTokens: usage.output_tokens,
     _rawAssistant: content,
   };
@@ -706,12 +835,12 @@ async function _callAnthropicWithTools(
 // ─── OpenAI-compatible tool step ─────────────────────────────────────────────
 
 async function _callOpenAIWithTools(
-  config:   LLMConfig,
-  system:   string,
+  config: LLMConfig,
+  system: string,
   messages: unknown[],
-  tools:    Array<{ name: string; description: string; input_schema: unknown }>,
+  tools: Array<{ name: string; description: string; input_schema: unknown }>,
 ): Promise<ToolStepResult> {
-  const openAITools = tools.map(t => ({
+  const openAITools = tools.map((t) => ({
     type: 'function',
     function: { name: t.name, description: t.description, parameters: t.input_schema },
   }));
@@ -721,18 +850,18 @@ async function _callOpenAIWithTools(
 
   const baseURL = config.baseUrl ?? 'https://api.openai.com/v1';
   const res = await fetch(`${baseURL}/chat/completions`, {
-    method:  'POST',
+    method: 'POST',
     headers: {
-      'Content-Type':  'application/json',
-      'Authorization': `Bearer ${config.apiKey}`,
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify({
-      model:       config.model,
-      max_tokens:  config.maxTokens ?? 4096,
+      model: config.model,
+      max_tokens: config.maxTokens ?? 4096,
       ...(config.temperature !== undefined && { temperature: config.temperature }),
-      tools:       openAITools,
+      tools: openAITools,
       tool_choice: 'auto',
-      messages:    allMessages,
+      messages: allMessages,
     }),
   });
 
@@ -741,7 +870,7 @@ async function _callOpenAIWithTools(
     throw new Error(`OpenAI tool call error ${res.status}: ${text.slice(0, 300)}`);
   }
 
-  const data = await res.json() as {
+  const data = (await res.json()) as {
     choices: Array<{
       message: {
         role: string;
@@ -757,28 +886,35 @@ async function _callOpenAIWithTools(
   const message = data.choices[0].message;
   const finishReason = data.choices[0].finish_reason;
 
-  const toolCalls: NormalizedToolCall[] = (message.tool_calls ?? []).map(tc => ({
-    id:    tc.id,
-    name:  tc.function.name,
-    input: (() => { try { return JSON.parse(tc.function.arguments) as Record<string, unknown>; } catch { return {}; } })(),
+  const toolCalls: NormalizedToolCall[] = (message.tool_calls ?? []).map((tc) => ({
+    id: tc.id,
+    name: tc.function.name,
+    input: (() => {
+      try {
+        return JSON.parse(tc.function.arguments) as Record<string, unknown>;
+      } catch {
+        return {};
+      }
+    })(),
   }));
 
   return {
-    text:         message.content ?? '',
+    text: message.content ?? '',
     toolCalls,
-    done:         finishReason !== 'tool_calls',
-    inputTokens:  data.usage.prompt_tokens,
+    done: finishReason !== 'tool_calls',
+    inputTokens: data.usage.prompt_tokens,
     outputTokens: data.usage.completion_tokens,
-    _rawAssistant: { role: 'assistant', content: message.content ?? null, tool_calls: message.tool_calls ?? [] },
+    _rawAssistant: {
+      role: 'assistant',
+      content: message.content ?? null,
+      tool_calls: message.tool_calls ?? [],
+    },
   };
 }
 
 // ─── Main call function ───────────────────────────────────────────────────────
 
-async function callProvider(
-  config: LLMConfig,
-  messages: LLMMessage[],
-): Promise<LLMResponse> {
+async function callProvider(config: LLMConfig, messages: LLMMessage[]): Promise<LLMResponse> {
   switch (config.provider) {
     case 'anthropic':
       return callAnthropic(config, messages);
@@ -790,17 +926,19 @@ async function callProvider(
   }
 }
 
-/** Whether the error is retryable (server error, timeout, network, rate limit) */
+/** Whether the error is retryable (server error, timeout, network, rate limit, auth refresh) */
 function isRetryableError(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : String(e);
-  return /\b(5\d\d|429|rate.limit|timeout|overloaded|ECONNREFUSED)/i.test(msg);
+  return /\b(5\d\d|429|401|403|rate.limit|timeout|overloaded|ECONNREFUSED|ECONNRESET|ETIMEDOUT|oauth|token.*expired|token.*refresh)/i.test(
+    msg,
+  );
 }
 
 /** Retry fn up to maxAttempts times with exponential backoff on retryable errors. */
 async function withRetry<T>(
-  fn:           () => Promise<T>,
-  maxAttempts:  number = 3,
-  baseDelayMs:  number = 1000,
+  fn: () => Promise<T>,
+  maxAttempts: number = 3,
+  baseDelayMs: number = 1000,
 ): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -809,9 +947,11 @@ async function withRetry<T>(
     } catch (e) {
       lastError = e;
       if (!isRetryableError(e) || attempt === maxAttempts - 1) throw e;
-      const delay = baseDelayMs * (2 ** attempt); // 1s → 2s → 4s
-      log.warn(`LLM call failed (attempt ${attempt + 1}/${maxAttempts}), retrying in ${delay}ms — ${(e as Error).message}`);
-      await new Promise(r => setTimeout(r, delay));
+      const delay = baseDelayMs * 2 ** attempt; // 1s → 2s → 4s
+      log.warn(
+        `LLM call failed (attempt ${attempt + 1}/${maxAttempts}), retrying in ${delay}ms — ${(e as Error).message}`,
+      );
+      await new Promise((r) => setTimeout(r, delay));
     }
   }
   throw lastError;
@@ -824,10 +964,13 @@ export async function llmCall(
 ): Promise<LLMResponse> {
   // Use embedded fallback if no explicit one passed
   const effectiveFallback = fallbackConfig ?? config.fallback;
-  log.debug(`Calling ${config.provider}/${config.model}${effectiveFallback ? ` (fallback: ${effectiveFallback.provider}/${effectiveFallback.model})` : ''}`, {
-    messages: messages.length,
-    maxTokens: config.maxTokens,
-  });
+  log.debug(
+    `Calling ${config.provider}/${config.model}${effectiveFallback ? ` (fallback: ${effectiveFallback.provider}/${effectiveFallback.model})` : ''}`,
+    {
+      messages: messages.length,
+      maxTokens: config.maxTokens,
+    },
+  );
 
   const start = Date.now();
 
@@ -841,7 +984,9 @@ export async function llmCall(
       return response;
     } catch (e) {
       if (effectiveFallback && isRetryableError(e)) {
-        log.warn(`Primary LLM failed (${(e as Error).message}), falling back to ${effectiveFallback.provider}/${effectiveFallback.model}`);
+        log.warn(
+          `Primary LLM failed (${(e as Error).message}), falling back to ${effectiveFallback.provider}/${effectiveFallback.model}`,
+        );
         const response = await withRetry(() => callProvider(effectiveFallback, messages));
         log.debug(`Fallback LLM response in ${Date.now() - start}ms`, {
           model: response.model,
@@ -862,7 +1007,7 @@ export async function llmCall(
  * Shared SSE reader — yields parsed JSON objects from a streaming fetch response.
  * Stops on `[DONE]` or when the stream ends.
  */
-async function* _readSseJson(response: Response): AsyncGenerator<Record<string, unknown>> {
+export async function* _readSseJson(response: Response): AsyncGenerator<Record<string, unknown>> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -879,7 +1024,9 @@ async function* _readSseJson(response: Response): AsyncGenerator<Record<string, 
       if (data === '[DONE]') return;
       try {
         yield JSON.parse(data) as Record<string, unknown>;
-      } catch { /* skip malformed lines */ }
+      } catch {
+        /* skip malformed lines */
+      }
     }
   }
 }
@@ -902,50 +1049,65 @@ async function* _streamAnthropicBearer(
     });
   }
 
-  const systemMsg = messages.find(m => m.role === 'system');
-  const nonSystem = messages.filter(m => m.role !== 'system');
+  const systemMsg = messages.find((m) => m.role === 'system');
+  const nonSystem = messages.filter((m) => m.role !== 'system');
 
   const systemBlocks: Array<{ type: string; text: string; cache_control?: { type: string } }> = [
-    { type: 'text', text: 'You are Claude Code, Anthropic\'s official CLI for Claude.', cache_control: { type: 'ephemeral' } },
+    {
+      type: 'text',
+      text: "You are Claude Code, Anthropic's official CLI for Claude.",
+      cache_control: { type: 'ephemeral' },
+    },
   ];
   if (systemMsg?.content) {
     systemBlocks.push({ type: 'text', text: systemMsg.content as string });
   }
 
-  const nonEmpty = nonSystem.filter(m =>
-    Array.isArray(m.content) ? m.content.length > 0 : (m.content as string)?.trim()
+  const nonEmpty = nonSystem.filter((m) =>
+    Array.isArray(m.content) ? m.content.length > 0 : (m.content as string)?.trim(),
   );
   const msgBodies = nonEmpty.map((m, i) => {
     const isLast = i === nonEmpty.length - 1;
     if (Array.isArray(m.content)) {
-      const blocks = (m.content as LLMContentBlock[]).map(b =>
-        b.type === 'image'    ? { type: 'image' as const, source: b.source } :
-        b.type === 'document' ? { type: 'document' as const, source: b.source } :
-        { type: 'text' as const, text: b.text }
+      const blocks = (m.content as LLMContentBlock[]).map((b) =>
+        b.type === 'image'
+          ? { type: 'image' as const, source: b.source }
+          : b.type === 'document'
+            ? { type: 'document' as const, source: b.source }
+            : { type: 'text' as const, text: b.text },
       );
       return { role: m.role, content: blocks };
     }
     return {
       role: m.role,
-      content: [{
-        type: 'text',
-        text: (m.content as string) || '.',
-        ...(isLast ? { cache_control: { type: 'ephemeral' } } : {}),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: (m.content as string) || '.',
+          ...(isLast ? { cache_control: { type: 'ephemeral' } } : {}),
+        },
+      ],
     };
   });
+
+  const isBearer3 = config.authMode === 'bearer' || config.oauthTokens !== undefined;
+  const authHeaders3: Record<string, string> = isBearer3
+    ? {
+        authorization: `Bearer ${accessToken}`,
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'user-agent': 'claude-cli/2.1.75',
+        'x-app': 'cli',
+      }
+    : { 'x-api-key': accessToken };
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'authorization': `Bearer ${accessToken}`,
+      ...authHeaders3,
       'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,mcp-client-2025-04-04',
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'user-agent': 'claude-cli/2.1.75',
-      'x-app': 'cli',
-      'accept': 'application/json',
+      'anthropic-beta': `claude-code-20250219,fine-grained-tool-streaming-2025-05-14,mcp-client-2025-04-04${isBearer3 ? ',oauth-2025-04-20' : ''}`,
+      accept: 'application/json',
     },
     body: JSON.stringify({
       model: config.model,
@@ -983,14 +1145,22 @@ async function* _streamOpenAICompat(
 ): AsyncGenerator<string> {
   const baseURL = config.baseUrl ?? 'https://api.openai.com/v1';
 
-  const mappedMessages = messages.map(m => {
+  const mappedMessages = messages.map((m) => {
     if (Array.isArray(m.content)) {
       return {
         role: m.role,
-        content: (m.content as LLMContentBlock[]).map(b =>
-          b.type === 'image'    ? { type: 'image_url' as const, image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } } :
-          b.type === 'document' ? { type: 'text' as const, text: '[PDF document attached — not supported by this provider]' } :
-          { type: 'text' as const, text: b.text }
+        content: (m.content as LLMContentBlock[]).map((b) =>
+          b.type === 'image'
+            ? {
+                type: 'image_url' as const,
+                image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` },
+              }
+            : b.type === 'document'
+              ? {
+                  type: 'text' as const,
+                  text: '[PDF document attached — not supported by this provider]',
+                }
+              : { type: 'text' as const, text: b.text },
         ),
       };
     }
@@ -1051,18 +1221,24 @@ export async function* streamLlmResponse(
 
 export function extractJson<T>(content: string): T {
   // Try direct parse first
-  try { return JSON.parse(content) as T; } catch {}
+  try {
+    return JSON.parse(content) as T;
+  } catch {}
 
   // Strip markdown code fence
   const match = content.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (match?.[1]) {
-    try { return JSON.parse(match[1].trim()) as T; } catch {}
+    try {
+      return JSON.parse(match[1].trim()) as T;
+    } catch {}
   }
 
   // Try to find first { or [ and extract from there
   const start = content.search(/[{[]/);
   if (start !== -1) {
-    try { return JSON.parse(content.slice(start)) as T; } catch {}
+    try {
+      return JSON.parse(content.slice(start)) as T;
+    } catch {}
   }
 
   throw new Error(`Could not extract JSON from LLM response: ${content.slice(0, 200)}`);

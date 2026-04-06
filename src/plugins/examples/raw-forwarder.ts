@@ -25,34 +25,34 @@ import { createLogger } from '../../logger.js';
 import type { RawMessage } from '../../types.js';
 
 const ulid = monotonicFactory();
-const log   = createLogger('plugin:raw-forwarder');
+const log = createLogger('plugin:raw-forwarder');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Minimal fields required to forward a message. All other RawMessage fields are optional. */
 export interface ForwardInput {
-  chatId:       string;
-  content:      string;
-  channel?:     string;   // defaults to plugin.channel
-  chatName?:    string;
-  chatType?:    RawMessage['chatType'];
-  senderId?:    string;
-  senderName?:  string;
+  chatId: string;
+  content: string;
+  channel?: string; // defaults to plugin.channel
+  chatName?: string;
+  chatType?: RawMessage['chatType'];
+  senderId?: string;
+  senderName?: string;
   partnerName?: string;
-  messageUrl?:  string;
-  links?:       string[];
-  isForward?:   boolean;
+  messageUrl?: string;
+  links?: string[];
+  isForward?: boolean;
   forwardFrom?: string;
-  mediaType?:   RawMessage['mediaType'];
-  replyToId?:   string;
-  threadId?:    string;
-  timestamp?:   number;  // original send time — defaults to now
-  meta?:        Record<string, unknown>;
+  mediaType?: RawMessage['mediaType'];
+  replyToId?: string;
+  threadId?: string;
+  timestamp?: number; // original send time — defaults to now
+  meta?: Record<string, unknown>;
 }
 
 export interface RawForwarderOptions {
   /** Human label for this forwarder — used in logs and sourceRef */
-  name:    string;
+  name: string;
   /** Channel identifier written into RawMessage.channel (e.g. 'webhook', 'myapp') */
   channel: string;
   /** Called with each fully-constructed RawMessage before it enters the pipeline */
@@ -62,14 +62,14 @@ export interface RawForwarderOptions {
 // ─── Plugin ───────────────────────────────────────────────────────────────────
 
 export class RawForwarderPlugin {
-  readonly name:    string;
+  readonly name: string;
   readonly channel: string;
 
   private readonly onMessage?: RawForwarderOptions['onMessage'];
 
   constructor(opts: RawForwarderOptions) {
-    this.name      = opts.name;
-    this.channel   = opts.channel;
+    this.name = opts.name;
+    this.channel = opts.channel;
     this.onMessage = opts.onMessage;
   }
 
@@ -88,55 +88,55 @@ export class RawForwarderPlugin {
     // Build a fully-typed RawMessage — all standard fields populated.
     // Channel adapters (telegram.ts, slack.ts, …) follow exactly this pattern.
     const msg: RawMessage = {
-      id:           ulid(),
+      id: ulid(),
 
       // ── Channel identity ────────────────────────────────────────────────
-      channel:      input.channel   ?? this.channel,
-      source:       (input.channel ?? this.channel) as RawMessage['source'],
+      channel: input.channel ?? this.channel,
+      source: (input.channel ?? this.channel) as RawMessage['source'],
 
       // ── Chat ────────────────────────────────────────────────────────────
-      chatId:       input.chatId,
-      chatName:     input.chatName,
-      chatType:     input.chatType,
+      chatId: input.chatId,
+      chatName: input.chatName,
+      chatType: input.chatType,
 
       // ── Sender ──────────────────────────────────────────────────────────
-      senderId:     input.senderId,
-      senderName:   input.senderName,
-      partnerName:  input.partnerName,
+      senderId: input.senderId,
+      senderName: input.senderName,
+      partnerName: input.partnerName,
 
       // ── Content ─────────────────────────────────────────────────────────
-      content:      input.content,
+      content: input.content,
       // anonText is NOT set here — it will be set by the privacy layer later
 
       // ── Links & media ────────────────────────────────────────────────────
-      messageUrl:   input.messageUrl,
-      links:        input.links     ?? [],
-      isForward:    input.isForward,
-      forwardFrom:  input.forwardFrom,
-      mediaType:    input.mediaType,
+      messageUrl: input.messageUrl,
+      links: input.links ?? [],
+      isForward: input.isForward,
+      forwardFrom: input.forwardFrom,
+      mediaType: input.mediaType,
 
       // ── Threading ────────────────────────────────────────────────────────
-      replyToId:    input.replyToId,
-      threadId:     input.threadId,
+      replyToId: input.replyToId,
+      threadId: input.threadId,
 
       // ── Timestamps ───────────────────────────────────────────────────────
-      receivedAt:   now,
-      timestamp:    input.timestamp ?? now,
+      receivedAt: now,
+      timestamp: input.timestamp ?? now,
 
       // ── Channel-specific extras ──────────────────────────────────────────
-      meta:         input.meta,
+      meta: input.meta,
     };
 
     log.debug(`[${this.name}] forwarding message`, {
-      channel:     msg.channel,
-      chatId:      msg.chatId,
-      chatName:    msg.chatName,
-      chatType:    msg.chatType,
-      senderName:  msg.senderName,
+      channel: msg.channel,
+      chatId: msg.chatId,
+      chatName: msg.chatName,
+      chatType: msg.chatType,
+      senderName: msg.senderName,
       partnerName: msg.partnerName,
-      messageUrl:  msg.messageUrl,
-      timestamp:   msg.timestamp,
-      contentLen:  msg.content.length,
+      messageUrl: msg.messageUrl,
+      timestamp: msg.timestamp,
+      contentLen: msg.content.length,
     });
 
     if (this.onMessage) {
@@ -185,25 +185,25 @@ export class RawForwarderPlugin {
 export function buildRawMessage(input: ForwardInput & { channel: string }): RawMessage {
   const now = Date.now();
   return {
-    id:          ulid(),
-    channel:     input.channel,
-    source:      input.channel as RawMessage['source'],
-    chatId:      input.chatId,
-    chatName:    input.chatName,
-    chatType:    input.chatType,
-    senderId:    input.senderId,
-    senderName:  input.senderName,
+    id: ulid(),
+    channel: input.channel,
+    source: input.channel as RawMessage['source'],
+    chatId: input.chatId,
+    chatName: input.chatName,
+    chatType: input.chatType,
+    senderId: input.senderId,
+    senderName: input.senderName,
     partnerName: input.partnerName,
-    content:     input.content,
-    messageUrl:  input.messageUrl,
-    links:       input.links     ?? [],
-    isForward:   input.isForward,
+    content: input.content,
+    messageUrl: input.messageUrl,
+    links: input.links ?? [],
+    isForward: input.isForward,
     forwardFrom: input.forwardFrom,
-    mediaType:   input.mediaType,
-    replyToId:   input.replyToId,
-    threadId:    input.threadId,
-    receivedAt:  now,
-    timestamp:   input.timestamp ?? now,
-    meta:        input.meta,
+    mediaType: input.mediaType,
+    replyToId: input.replyToId,
+    threadId: input.threadId,
+    receivedAt: now,
+    timestamp: input.timestamp ?? now,
+    meta: input.meta,
   };
 }

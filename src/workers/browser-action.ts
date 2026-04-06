@@ -33,13 +33,13 @@ const log = createLogger('browser-action');
 // ─── Action types ─────────────────────────────────────────────────────────────
 
 export interface BrowserStep {
-  action:   'navigate' | 'fill' | 'click' | 'screenshot' | 'wait' | 'extract' | 'submit';
+  action: 'navigate' | 'fill' | 'click' | 'screenshot' | 'wait' | 'extract' | 'submit';
   selector?: string;
   /** Static value to fill — use credential_field instead for secrets */
-  value?:    string;
+  value?: string;
   /** Which field from the resolved credential to use: username | password | token | cardNumber | cardExpiry | cardCvv | value */
   credential_field?: keyof import('./credentials.js').ResolvedCredential;
-  url?:      string;
+  url?: string;
   /** ms or CSS selector to wait for */
   wait_for?: string | number;
   /** Screenshot filename (saved to ~/.argos/context/) */
@@ -52,9 +52,9 @@ export class BrowserActionWorker {
   constructor(private config: Config) {}
 
   async execute(input: Record<string, unknown>): Promise<WorkerResult> {
-    const steps        = (input.steps as BrowserStep[]) ?? [];
+    const steps = (input.steps as BrowserStep[]) ?? [];
     const credentialRef = input.credential_ref as string | undefined;
-    const description  = String(input.description ?? 'browser automation');
+    const description = String(input.description ?? 'browser automation');
 
     if (!steps.length) {
       return { success: false, dryRun: false, output: 'browser_action: steps array is required' };
@@ -62,16 +62,18 @@ export class BrowserActionWorker {
 
     // ── Draft mode ─────────────────────────────────────────────────────────────
     if (this.config.readOnly) {
-      const preview = steps.map((s, i) => {
-        const cred = s.credential_field ? ` [${s.credential_field}: ***]` : '';
-        const val  = s.value ? ` "${s.value.slice(0, 30)}"` : '';
-        return `  ${i + 1}. ${s.action}${s.selector ? ` → ${s.selector}` : ''}${s.url ? ` → ${s.url}` : ''}${val}${cred}`;
-      }).join('\n');
+      const preview = steps
+        .map((s, i) => {
+          const cred = s.credential_field ? ` [${s.credential_field}: ***]` : '';
+          const val = s.value ? ` "${s.value.slice(0, 30)}"` : '';
+          return `  ${i + 1}. ${s.action}${s.selector ? ` → ${s.selector}` : ''}${s.url ? ` → ${s.url}` : ''}${val}${cred}`;
+        })
+        .join('\n');
 
       return {
         success: true,
-        dryRun:  true,
-        output:  `🌐 [DRAFT] ${description}\n${preview}${credentialRef ? `\n  Credential: ${credentialRef}` : ''}`,
+        dryRun: true,
+        output: `🌐 [DRAFT] ${description}\n${preview}${credentialRef ? `\n  Credential: ${credentialRef}` : ''}`,
       };
     }
 
@@ -80,9 +82,15 @@ export class BrowserActionWorker {
     if (credentialRef) {
       try {
         credential = await resolveCredential(credentialRef, this.config.secrets ?? {});
-        log.info(`Credential resolved for browser action: ${JSON.stringify(redactCredential(credential))}`);
+        log.info(
+          `Credential resolved for browser action: ${JSON.stringify(redactCredential(credential))}`,
+        );
       } catch (e) {
-        return { success: false, dryRun: false, output: `Credential error: ${(e as Error).message}` };
+        return {
+          success: false,
+          dryRun: false,
+          output: `Credential error: ${(e as Error).message}`,
+        };
       }
     }
 
@@ -90,15 +98,21 @@ export class BrowserActionWorker {
     // puppeteer is optional — not in package.json. Install separately if needed.
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore optional peer dependency
-    const puppeteer = await import('puppeteer').catch(() => null) as null | {
-      launch: (opts: unknown) => Promise<{ newPage: () => Promise<unknown>; close: () => Promise<void> }>;
+    const puppeteer = (await import('puppeteer').catch(() => null)) as null | {
+      launch: (
+        opts: unknown,
+      ) => Promise<{ newPage: () => Promise<unknown>; close: () => Promise<void> }>;
     };
     if (!puppeteer) {
-      return { success: false, dryRun: false, output: 'puppeteer not installed. Run: npm install puppeteer' };
+      return {
+        success: false,
+        dryRun: false,
+        output: 'puppeteer not installed. Run: npm install puppeteer',
+      };
     }
 
     const browser = await puppeteer.launch({ headless: true });
-    const page    = await browser.newPage();
+    const page = await browser.newPage();
     const outputs: string[] = [];
 
     try {
@@ -111,14 +125,18 @@ export class BrowserActionWorker {
 
       return {
         success: true,
-        dryRun:  false,
-        output:  `✅ ${description}\n${outputs.join('\n')}`,
-        data:    { steps: steps.length, outputs },
+        dryRun: false,
+        output: `✅ ${description}\n${outputs.join('\n')}`,
+        data: { steps: steps.length, outputs },
       };
     } catch (e) {
       await browser.close().catch(() => {});
       log.error('Browser action failed', e);
-      return { success: false, dryRun: false, output: `❌ Browser action failed: ${(e as Error).message}` };
+      return {
+        success: false,
+        dryRun: false,
+        output: `❌ Browser action failed: ${(e as Error).message}`,
+      };
     }
   }
 
@@ -131,12 +149,12 @@ export class BrowserActionWorker {
     outputs: string[],
   ): Promise<void> {
     const p = page as {
-      goto:       (url: string, opts?: unknown) => Promise<unknown>;
+      goto: (url: string, opts?: unknown) => Promise<unknown>;
       waitForSelector: (sel: string, opts?: unknown) => Promise<unknown>;
-      click:      (sel: string) => Promise<void>;
-      type:       (sel: string, text: string) => Promise<void>;
+      click: (sel: string) => Promise<void>;
+      type: (sel: string, text: string) => Promise<void>;
       screenshot: (opts: unknown) => Promise<Buffer>;
-      evaluate:   (fn: (sel: string) => string, sel: string) => Promise<string>;
+      evaluate: (fn: (sel: string) => string, sel: string) => Promise<string>;
       waitForTimeout: (ms: number) => Promise<void>;
     };
 
@@ -155,7 +173,10 @@ export class BrowserActionWorker {
         let fillValue: string;
         if (step.credential_field && credential) {
           const val = credential[step.credential_field];
-          if (!val) throw new Error(`fill: credential field "${step.credential_field}" not found in resolved credential`);
+          if (!val)
+            throw new Error(
+              `fill: credential field "${step.credential_field}" not found in resolved credential`,
+            );
           fillValue = val;
         } else if (step.value !== undefined) {
           fillValue = step.value;
@@ -209,8 +230,9 @@ export class BrowserActionWorker {
         // page.evaluate runs inside the browser — document exists there, not in Node.
         // We pass a serialized function string to avoid TS DOM lib requirement.
         const evalFn = `(sel) => { const el = document.querySelector(sel); return el ? (el.textContent || '').trim() : ''; }`;
-        const text = await (p as unknown as { evaluate: (fn: string, sel: string) => Promise<string> })
-          .evaluate(evalFn, step.selector);
+        const text = await (
+          p as unknown as { evaluate: (fn: string, sel: string) => Promise<string> }
+        ).evaluate(evalFn, step.selector);
         outputs.push(`→ extracted from ${step.selector}: "${text.slice(0, 200)}"`);
         break;
       }

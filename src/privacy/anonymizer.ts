@@ -21,9 +21,9 @@ export interface AnonymizedResult {
 }
 
 type PatternEntry = {
-  key: string;                      // e.g. 'ETH_ADDR', 'EMAIL'
+  key: string; // e.g. 'ETH_ADDR', 'EMAIL'
   regex: RegExp;
-  label: (i: number) => string;     // e.g. (i) => `ADDR_${i}`
+  label: (i: number) => string; // e.g. (i) => `ADDR_${i}`
 };
 
 // ─── Pattern registry ─────────────────────────────────────────────────────────
@@ -38,31 +38,31 @@ const CRYPTO_PATTERNS: PatternEntry[] = [
   {
     key: 'TX_HASH',
     regex: /\b0x[0-9a-fA-F]{64}\b/g,
-    label: i => `[TX_HASH_${i}]`,
+    label: (i) => `[TX_HASH_${i}]`,
   },
   // ETH/EVM addresses (40 hex)
   {
     key: 'ETH_ADDR',
     regex: /\b0x[0-9a-fA-F]{40}\b/g,
-    label: i => `[ETH_ADDR_${i}]`,
+    label: (i) => `[ETH_ADDR_${i}]`,
   },
   // BTC bech32 (native segwit: bc1...)
   {
     key: 'BTC_ADDR',
     regex: /\bbc1[a-z0-9]{6,87}\b/g,
-    label: i => `[BTC_ADDR_${i}]`,
+    label: (i) => `[BTC_ADDR_${i}]`,
   },
   // BTC legacy (P2PKH: 1..., P2SH: 3...)
   {
     key: 'BTC_ADDR',
     regex: /\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b/g,
-    label: i => `[BTC_ADDR_${i}]`,
+    label: (i) => `[BTC_ADDR_${i}]`,
   },
   // ENS names (*.eth)
   {
     key: 'ENS',
     regex: /\b[a-z0-9-]{3,}\.eth\b/gi,
-    label: i => `[ENS_${i}]`,
+    label: (i) => `[ENS_${i}]`,
   },
 ];
 
@@ -71,46 +71,47 @@ const PII_PATTERNS: PatternEntry[] = [
   {
     key: 'EMAIL',
     regex: /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g,
-    label: i => `[EMAIL_${i}]`,
+    label: (i) => `[EMAIL_${i}]`,
   },
   // Phone numbers (international formats)
   {
     key: 'PHONE',
     regex: /(?:\+|00)[1-9]\d{7,14}\b|\b\d{2}[\s.-]?\d{2}[\s.-]?\d{2}[\s.-]?\d{2}[\s.-]?\d{2}\b/g,
-    label: i => `[PHONE_${i}]`,
+    label: (i) => `[PHONE_${i}]`,
   },
   // IP addresses
   {
     key: 'IP',
     regex: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,
-    label: i => `[IP_${i}]`,
+    label: (i) => `[IP_${i}]`,
   },
   // URLs with credentials (http://user:pass@...)
   {
     key: 'URL_CRED',
     regex: /https?:\/\/[^:]+:[^@]+@[^\s]+/g,
-    label: i => `[URL_CRED_${i}]`,
+    label: (i) => `[URL_CRED_${i}]`,
   },
   // API keys / secrets (long alphanumeric strings prefixed by common patterns)
   {
     key: 'SECRET',
     regex: /(?:sk-|pk-|Bearer\s+)[A-Za-z0-9\-_]{20,}/g,
-    label: i => `[SECRET_${i}]`,
+    label: (i) => `[SECRET_${i}]`,
   },
 ];
 
 // Amount bucketing: replace exact amounts with ranges
-const AMOUNT_REGEX = /(?:€|\$|USD|EUR|USDC|USDT|ETH|BTC|SOL)\s*[\d,.']+(?:\.\d+)?|[\d,.']+(?:\.\d+)?\s*(?:€|\$|USD|EUR|USDC|USDT|ETH|BTC|SOL)/gi;
+const AMOUNT_REGEX =
+  /(?:€|\$|USD|EUR|USDC|USDT|ETH|BTC|SOL)\s*[\d,.']+(?:\.\d+)?|[\d,.']+(?:\.\d+)?\s*(?:€|\$|USD|EUR|USDC|USDT|ETH|BTC|SOL)/gi;
 
 function bucketAmount(raw: string): string {
   const numStr = raw.replace(/[^0-9.]/g, '');
   const n = parseFloat(numStr);
   if (isNaN(n)) return '[AMT_?]';
   const currency = raw.match(/€|\$|USD|EUR|USDC|USDT|ETH|BTC|SOL/i)?.[0]?.toUpperCase() ?? '';
-  if (n < 1_000)       return `[AMT_<1K_${currency}]`;
-  if (n < 10_000)      return `[AMT_1K-10K_${currency}]`;
-  if (n < 100_000)     return `[AMT_10K-100K_${currency}]`;
-  if (n < 1_000_000)   return `[AMT_100K-1M_${currency}]`;
+  if (n < 1_000) return `[AMT_<1K_${currency}]`;
+  if (n < 10_000) return `[AMT_1K-10K_${currency}]`;
+  if (n < 100_000) return `[AMT_10K-100K_${currency}]`;
+  if (n < 1_000_000) return `[AMT_100K-1M_${currency}]`;
   return `[AMT_>1M_${currency}]`;
 }
 
@@ -124,7 +125,12 @@ export class Anonymizer {
   private counters: Record<string, number> = {};
   private seenValues: Map<string, string> = new Map(); // value → placeholder
 
-  constructor(private config: Pick<AnonymizerConfig, 'mode' | 'knownPersons' | 'bucketAmounts' | 'anonymizeCryptoAddresses' | 'customPatterns'>) {}
+  constructor(
+    private config: Pick<
+      AnonymizerConfig,
+      'mode' | 'knownPersons' | 'bucketAmounts' | 'anonymizeCryptoAddresses' | 'customPatterns'
+    >,
+  ) {}
 
   anonymize(text: string): AnonymizedResult {
     if (this.config.mode === 'none') {

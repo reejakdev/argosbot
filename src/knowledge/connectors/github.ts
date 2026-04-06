@@ -16,7 +16,7 @@ export async function fetchGitHub(source: ContextGitHub): Promise<KnowledgeDocum
   try {
     const parts: string[] = [`# ${repoLabel}\nhttps://github.com/${source.owner}/${source.repo}\n`];
     const headers: Record<string, string> = {
-      'Accept':     'application/vnd.github.v3.raw',
+      Accept: 'application/vnd.github.v3.raw',
       'User-Agent': 'Argos/1.0',
     };
 
@@ -46,13 +46,15 @@ export async function fetchGitHub(source: ContextGitHub): Promise<KnowledgeDocum
     }
 
     const fullText = parts.join('\n');
-    const isLarge  = fullText.length > 8000;
+    const isLarge = fullText.length > 8000;
 
     return {
-      key:      `github:${source.owner}/${source.repo}`,
-      name:     repoLabel,
-      content:  isLarge ? fullText.slice(0, 2000) + '\n\n[…full content indexed in vector store]' : fullText,
-      tags:     ['context', 'github', source.owner, source.repo],
+      key: `github:${source.owner}/${source.repo}`,
+      name: repoLabel,
+      content: isLarge
+        ? fullText.slice(0, 2000) + '\n\n[…full content indexed in vector store]'
+        : fullText,
+      tags: ['context', 'github', source.owner, source.repo],
       fullText: isLarge ? fullText : undefined,
     };
   } catch (e) {

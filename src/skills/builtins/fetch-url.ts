@@ -10,7 +10,8 @@ registerSkill({
   description: 'Fetch and extract text content from any public URL',
   tool: {
     name: 'fetch_url',
-    description: 'Fetch a URL and return its readable text content (HTML stripped). Useful for reading docs, articles, pages.',
+    description:
+      'Fetch a URL and return its readable text content (HTML stripped). Useful for reading docs, articles, pages.',
     input_schema: {
       type: 'object',
       properties: {
@@ -39,10 +40,18 @@ registerSkill({
       const parsed = new URL(url);
       const h = parsed.hostname.toLowerCase();
       if (
-        h === 'localhost' || h === '0.0.0.0' || h === '::1' || h.endsWith('.localhost') ||
-        /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) ||
-        /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^169\.254\./.test(h) ||
-        h === '169.254.169.254' || h === 'metadata.google.internal' || h === '100.100.100.200'
+        h === 'localhost' ||
+        h === '0.0.0.0' ||
+        h === '::1' ||
+        h.endsWith('.localhost') ||
+        /^127\./.test(h) ||
+        /^10\./.test(h) ||
+        /^192\.168\./.test(h) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
+        /^169\.254\./.test(h) ||
+        h === '169.254.169.254' ||
+        h === 'metadata.google.internal' ||
+        h === '100.100.100.200'
       ) {
         return { success: false, output: `Security: blocked private/internal network (${h})` };
       }
@@ -53,7 +62,7 @@ registerSkill({
     const res = await fetch(url, {
       headers: {
         'User-Agent': 'Argos/1.0 (AI assistant; research purposes)',
-        'Accept': 'text/html,application/xhtml+xml,text/plain,*/*',
+        Accept: 'text/html,application/xhtml+xml,text/plain,*/*',
       },
       signal: AbortSignal.timeout(15_000),
     });
@@ -81,7 +90,9 @@ registerSkill({
     }
 
     const truncated = clean.length > maxChars;
-    const output = truncated ? clean.slice(0, maxChars) + `\n\n[... truncated at ${maxChars} chars]` : clean;
+    const output = truncated
+      ? clean.slice(0, maxChars) + `\n\n[... truncated at ${maxChars} chars]`
+      : clean;
 
     return { success: true, output, data: { url, chars: clean.length, truncated } };
   },
@@ -90,23 +101,28 @@ registerSkill({
 // ─── HTML stripper ────────────────────────────────────────────────────────────
 
 function stripHtml(html: string): string {
-  return html
-    // Remove <script> and <style> blocks entirely
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
-    // Convert block elements to newlines
-    .replace(/<\/(p|div|h[1-6]|li|tr|blockquote|pre|article|section|header|footer|main|nav|aside)>/gi, '\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    // Strip all remaining tags
-    .replace(/<[^>]+>/g, '')
-    // Decode common HTML entities
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'")
-    .replace(/&nbsp;/g, ' ')
-    // Normalize whitespace
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n[ \t]+/g, '\n');
+  return (
+    html
+      // Remove <script> and <style> blocks entirely
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+      // Convert block elements to newlines
+      .replace(
+        /<\/(p|div|h[1-6]|li|tr|blockquote|pre|article|section|header|footer|main|nav|aside)>/gi,
+        '\n',
+      )
+      .replace(/<br\s*\/?>/gi, '\n')
+      // Strip all remaining tags
+      .replace(/<[^>]+>/g, '')
+      // Decode common HTML entities
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#039;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      // Normalize whitespace
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n[ \t]+/g, '\n')
+  );
 }

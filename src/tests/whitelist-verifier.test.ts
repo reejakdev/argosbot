@@ -15,17 +15,17 @@ import type { WhitelistVerification } from '../core/whitelist-verifier.js';
 // ─── formatVerificationNotif ─────────────────────────────────────────────────
 
 const makeVerif = (overrides: Partial<WhitelistVerification> = {}): WhitelistVerification => ({
-  decision:  'APPROVE',
-  protocol:  'Example Protocol',
-  chain:     'Ethereum mainnet',
-  address:   '0x5555555555555555555555555555555555555555',
-  reason:    'TokenB depositVault',
-  summary:   'Address found in official Smart Contracts Registry.',
-  why:       'Exact match in docs.example.com/resources/smart-contracts',
-  score:     0.90,
-  sources:   {
-    docs:       'https://docs.example.com/resources/smart-contracts',
-    website:    'https://example.com',
+  decision: 'APPROVE',
+  protocol: 'Example Protocol',
+  chain: 'Ethereum mainnet',
+  address: '0x5555555555555555555555555555555555555555',
+  reason: 'TokenB depositVault',
+  summary: 'Address found in official Smart Contracts Registry.',
+  why: 'Exact match in docs.example.com/resources/smart-contracts',
+  score: 0.9,
+  sources: {
+    docs: 'https://docs.example.com/resources/smart-contracts',
+    website: 'https://example.com',
     matchPages: ['https://docs.example.com/resources/smart-contracts'],
   },
   rawOutput: '',
@@ -40,19 +40,19 @@ describe('formatVerificationNotif', () => {
   });
 
   it('shows ⚠️ for MANUAL_REVIEW', () => {
-    const notif = formatVerificationNotif(makeVerif({ decision: 'MANUAL_REVIEW', score: 0.30 }));
+    const notif = formatVerificationNotif(makeVerif({ decision: 'MANUAL_REVIEW', score: 0.3 }));
     expect(notif).toContain('⚠️');
     expect(notif).toContain('MANUAL REVIEW');
   });
 
   it('shows ❌ for REJECT', () => {
-    const notif = formatVerificationNotif(makeVerif({ decision: 'REJECT', score: 0.00 }));
+    const notif = formatVerificationNotif(makeVerif({ decision: 'REJECT', score: 0.0 }));
     expect(notif).toContain('❌');
     expect(notif).toContain('REJECT');
   });
 
   it('includes score bar', () => {
-    const notif = formatVerificationNotif(makeVerif({ score: 0.90 }));
+    const notif = formatVerificationNotif(makeVerif({ score: 0.9 }));
     expect(notif).toContain('Score:');
     expect(notif).toContain('90%');
   });
@@ -63,21 +63,25 @@ describe('formatVerificationNotif', () => {
   });
 
   it('includes match pages when found', () => {
-    const notif = formatVerificationNotif(makeVerif({
-      sources: {
-        docs:       'https://docs.example.com/resources/smart-contracts-addresses',
-        matchPages: ['https://docs.example.com/resources/smart-contracts-addresses'],
-      },
-    }));
+    const notif = formatVerificationNotif(
+      makeVerif({
+        sources: {
+          docs: 'https://docs.example.com/resources/smart-contracts-addresses',
+          matchPages: ['https://docs.example.com/resources/smart-contracts-addresses'],
+        },
+      }),
+    );
     expect(notif).toContain('Match:');
   });
 
   it('omits match pages when not found (MANUAL_REVIEW)', () => {
-    const notif = formatVerificationNotif(makeVerif({
-      decision: 'MANUAL_REVIEW',
-      score: 0.10,
-      sources: { docs: 'https://docs.example.com' },
-    }));
+    const notif = formatVerificationNotif(
+      makeVerif({
+        decision: 'MANUAL_REVIEW',
+        score: 0.1,
+        sources: { docs: 'https://docs.example.com' },
+      }),
+    );
     expect(notif).not.toContain('Match:');
   });
 
@@ -102,13 +106,13 @@ describe('formatVerificationNotif', () => {
 
 describe('score semantics', () => {
   it('score 0.90 maps to high-confidence APPROVE', () => {
-    const v = makeVerif({ score: 0.90, decision: 'APPROVE' });
+    const v = makeVerif({ score: 0.9, decision: 'APPROVE' });
     expect(v.score).toBeGreaterThanOrEqual(0.85);
     expect(v.decision).toBe('APPROVE');
   });
 
   it('score 0.00 with REJECT reflects explicit contradiction', () => {
-    const v = makeVerif({ score: 0.00, decision: 'REJECT' });
+    const v = makeVerif({ score: 0.0, decision: 'REJECT' });
     expect(v.score).toBe(0);
     expect(v.decision).toBe('REJECT');
   });

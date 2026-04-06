@@ -4,7 +4,11 @@ import os from 'os';
 import { ConfigSchema, type Config } from './schema.js';
 import { createLogger } from '../logger.js';
 import { initSecretsStoreSync } from '../secrets/store.js';
-import { migrateSecretsFromRaw, resolveSecretRefs, redactSecretsForDisk } from '../secrets/migrate.js';
+import {
+  migrateSecretsFromRaw,
+  resolveSecretRefs,
+  redactSecretsForDisk,
+} from '../secrets/migrate.js';
 
 const log = createLogger('config');
 
@@ -25,7 +29,7 @@ function loadConfigFile(configPath: string): unknown {
   if (!fs.existsSync(resolved)) {
     throw new Error(`Config file not found: ${resolved}\nRun: npm run setup`);
   }
-  const raw      = fs.readFileSync(resolved, 'utf-8');
+  const raw = fs.readFileSync(resolved, 'utf-8');
   // Strip // comments but NOT inside strings (avoid breaking URLs like https://)
   const stripped = raw.replace(/("(?:[^"\\]|\\.)*")|\/\/.*$/gm, (match, str) => str ?? '');
   return JSON.parse(stripped);
@@ -33,7 +37,7 @@ function loadConfigFile(configPath: string): unknown {
 
 function mergeEnv(config: Record<string, unknown>): Record<string, unknown> {
   // ─── Channels ────────────────────────────────────────────────────────────
-  const channels  = (config.channels as Record<string, unknown>) ?? {};
+  const channels = (config.channels as Record<string, unknown>) ?? {};
   const tgChannel = (channels.telegram as Record<string, unknown>) ?? {};
   const tgPersonal = (tgChannel.personal as Record<string, unknown>) ?? {};
 
@@ -42,25 +46,25 @@ function mergeEnv(config: Record<string, unknown>): Record<string, unknown> {
   if (legacyTg) {
     if (legacyTg.approvalChatId && !tgPersonal.approvalChatId)
       tgPersonal.approvalChatId = legacyTg.approvalChatId;
-    if (legacyTg.botToken && !tgPersonal.botToken)
-      tgPersonal.botToken = legacyTg.botToken;
+    if (legacyTg.botToken && !tgPersonal.botToken) tgPersonal.botToken = legacyTg.botToken;
   }
 
-  if (process.env.TELEGRAM_BOT_TOKEN)        tgPersonal.botToken       = process.env.TELEGRAM_BOT_TOKEN;
-  if (process.env.TELEGRAM_APPROVAL_CHAT_ID) tgPersonal.approvalChatId = process.env.TELEGRAM_APPROVAL_CHAT_ID;
-  tgChannel.personal  = tgPersonal;
-  channels.telegram   = tgChannel;
-  config.channels     = channels;
+  if (process.env.TELEGRAM_BOT_TOKEN) tgPersonal.botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (process.env.TELEGRAM_APPROVAL_CHAT_ID)
+    tgPersonal.approvalChatId = process.env.TELEGRAM_APPROVAL_CHAT_ID;
+  tgChannel.personal = tgPersonal;
+  channels.telegram = tgChannel;
+  config.channels = channels;
 
   // ─── LLM / misc ──────────────────────────────────────────────────────────
-  if (process.env.DATA_DIR)  config.dataDir  = process.env.DATA_DIR;
+  if (process.env.DATA_DIR) config.dataDir = process.env.DATA_DIR;
   if (process.env.LOG_LEVEL) config.logLevel = process.env.LOG_LEVEL;
 
   // ─── Notion ───────────────────────────────────────────────────────────────
   if (process.env.NOTION_API_KEY && process.env.NOTION_AGENT_DATABASE_ID) {
     config.notion = {
-      ...(config.notion as object ?? {}),
-      apiKey:          process.env.NOTION_API_KEY,
+      ...((config.notion as object) ?? {}),
+      apiKey: process.env.NOTION_API_KEY,
       agentDatabaseId: process.env.NOTION_AGENT_DATABASE_ID,
       ...(process.env.NOTION_OWNER_DATABASE_ID
         ? { ownerDatabaseId: process.env.NOTION_OWNER_DATABASE_ID, mode: 'both' }
@@ -69,11 +73,15 @@ function mergeEnv(config: Record<string, unknown>): Record<string, unknown> {
   }
 
   // ─── Calendar ─────────────────────────────────────────────────────────────
-  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN) {
+  if (
+    process.env.GOOGLE_CLIENT_ID &&
+    process.env.GOOGLE_CLIENT_SECRET &&
+    process.env.GOOGLE_REFRESH_TOKEN
+  ) {
     config.calendar = {
-      ...(config.calendar as object ?? {}),
+      ...((config.calendar as object) ?? {}),
       credentials: {
-        clientId:     process.env.GOOGLE_CLIENT_ID,
+        clientId: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
         refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
       },
@@ -89,22 +97,25 @@ let _config: Config | null = null;
 export function loadConfig(): Config {
   if (_config) return _config;
 
-  const configPath = process.env.CONFIG_PATH ?? '~/.argos/config.json';
+  const configPath = process.env.CONFIG_PATH ?? '~/.argos/.config.json';
   log.info(`Loading config from ${configPath}`);
 
   // ── Init secrets store (sync file read, async keychain probe) ──────────────
   const dataDir = resolvePath(process.env.DATA_DIR ?? '~/.argos');
   initSecretsStoreSync(dataDir);
 
-  const raw    = loadConfigFile(configPath);
+  const raw = loadConfigFile(configPath);
   const merged = mergeEnv(raw as Record<string, unknown>);
 
   // ── Migrate old format (actual values → secrets store + $REF in config) ───
   const resolvedConfigPath = resolvePath(configPath);
   const { cleaned, migrated } = migrateSecretsFromRaw(merged);
   if (migrated > 0) {
-    fs.writeFileSync(resolvedConfigPath, JSON.stringify(cleaned, null, 2), { encoding: 'utf-8', mode: 0o600 });
-    log.info(`Migrated ${migrated} secret(s) from config.json → secrets store`);
+    fs.writeFileSync(resolvedConfigPath, JSON.stringify(cleaned, null, 2), {
+      encoding: 'utf-8',
+      mode: 0o600,
+    });
+    log.info(`Migrated ${migrated} secret(s) from .config.json → secrets store`);
   }
 
   // ── Resolve "$KEY" references → actual values before Zod parse ─────────────
@@ -113,7 +124,7 @@ export function loadConfig(): Config {
   const result = ConfigSchema.safeParse(resolved);
   if (!result.success) {
     log.error('Invalid config', result.error.format());
-    throw new Error('Config validation failed. Check your ~/.argos/config.json');
+    throw new Error('Config validation failed. Check your ~/.argos/.config.json');
   }
 
   _config = result.data;
@@ -128,28 +139,33 @@ export function loadConfig(): Config {
   if (_config.llm.activeProvider && !process.env.LLM_PROVIDER_ID)
     process.env.LLM_PROVIDER_ID = _config.llm.activeProvider;
   if (activeProvider) {
-    if (!process.env.LLM_PROVIDER) process.env.LLM_PROVIDER = activeProvider.api === 'anthropic' ? 'anthropic' : 'compatible';
-    if (!process.env.LLM_MODEL)    process.env.LLM_MODEL    = _config.llm.activeModel;
-    if (activeProvider.baseUrl && !process.env.LLM_BASE_URL)  process.env.LLM_BASE_URL  = activeProvider.baseUrl;
-    if (activeProvider.auth   && !process.env.LLM_AUTH_MODE)  process.env.LLM_AUTH_MODE = activeProvider.auth;
+    if (!process.env.LLM_PROVIDER)
+      process.env.LLM_PROVIDER = activeProvider.api === 'anthropic' ? 'anthropic' : 'compatible';
+    if (!process.env.LLM_MODEL) process.env.LLM_MODEL = _config.llm.activeModel;
+    if (activeProvider.baseUrl && !process.env.LLM_BASE_URL)
+      process.env.LLM_BASE_URL = activeProvider.baseUrl;
+    if (activeProvider.auth && !process.env.LLM_AUTH_MODE)
+      process.env.LLM_AUTH_MODE = activeProvider.auth;
     if (activeProvider.apiKey) {
-      const envKey = { anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY' }[_config.llm.activeProvider] ?? 'LLM_API_KEY';
+      const envKey =
+        { anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY' }[_config.llm.activeProvider] ??
+        'LLM_API_KEY';
       if (!process.env[envKey]) process.env[envKey] = activeProvider.apiKey;
     }
   }
-  if (!process.env.APP_PORT)       process.env.APP_PORT       = String(_config.webapp.port);
+  if (!process.env.APP_PORT) process.env.APP_PORT = String(_config.webapp.port);
   if (!process.env.WEBAUTHN_RP_ID) process.env.WEBAUTHN_RP_ID = _config.webapp.webauthnRpId;
   if (!process.env.WEBAUTHN_ORIGIN) process.env.WEBAUTHN_ORIGIN = _config.webapp.webauthnOrigin;
 
   const monitoredCount = _config.channels.telegram.listener.monitoredChats.length;
   log.info('Config loaded', {
-    owner:         _config.owner.name,
-    teams:         _config.owner.teams,
+    owner: _config.owner.name,
+    teams: _config.owner.teams,
     monitoredChats: monitoredCount,
-    llm:           `${_config.llm.activeProvider}/${_config.llm.activeModel}`,
-    privacy:       _config.privacy.provider ?? 'none (all roles → primary)',
-    triage:        _config.triage.enabled,
-    readOnly:      _config.readOnly,
+    llm: `${_config.llm.activeProvider}/${_config.llm.activeModel}`,
+    privacy: _config.privacy.provider ?? 'none (all roles → primary)',
+    triage: _config.triage.enabled,
+    readOnly: _config.readOnly,
   });
 
   return _config;
@@ -169,17 +185,20 @@ export function getEmbeddingsConfig(): import('./schema.js').EmbeddingsConfig | 
 export function patchConfig(patch: (cfg: Config) => void): void {
   if (!_config) throw new Error('Config not loaded');
   patch(_config);
-  const configPath = resolvePath(process.env.CONFIG_PATH ?? '~/.argos/config.json');
+  const configPath = resolvePath(process.env.CONFIG_PATH ?? '~/.argos/.config.json');
   // Strip actual secret values → "$KEY" refs before writing to disk
   const forDisk = redactSecretsForDisk(_config);
-  fs.writeFileSync(configPath, JSON.stringify(forDisk, null, 2), { encoding: 'utf-8', mode: 0o600 });
+  fs.writeFileSync(configPath, JSON.stringify(forDisk, null, 2), {
+    encoding: 'utf-8',
+    mode: 0o600,
+  });
 }
 
 /**
  * Harden file permissions on all sensitive files in the data directory.
  * - data dir itself   → 0700 (only owner can list/enter)
- * - config.json       → 0600
- * - secrets.json      → 0600
+ * - .config.json      → 0600
+ * - .secrets.json     → 0600
  * - argos.db*         → 0600
  * - telegram_session  → 0600
  * - *.bak             → 0600
@@ -190,9 +209,9 @@ export function hardenDataDir(): void {
   const dataDir = resolvePath(process.env.DATA_DIR ?? '~/.argos');
 
   const sensitiveFiles = [
-    'config.json',
-    'secrets.json',
-    'secrets.json.tmp',
+    '.config.json',
+    '.secrets.json',
+    '.secrets.json.tmp',
     'argos.db',
     'argos.db-shm',
     'argos.db-wal',
@@ -200,24 +219,30 @@ export function hardenDataDir(): void {
   ];
 
   // chmod the directory itself to 0700 so other users can't list its contents
-  try { fs.chmodSync(dataDir, 0o700); } catch {}
+  try {
+    fs.chmodSync(dataDir, 0o700);
+  } catch {}
 
   for (const file of sensitiveFiles) {
     const p = path.join(dataDir, file);
-    try { if (fs.existsSync(p)) fs.chmodSync(p, 0o600); } catch {}
+    try {
+      if (fs.existsSync(p)) fs.chmodSync(p, 0o600);
+    } catch {}
   }
 
   // All other sensitive file patterns in the data dir root
   try {
     for (const entry of fs.readdirSync(dataDir)) {
       const sensitive =
-        entry.includes('.bak')     ||  // config backups
-        entry.includes('session')  ||  // Telegram/WhatsApp session files
-        entry.includes('_key')     ||  // private key files
-        entry.endsWith('.pem')     ||  // TLS private keys
-        entry.endsWith('.key');        // generic key files
+        entry.includes('.bak') || // config backups
+        entry.includes('session') || // Telegram/WhatsApp session files
+        entry.includes('_key') || // private key files
+        entry.endsWith('.pem') || // TLS private keys
+        entry.endsWith('.key'); // generic key files
       if (sensitive) {
-        try { fs.chmodSync(path.join(dataDir, entry), 0o600); } catch {}
+        try {
+          fs.chmodSync(path.join(dataDir, entry), 0o600);
+        } catch {}
       }
     }
   } catch {}
@@ -226,10 +251,15 @@ export function hardenDataDir(): void {
 }
 
 /** Ajoute un chat à la liste monitorée et persiste. */
-export function addMonitoredChat(chatId: string, name: string, isGroup = false, tags: string[] = []): void {
-  patchConfig(cfg => {
+export function addMonitoredChat(
+  chatId: string,
+  name: string,
+  isGroup = false,
+  tags: string[] = [],
+): void {
+  patchConfig((cfg) => {
     const chats = cfg.channels.telegram.listener.monitoredChats;
-    if (!chats.some(c => c.chatId === chatId)) {
+    if (!chats.some((c) => c.chatId === chatId)) {
       chats.push({ chatId, name, tags, isGroup });
     }
   });
@@ -237,7 +267,7 @@ export function addMonitoredChat(chatId: string, name: string, isGroup = false, 
 
 /** Supprime les notifications de découverte pour ce chatId. Persiste. */
 export function ignoreChat(chatId: string): void {
-  patchConfig(cfg => {
+  patchConfig((cfg) => {
     const ignored = cfg.channels.telegram.listener.ignoredChats;
     if (!ignored.includes(chatId)) ignored.push(chatId);
   });
@@ -265,46 +295,46 @@ export const CONFIG_TEMPLATE = {
         ignoredChats: [],
       },
       personal: {
-        botToken:      'YOUR_BOT_TOKEN',
-        allowedUsers:  ['YOUR_TELEGRAM_USER_ID'],
+        botToken: 'YOUR_BOT_TOKEN',
+        allowedUsers: ['YOUR_TELEGRAM_USER_ID'],
         approvalChatId: 'me',
       },
     },
   },
   privacy: {
-    provider: 'local',   // ex: clé dans llm.providers pointant sur Ollama
+    provider: 'local', // ex: clé dans llm.providers pointant sur Ollama
     roles: {
-      sanitize: 'privacy',  // contenu brut → local de préférence
+      sanitize: 'privacy', // contenu brut → local de préférence
       classify: 'privacy',
-      triage:   'privacy',
-      plan:     'primary',
+      triage: 'privacy',
+      plan: 'primary',
     },
   },
   triage: {
-    enabled:   true,
+    enabled: true,
     myHandles: ['@yourhandle'],
   },
   heartbeat: {
-    enabled:         false,
+    enabled: false,
     intervalMinutes: 60,
   },
   knowledge: {
-    sources:      [],
+    sources: [],
     indexLocally: true,
     refreshHours: 6,
   },
   owner: {
-    name:           'Emeric',
+    name: 'Emeric',
     telegramUserId: 0,
-    teams:          ['product', 'solution-engineer'],
-    roles:          ['solution-engineer'],
+    teams: ['product', 'solution-engineer'],
+    roles: ['solution-engineer'],
   },
   anonymizer: {
-    mode:          'regex',
-    knownPersons:  [],
+    mode: 'regex',
+    knownPersons: [],
     bucketAmounts: true,
   },
   readOnly: true,
-  dataDir:  '~/.argos',
+  dataDir: '~/.argos',
   logLevel: 'debug',
 };

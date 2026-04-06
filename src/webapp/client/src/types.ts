@@ -3,6 +3,7 @@ export interface ProposalAction {
   details?: string;
   risk: 'low' | 'medium' | 'high';
   tool?: string;
+  lang?: string;
 }
 
 export interface Proposal {

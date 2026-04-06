@@ -23,9 +23,9 @@ export type PipelineRole = 'sanitize' | 'classify' | 'triage' | 'llmAnon' | 'pla
  */
 export function llmForRole(
   role: PipelineRole,
-  primaryLlm:  LLMConfig,
-  privacyLlm:  LLMConfig | null,
-  config:      Config,
+  primaryLlm: LLMConfig,
+  privacyLlm: LLMConfig | null,
+  config: Config,
 ): LLMConfig {
   const assignedRole: PrivacyRole = config.privacy.roles[role] ?? 'primary';
 
@@ -53,10 +53,10 @@ export function buildPrivacyLlmConfig(
   }
 
   return {
-    provider:   provider.api === 'anthropic' ? 'anthropic' : 'compatible',
-    model:      config.privacy.model ?? provider.models[0] ?? 'llama3',
-    apiKey:     provider.apiKey ?? '',
-    baseUrl:    provider.baseUrl,
-    maxTokens:  opts?.maxTokens ?? 2048,
+    provider: provider.api === 'anthropic' ? 'anthropic' : 'compatible',
+    model: config.privacy.model ?? provider.models[0] ?? 'llama3',
+    apiKey: provider.apiKey ?? '',
+    baseUrl: provider.baseUrl,
+    maxTokens: opts?.maxTokens ?? 2048,
   };
 }

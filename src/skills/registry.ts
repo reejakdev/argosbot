@@ -32,8 +32,8 @@ const log = createLogger('skills');
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ToolDefinition {
-  name:         string;
-  description:  string;
+  name: string;
+  description: string;
   input_schema: {
     type: 'object';
     properties: Record<string, { type: string; description: string; enum?: string[] }>;
@@ -43,15 +43,15 @@ export interface ToolDefinition {
 
 export interface SkillResult {
   success: boolean;
-  output:  string;
-  data?:   unknown;
+  output: string;
+  data?: unknown;
 }
 
 export interface Skill {
-  name:        string;
+  name: string;
   description: string;
-  tool:        ToolDefinition;
-  handler:     (input: Record<string, unknown>, cfg: Record<string, unknown>) => Promise<SkillResult>;
+  tool: ToolDefinition;
+  handler: (input: Record<string, unknown>, cfg: Record<string, unknown>) => Promise<SkillResult>;
 }
 
 // ─── Registry ─────────────────────────────────────────────────────────────────
@@ -65,13 +65,13 @@ export function registerSkill(skill: Skill): void {
 
 export function getEnabledSkills(configs: SkillConfig[]): Skill[] {
   return configs
-    .filter(c => c.enabled !== false)
-    .map(c => _registry.get(c.name))
+    .filter((c) => c.enabled !== false)
+    .map((c) => _registry.get(c.name))
     .filter((s): s is Skill => !!s);
 }
 
 export function getSkillToolDefinitions(configs: SkillConfig[]): ToolDefinition[] {
-  return getEnabledSkills(configs).map(s => s.tool);
+  return getEnabledSkills(configs).map((s) => s.tool);
 }
 
 export async function executeSkill(
@@ -82,7 +82,7 @@ export async function executeSkill(
   const skill = _registry.get(name);
   if (!skill) return { success: false, output: `Unknown skill: ${name}` };
 
-  const cfg = configs.find(c => c.name === name)?.config ?? {};
+  const cfg = configs.find((c) => c.name === name)?.config ?? {};
   try {
     return await skill.handler(input, cfg);
   } catch (e) {
@@ -117,39 +117,41 @@ export async function loadBuiltinSkills(): Promise<void> {
 // ─── Skill catalog (for setup wizard display) ─────────────────────────────────
 
 export const SKILL_CATALOG: Array<{
-  name:        string;
+  name: string;
   description: string;
   requiresEnv?: string[];
   requiresConfig?: string[];
 }> = [
   {
-    name:        'web_search',
+    name: 'web_search',
     description: 'Search the web — DuckDuckGo (free, no key) or Brave Search API',
     requiresConfig: ['engine: "duckduckgo" | "brave"'],
   },
   {
-    name:        'crypto_price',
+    name: 'crypto_price',
     description: 'Get token prices from CoinGecko — free, no API key needed',
   },
   {
-    name:        'fetch_url',
+    name: 'fetch_url',
     description: 'Fetch and extract text content from any public URL',
   },
   {
-    name:        'notion_search',
+    name: 'notion_search',
     description: 'Search your Notion workspace',
     requiresEnv: ['NOTION_API_KEY', 'NOTION_AGENT_DATABASE_ID'],
   },
   {
-    name:        'memory_search',
+    name: 'memory_search',
     description: 'Explicitly search Argos memory (FTS) for past context',
   },
   {
-    name:        'verify_protocol_address',
-    description: 'Verify a partner-provided crypto address against official protocol documentation — DOCS FIRST, returns APPROVE / MANUAL REVIEW / REJECT with score',
+    name: 'verify_protocol_address',
+    description:
+      'Verify a partner-provided crypto address against official protocol documentation — DOCS FIRST, returns APPROVE / MANUAL REVIEW / REJECT with score',
   },
   {
-    name:        'graph_search',
-    description: 'Search the knowledge graph for everything known about a person, company, or entity. Returns related entities and relationships.',
+    name: 'graph_search',
+    description:
+      'Search the knowledge graph for everything known about a person, company, or entity. Returns related entities and relationships.',
   },
 ];

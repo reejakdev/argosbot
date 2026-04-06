@@ -14,7 +14,7 @@
 
 import { writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import os   from 'node:os';
+import os from 'node:os';
 import { createLogger } from '../logger.js';
 import type { Config } from '../config/schema.js';
 
@@ -24,7 +24,7 @@ export function generateSelfDoc(config: Config): string {
   const lines: string[] = [];
 
   const push = (...l: string[]) => lines.push(...l);
-  const h2   = (t: string) => push('', `## ${t}`, '');
+  const h2 = (t: string) => push('', `## ${t}`, '');
   const item = (label: string, value: string | boolean | number) =>
     push(`- **${label}**: ${String(value)}`);
 
@@ -33,7 +33,9 @@ export function generateSelfDoc(config: Config): string {
   push(`> Last updated: ${new Date().toISOString()}`, '');
 
   push('Argos is your local-first AI assistant for daily operations.');
-  push('It observes messages, classifies them, proposes actions, and executes only after your explicit approval.');
+  push(
+    'It observes messages, classifies them, proposes actions, and executes only after your explicit approval.',
+  );
   push('');
 
   // ─── Identity ──────────────────────────────────────────────────────────────
@@ -54,7 +56,9 @@ export function generateSelfDoc(config: Config): string {
 
   const tg = config.channels.telegram;
   if (tg?.listener?.mode === 'mtproto') {
-    push(`- **Telegram MTProto listener** (user account): monitors ${tg.listener.monitoredChats?.length ?? 0} chat(s)`);
+    push(
+      `- **Telegram MTProto listener** (user account): monitors ${tg.listener.monitoredChats?.length ?? 0} chat(s)`,
+    );
     if (tg.listener.monitoredChats?.length) {
       for (const c of tg.listener.monitoredChats) {
         push(`  - ${c.name} (${c.chatId})${c.isGroup ? ' [group]' : ''}`);
@@ -62,20 +66,28 @@ export function generateSelfDoc(config: Config): string {
     }
   }
   if (tg?.personal?.botToken) {
-    push(`- **Telegram personal bot**: active — approval chat: ${tg.personal.approvalChatId ?? 'me'}`);
+    push(
+      `- **Telegram personal bot**: active — approval chat: ${tg.personal.approvalChatId ?? 'me'}`,
+    );
   }
 
   const slack = config.channels.slack;
   if (slack?.enabled) {
-    push(`- **Slack user-token listener**: active — monitors ${slack.monitoredChannels?.length ?? 0} explicit channel(s)${slack.monitorDMs ? ' + DMs' : ''}`);
+    push(
+      `- **Slack user-token listener**: active — monitors ${slack.monitoredChannels?.length ?? 0} explicit channel(s)${slack.monitorDMs ? ' + DMs' : ''}`,
+    );
   }
   if (slack?.personal?.botToken) {
-    push(`- **Slack personal bot**: active — approval channel: ${slack.personal.approvalChannelId ?? 'not set'}`);
+    push(
+      `- **Slack personal bot**: active — approval channel: ${slack.personal.approvalChannelId ?? 'not set'}`,
+    );
   }
 
   const discord = config.channels.discord;
   if (discord?.enabled) {
-    push(`- **Discord listener**: active — ${discord.monitoredChannels?.length ?? 0} channel(s), ${discord.monitoredGuildIds?.length ?? 0} guild(s)`);
+    push(
+      `- **Discord listener**: active — ${discord.monitoredChannels?.length ?? 0} channel(s), ${discord.monitoredGuildIds?.length ?? 0} guild(s)`,
+    );
   }
 
   if (!tg?.listener?.mode && !slack?.enabled && !discord?.enabled) {
@@ -102,7 +114,9 @@ export function generateSelfDoc(config: Config): string {
   push('- `/compact` (Telegram) — summarize conversation to save tokens');
   push('');
   push('### Config self-modification (via approval)');
-  push('- Ask: "Add @alice_telegram to monitored chats" → Argos proposes an `edit_config` action → you approve');
+  push(
+    '- Ask: "Add @alice_telegram to monitored chats" → Argos proposes an `edit_config` action → you approve',
+  );
   push('- Ask: "Enable heartbeat every 30 minutes" → same flow');
   push('- Ask: "What channels am I monitoring?" → instant answer from this document');
 
@@ -155,8 +169,12 @@ export function generateSelfDoc(config: Config): string {
   item('Archive TTL', `${config.memory?.archiveTtlDays ?? 365} days`);
   item('Auto-archive threshold (importance)', config.memory?.autoArchiveThreshold ?? 8);
   push('');
-  push('Memories are stored in SQLite with FTS5 full-text search + LanceDB for semantic (vector) search.');
-  push('Conversations from the last 30 days are vectorized per chat — each chat is isolated (no cross-chat bleed).');
+  push(
+    'Memories are stored in SQLite with FTS5 full-text search + LanceDB for semantic (vector) search.',
+  );
+  push(
+    'Conversations from the last 30 days are vectorized per chat — each chat is isolated (no cross-chat bleed).',
+  );
 
   // ─── Triage ────────────────────────────────────────────────────────────────
   if (config.triage?.enabled) {
@@ -180,8 +198,8 @@ export function generateSelfDoc(config: Config): string {
     push('');
     for (const s of config.knowledge.sources) {
       const type = s.type;
-      const name = ('name' in s && s.name) ? String(s.name) : type;
-      push(`- **${name}** [${type}] — refresh: ${('refreshHours' in s ? s.refreshHours : 24)}h`);
+      const name = 'name' in s && s.name ? String(s.name) : type;
+      push(`- **${name}** [${type}] — refresh: ${'refreshHours' in s ? s.refreshHours : 24}h`);
     }
   }
 
@@ -227,7 +245,9 @@ export function generateSelfDoc(config: Config): string {
   h2('Web Dashboard');
   push('Available at the configured host (default: http://localhost:3000).');
   push('Secured with WebAuthn (YubiKey) + TOTP backup.');
-  push('Provides: proposal approval (with elevated auth for high-risk), task list, memory browser, history.');
+  push(
+    'Provides: proposal approval (with elevated auth for high-risk), task list, memory browser, history.',
+  );
 
   return lines.join('\n');
 }
@@ -239,7 +259,7 @@ export function writeSelfDoc(config: Config): void {
     const dataDir = process.env.DATA_DIR ?? path.join(os.homedir(), '.argos');
     mkdirSync(dataDir, { recursive: true });
     const filePath = path.join(dataDir, 'argos-self.md');
-    const content  = generateSelfDoc(config);
+    const content = generateSelfDoc(config);
     writeFileSync(filePath, content, { mode: 0o600 });
     log.info(`Self-doc written: ${filePath} (${content.length} chars)`);
   } catch (e) {

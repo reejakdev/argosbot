@@ -3,7 +3,7 @@
  *
  * Supports glob patterns and exact file paths, all relative to HOME or absolute.
  * Useful for:
- *   - Argos's own config (`~/.argos/config.json`)
+ *   - Argos's own config (`~/.argos/.config.json`)
  *   - Self-description (`~/.argos/argos-self.md`)
  *   - Source code (`src/**\/*.ts`) for self-awareness
  *   - Local reference docs, runbooks, SOPs
@@ -17,34 +17,58 @@
  *   {
  *     type: 'local',
  *     name: 'Argos self',
- *     paths: ['~/.argos/argos-self.md', '~/.argos/config.json'],
+ *     paths: ['~/.argos/argos-self.md', '~/.argos/.config.json'],
  *     refreshHours: 1
  *   }
  */
 
 import { readFileSync, existsSync, statSync, globSync } from 'node:fs';
 import path from 'node:path';
-import os   from 'node:os';
+import os from 'node:os';
 import { createLogger } from '../../logger.js';
 import type { KnowledgeDocument } from '../types.js';
 
 const log = createLogger('knowledge:local');
 
-const MAX_FILE_SIZE  = 500_000; // 500 KB per file
+const MAX_FILE_SIZE = 500_000; // 500 KB per file
 const MAX_TOTAL_SIZE = 2_000_000; // 2 MB total for the whole batch
-const MAX_FILES      = 200;
+const MAX_FILES = 200;
 
 const TEXT_EXTENSIONS = new Set([
-  '.md', '.txt', '.ts', '.js', '.mjs', '.cjs', '.json', '.jsonc', '.yaml', '.yml',
-  '.toml', '.env', '.sh', '.bash', '.zsh', '.py', '.rb', '.go', '.rs', '.sql',
-  '.html', '.xml', '.csv', '.log', '.conf', '.ini', '.cfg',
+  '.md',
+  '.txt',
+  '.ts',
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.json',
+  '.jsonc',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.env',
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.py',
+  '.rb',
+  '.go',
+  '.rs',
+  '.sql',
+  '.html',
+  '.xml',
+  '.csv',
+  '.log',
+  '.conf',
+  '.ini',
+  '.cfg',
 ]);
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function fetchLocal(opts: {
-  paths:        string[];   // glob patterns or exact paths
-  name:         string;
+  paths: string[]; // glob patterns or exact paths
+  name: string;
   refreshDays?: number;
 }): Promise<KnowledgeDocument | null> {
   const home = os.homedir();
@@ -60,8 +84,12 @@ export async function fetchLocal(opts: {
 
     let matches: string[];
     try {
-      matches = (globSync(absPattern) as string[]).filter(m => {
-        try { return statSync(m).isFile(); } catch { return false; }
+      matches = (globSync(absPattern) as string[]).filter((m) => {
+        try {
+          return statSync(m).isFile();
+        } catch {
+          return false;
+        }
       });
     } catch {
       // Not a glob — try as exact path
@@ -80,7 +108,7 @@ export async function fetchLocal(opts: {
         log.warn(`Skipping root .env file`);
         continue;
       }
-      if (!files.find(f => f.resolved === resolved)) {
+      if (!files.find((f) => f.resolved === resolved)) {
         files.push({ resolved, rel: resolved.replace(home + path.sep, '~/') });
       }
     }
@@ -129,16 +157,22 @@ export async function fetchLocal(opts: {
 
   if (!parts.length) return null;
 
-  const content = `[${opts.name}]\nFiles: ${files.length} | Total: ${(totalSize / 1024).toFixed(0)} KB\n\n` + parts.join('\n\n');
+  const content =
+    `[${opts.name}]\nFiles: ${files.length} | Total: ${(totalSize / 1024).toFixed(0)} KB\n\n` +
+    parts.join('\n\n');
   const isLarge = content.length > 8000;
 
-  log.info(`Local connector "${opts.name}": ${files.map(f => f.rel).join(', ')} (${(totalSize / 1024).toFixed(0)} KB)`);
+  log.info(
+    `Local connector "${opts.name}": ${files.map((f) => f.rel).join(', ')} (${(totalSize / 1024).toFixed(0)} KB)`,
+  );
 
   return {
-    key:      `local:${opts.name.toLowerCase().replace(/\s+/g, '_')}`,
-    name:     opts.name,
-    content:  isLarge ? content.slice(0, 4000) + '\n\n[…full content indexed in vector store]' : content,
-    tags:     ['local', 'self', opts.name.toLowerCase().replace(/\s+/g, '_')],
+    key: `local:${opts.name.toLowerCase().replace(/\s+/g, '_')}`,
+    name: opts.name,
+    content: isLarge
+      ? content.slice(0, 4000) + '\n\n[…full content indexed in vector store]'
+      : content,
+    tags: ['local', 'self', opts.name.toLowerCase().replace(/\s+/g, '_')],
     fullText: isLarge ? content : undefined,
   };
 }

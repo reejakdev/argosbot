@@ -10,24 +10,24 @@ const LEVELS: Record<LogLevel, number> = {
 };
 
 const COLORS: Record<LogLevel, string> = {
-  debug: '\x1b[90m',  // gray
-  info:  '\x1b[36m',  // cyan
-  warn:  '\x1b[33m',  // yellow
-  error: '\x1b[31m',  // red
+  debug: '\x1b[90m', // gray
+  info: '\x1b[36m', // cyan
+  warn: '\x1b[33m', // yellow
+  error: '\x1b[31m', // red
 };
 
 const RESET = '\x1b[0m';
 
 // Patterns that indicate secrets — redacted before logging
 const SECRET_PATTERNS = [
-  /sk-[A-Za-z0-9\-_]{20,}/g,                         // Anthropic / Stripe API keys
-  /pk-[A-Za-z0-9\-_]{20,}/g,                          // Public keys
-  /Bearer\s+[A-Za-z0-9\-_.~+/]{20,}/g,               // Bearer tokens
-  /ntn_[A-Za-z0-9]{20,}/g,                            // Notion tokens
-  /xoxb-[A-Za-z0-9\-]{20,}/g,                         // Slack bot tokens
-  /ghp_[A-Za-z0-9]{20,}/g,                            // GitHub PATs
-  /gho_[A-Za-z0-9]{20,}/g,                            // GitHub OAuth tokens
-  /eyJ[A-Za-z0-9\-_]{30,}\.[A-Za-z0-9\-_]{30,}/g,   // JWTs
+  /sk-[A-Za-z0-9\-_]{20,}/g, // Anthropic / Stripe API keys
+  /pk-[A-Za-z0-9\-_]{20,}/g, // Public keys
+  /Bearer\s+[A-Za-z0-9\-_.~+/]{20,}/g, // Bearer tokens
+  /ntn_[A-Za-z0-9]{20,}/g, // Notion tokens
+  /xoxb-[A-Za-z0-9\-]{20,}/g, // Slack bot tokens
+  /ghp_[A-Za-z0-9]{20,}/g, // GitHub PATs
+  /gho_[A-Za-z0-9]{20,}/g, // GitHub OAuth tokens
+  /eyJ[A-Za-z0-9\-_]{30,}\.[A-Za-z0-9\-_]{30,}/g, // JWTs
 ];
 
 function sanitizeLogData(data: unknown): unknown {
@@ -47,14 +47,15 @@ function sanitizeLogData(data: unknown): unknown {
           sanitized = sanitized.replace(pattern, (match) => match.slice(0, 6) + '…[REDACTED]');
         }
         return sanitized;
-      })
+      }),
     );
   }
   return data;
 }
 
 let currentLevel: LogLevel = 'debug';
-let auditCallback: ((level: LogLevel, module: string, msg: string, data?: unknown) => void) | null = null;
+let auditCallback: ((level: LogLevel, module: string, msg: string, data?: unknown) => void) | null =
+  null;
 
 export function setLogLevel(level: LogLevel) {
   currentLevel = level;
@@ -73,7 +74,10 @@ function log(level: LogLevel, module: string, msg: string, data?: unknown) {
 
   if (data !== undefined) {
     const safe = sanitizeLogData(data);
-    console.log(`${prefix} ${msg}`, typeof safe === 'object' ? JSON.stringify(safe, null, 2) : safe); // eslint-disable-line no-console
+    console.log(
+      `${prefix} ${msg}`,
+      typeof safe === 'object' ? JSON.stringify(safe, null, 2) : safe,
+    ); // eslint-disable-line no-console
   } else {
     console.log(`${prefix} ${msg}`); // eslint-disable-line no-console
   }
@@ -84,8 +88,8 @@ function log(level: LogLevel, module: string, msg: string, data?: unknown) {
 export function createLogger(module: string) {
   return {
     debug: (msg: string, data?: unknown) => log('debug', module, msg, data),
-    info:  (msg: string, data?: unknown) => log('info',  module, msg, data),
-    warn:  (msg: string, data?: unknown) => log('warn',  module, msg, data),
+    info: (msg: string, data?: unknown) => log('info', module, msg, data),
+    warn: (msg: string, data?: unknown) => log('warn', module, msg, data),
     error: (msg: string, data?: unknown) => log('error', module, msg, data),
   };
 }

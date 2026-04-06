@@ -16,10 +16,7 @@
 import path from 'path';
 import os from 'os';
 import { createLogger } from '../logger.js';
-import {
-  embed,
-  cosineSimilarity,
-} from '../embeddings/index.js';
+import { embed, cosineSimilarity } from '../embeddings/index.js';
 import type { EmbeddingsConfig } from '../config/schema.js';
 
 const log = createLogger('vector');
@@ -27,15 +24,15 @@ const log = createLogger('vector');
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface VectorChunk {
-  id:         string;
-  sourceRef:  string;  // e.g. "github:owner/repo/file.json", "telegram:channel_id:msg_id"
-  sourceName: string;  // human label
+  id: string;
+  sourceRef: string; // e.g. "github:owner/repo/file.json", "telegram:channel_id:msg_id"
+  sourceName: string; // human label
   chunkIndex: number;
-  content:    string;
-  tags:       string[]; // e.g. ["telegram", "2026-03-30"]
+  content: string;
+  tags: string[]; // e.g. ["telegram", "2026-03-30"]
   lineStart?: number;
-  lineEnd?:   number;
-  createdAt:  number;
+  lineEnd?: number;
+  createdAt: number;
   /**
    * Generic indexed fields — semantics defined by the adapter, not the store.
    * Keeps the schema decoupled from any channel architecture.
@@ -71,13 +68,15 @@ export interface ChunkFieldMap {
 }
 
 export interface SearchResult {
-  chunk:      VectorChunk;
+  chunk: VectorChunk;
   similarity: number;
 }
 
 // ─── LanceDB connection ───────────────────────────────────────────────────────
 
-type LanceTable = Awaited<ReturnType<Awaited<ReturnType<typeof import('@lancedb/lancedb').connect>>['openTable']>>;
+type LanceTable = Awaited<
+  ReturnType<Awaited<ReturnType<typeof import('@lancedb/lancedb').connect>>['openTable']>
+>;
 let _db: Awaited<ReturnType<typeof import('@lancedb/lancedb').connect>> | null = null;
 let _table: LanceTable | null = null;
 
@@ -103,20 +102,20 @@ async function getTable() {
     // Create table with a dummy row to establish schema, then delete it
     _table = await _db!.createTable('chunks', [
       {
-        id:          '__init__',
-        source_ref:  '',
+        id: '__init__',
+        source_ref: '',
         source_name: '',
         chunk_index: 0,
-        content:     '',
-        tags:        '',
-        line_start:  0,
-        line_end:    0,
-        created_at:  0,
-        field1:      '',
-        field2:      '',
-        field3:      '',
-        field4:      '',
-        vector:      Array(768).fill(0) as number[],
+        content: '',
+        tags: '',
+        line_start: 0,
+        line_end: 0,
+        created_at: 0,
+        field1: '',
+        field2: '',
+        field3: '',
+        field4: '',
+        vector: Array(768).fill(0) as number[],
       },
     ]);
     await _table.delete('id = "__init__"');
@@ -128,37 +127,40 @@ async function getTable() {
 
 // ─── Chunking ─────────────────────────────────────────────────────────────────
 
-const CHUNK_LINES   = 40;  // ~one network+token section per chunk for address files
+const CHUNK_LINES = 40; // ~one network+token section per chunk for address files
 const OVERLAP_LINES = 15; // large overlap so parent keys (e.g. "TokenB: {") stay in scope
 const CODE_CHUNK_MAX_LINES = 80; // guard against monster depth-2 blocks
 
 export function chunkText(
-  text:       string,
-  sourceRef:  string,
+  text: string,
+  sourceRef: string,
   sourceName: string,
-  tags:       string[] = [],
-  fields?:    ChunkFieldMap,
+  tags: string[] = [],
+  fields?: ChunkFieldMap,
 ): VectorChunk[] {
-  const lines  = text.split('\n');
+  const lines = text.split('\n');
   const chunks: VectorChunk[] = [];
-  let   index  = 0;
+  let index = 0;
 
   for (let start = 0; start < lines.length; start += CHUNK_LINES - OVERLAP_LINES) {
-    const end     = Math.min(start + CHUNK_LINES, lines.length);
+    const end = Math.min(start + CHUNK_LINES, lines.length);
     const content = lines.slice(start, end).join('\n').trim();
 
-    if (content.length < 20) { if (end === lines.length) break; continue; }
+    if (content.length < 20) {
+      if (end === lines.length) break;
+      continue;
+    }
 
     chunks.push({
-      id:         `${sourceRef}:${index}`,
+      id: `${sourceRef}:${index}`,
       sourceRef,
       sourceName,
       chunkIndex: index++,
       content,
       tags,
-      lineStart:  start + 1,
-      lineEnd:    end,
-      createdAt:  Date.now(),
+      lineStart: start + 1,
+      lineEnd: end,
+      createdAt: Date.now(),
       ...fields,
     });
 
@@ -180,17 +182,17 @@ export function chunkText(
  * Falls back to chunkText() if structure is not recognised.
  */
 export function chunkCode(
-  text:       string,
-  sourceRef:  string,
+  text: string,
+  sourceRef: string,
   sourceName: string,
-  tags:       string[] = [],
-  fields?:    ChunkFieldMap,
+  tags: string[] = [],
+  fields?: ChunkFieldMap,
 ): VectorChunk[] {
   const lines = text.split('\n');
 
   // Auto-detect: structured when ≥8% of first 100 lines contain braces
   const sample = lines.slice(0, 100);
-  const braceLines = sample.filter(l => /[{}]/.test(l)).length;
+  const braceLines = sample.filter((l) => /[{}]/.test(l)).length;
   if (braceLines / Math.min(lines.length, 100) < 0.08) {
     return chunkText(text, sourceRef, sourceName, tags, fields);
   }
@@ -200,7 +202,7 @@ export function chunkCode(
   let depth = 0;
   const keyStack: string[] = []; // key name at each depth level
 
-  let sectionStart = -1;        // line index where current depth-2 block started
+  let sectionStart = -1; // line index where current depth-2 block started
 
   const pushChunk = (start: number, end: number) => {
     const blockLines = lines.slice(start, end);
@@ -210,25 +212,25 @@ export function chunkCode(
     const content = (header + blockLines.join('\n')).trim();
     if (content.length >= 20) {
       chunks.push({
-        id:         `${sourceRef}:${index}`,
+        id: `${sourceRef}:${index}`,
         sourceRef,
         sourceName,
         chunkIndex: index++,
         content,
         tags,
-        lineStart:  start + 1,
-        lineEnd:    end,
-        createdAt:  Date.now(),
+        lineStart: start + 1,
+        lineEnd: end,
+        createdAt: Date.now(),
         ...fields,
       });
     }
   };
 
   for (let i = 0; i < lines.length; i++) {
-    const line    = lines[i];
+    const line = lines[i];
     const trimmed = line.trimStart();
-    const opens   = (line.match(/\{/g) || []).length;
-    const closes  = (line.match(/\}/g) || []).length;
+    const opens = (line.match(/\{/g) || []).length;
+    const closes = (line.match(/\}/g) || []).length;
 
     // Capture key name BEFORE updating depth (so depth reflects outer context)
     if (opens > closes) {
@@ -255,7 +257,7 @@ export function chunkCode(
     }
 
     // Safety guard: oversized block → sub-chunk and continue
-    if (sectionStart >= 0 && (i - sectionStart) >= CODE_CHUNK_MAX_LINES) {
+    if (sectionStart >= 0 && i - sectionStart >= CODE_CHUNK_MAX_LINES) {
       pushChunk(sectionStart, i + 1);
       sectionStart = i + 1;
     }
@@ -287,13 +289,15 @@ export function chunkCode(
  */
 export async function cleanSource(sourceRef: string): Promise<void> {
   try {
-    const table   = await getTable();
+    const table = await getTable();
     const escaped = sourceRef.replace(/"/g, '\\"').replace(/[%_]/g, '\\$&');
     await table.delete(`source_ref LIKE "${escaped}%" ESCAPE '\\'`);
     // Compact to physically purge soft-deleted rows (available in lancedb ≥0.4)
     try {
       await (table as unknown as { optimize: () => Promise<void> }).optimize();
-    } catch { /* older lancedb versions without optimize — safe to ignore */ }
+    } catch {
+      /* older lancedb versions without optimize — safe to ignore */
+    }
     log.debug(`cleanSource: removed rows for prefix "${sourceRef}"`);
   } catch (e) {
     log.warn(`cleanSource failed for "${sourceRef}": ${e}`);
@@ -308,12 +312,14 @@ export async function cleanSource(sourceRef: string): Promise<void> {
  */
 export async function purgeOldConversations(olderThanDays: number): Promise<void> {
   try {
-    const table     = await getTable();
+    const table = await getTable();
     const threshold = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
     await table.delete(`source_ref LIKE "conversation:%" AND created_at < ${threshold}`);
     try {
       await (table as unknown as { optimize: () => Promise<void> }).optimize();
-    } catch { /* older lancedb versions — safe to ignore */ }
+    } catch {
+      /* older lancedb versions — safe to ignore */
+    }
     log.info(`Purged conversation vectors older than ${olderThanDays} days`);
   } catch (e) {
     log.warn(`purgeOldConversations failed: ${e}`);
@@ -322,13 +328,10 @@ export async function purgeOldConversations(olderThanDays: number): Promise<void
 
 // ─── Index ────────────────────────────────────────────────────────────────────
 
-export async function indexChunks(
-  chunks: VectorChunk[],
-  config: EmbeddingsConfig,
-): Promise<void> {
+export async function indexChunks(chunks: VectorChunk[], config: EmbeddingsConfig): Promise<void> {
   if (chunks.length === 0) return;
 
-  const table     = await getTable();
+  const table = await getTable();
   const sourceRef = chunks[0].sourceRef;
 
   // Hard-delete old chunks for this source before re-indexing (cleanSource compacts)
@@ -337,26 +340,26 @@ export async function indexChunks(
   log.info(`Indexing ${chunks.length} chunks for "${sourceRef}"…`);
 
   const rows: Array<Record<string, unknown>> = [];
-  let   failed = 0;
+  let failed = 0;
 
   for (const chunk of chunks) {
     try {
       const vec = await embed(chunk.content, config);
       rows.push({
-        id:          chunk.id,
-        source_ref:  chunk.sourceRef,
+        id: chunk.id,
+        source_ref: chunk.sourceRef,
         source_name: chunk.sourceName,
         chunk_index: chunk.chunkIndex,
-        content:     chunk.content,
-        tags:        chunk.tags.join(','),   // LanceDB stores as string for easy filtering
-        line_start:  chunk.lineStart ?? 0,
-        line_end:    chunk.lineEnd   ?? 0,
-        created_at:  chunk.createdAt,
-        field1:      chunk.field1 ?? '',
-        field2:      chunk.field2 ?? '',
-        field3:      chunk.field3 ?? '',
-        field4:      chunk.field4 ?? '',
-        vector:      Array.from(vec),
+        content: chunk.content,
+        tags: chunk.tags.join(','), // LanceDB stores as string for easy filtering
+        line_start: chunk.lineStart ?? 0,
+        line_end: chunk.lineEnd ?? 0,
+        created_at: chunk.createdAt,
+        field1: chunk.field1 ?? '',
+        field2: chunk.field2 ?? '',
+        field3: chunk.field3 ?? '',
+        field4: chunk.field4 ?? '',
+        vector: Array.from(vec),
       });
     } catch (e) {
       log.warn(`Failed to embed chunk ${chunk.id}: ${e}`);
@@ -368,19 +371,21 @@ export async function indexChunks(
     await table.add(rows);
   }
 
-  log.info(`Indexed ${rows.length}/${chunks.length} chunks for "${sourceRef}"${failed ? ` (${failed} failed)` : ''}`);
+  log.info(
+    `Indexed ${rows.length}/${chunks.length} chunks for "${sourceRef}"${failed ? ` (${failed} failed)` : ''}`,
+  );
 }
 
 // ─── Search ───────────────────────────────────────────────────────────────────
 
 export async function semanticSearch(
-  query:  string,
+  query: string,
   config: EmbeddingsConfig,
   opts: {
-    topK?:          number;
+    topK?: number;
     minSimilarity?: number;
-    sourceRef?:     string;
-    tags?:          string[];  // filter by tags (AND logic)
+    sourceRef?: string;
+    tags?: string[]; // filter by tags (AND logic)
     // Generic field filters — semantics depend on the adapter that indexed the chunks
     field1?: string;
     field2?: string;
@@ -390,7 +395,7 @@ export async function semanticSearch(
 ): Promise<SearchResult[]> {
   const { topK = 5, minSimilarity = 0.25 } = opts;
 
-  const table    = await getTable();
+  const table = await getTable();
   const queryVec = await embed(query, config);
 
   let q = table.vectorSearch(Array.from(queryVec)).limit(topK * 3); // over-fetch then filter
@@ -405,9 +410,9 @@ export async function semanticSearch(
     // Sanitize tag values — strip chars that could break the filter expression.
     // LanceDB uses SQL-like WHERE clauses; single quotes and % are special.
     const tagFilters = opts.tags
-      .map(t => t.replace(/['"\\%]/g, ''))   // strip injection chars
-      .filter(t => t.length > 0)
-      .map(t => `tags LIKE '%${t}%'`)
+      .map((t) => t.replace(/['"\\%]/g, '')) // strip injection chars
+      .filter((t) => t.length > 0)
+      .map((t) => `tags LIKE '%${t}%'`)
       .join(' AND ');
     if (tagFilters) q = q.where(tagFilters);
   }
@@ -428,19 +433,21 @@ export async function semanticSearch(
       const vec = new Float32Array(row['vector'] as number[]);
       return {
         chunk: {
-          id:         String(row['id']),
-          sourceRef:  String(row['source_ref']),
+          id: String(row['id']),
+          sourceRef: String(row['source_ref']),
           sourceName: String(row['source_name']),
           chunkIndex: Number(row['chunk_index']),
-          content:    String(row['content']),
-          tags:       String(row['tags'] ?? '').split(',').filter(Boolean),
-          lineStart:  Number(row['line_start']) || undefined,
-          lineEnd:    Number(row['line_end'])   || undefined,
-          createdAt:  Number(row['created_at']),
-          field1:     String(row['field1'] ?? '') || undefined,
-          field2:     String(row['field2'] ?? '') || undefined,
-          field3:     String(row['field3'] ?? '') || undefined,
-          field4:     String(row['field4'] ?? '') || undefined,
+          content: String(row['content']),
+          tags: String(row['tags'] ?? '')
+            .split(',')
+            .filter(Boolean),
+          lineStart: Number(row['line_start']) || undefined,
+          lineEnd: Number(row['line_end']) || undefined,
+          createdAt: Number(row['created_at']),
+          field1: String(row['field1'] ?? '') || undefined,
+          field2: String(row['field2'] ?? '') || undefined,
+          field3: String(row['field3'] ?? '') || undefined,
+          field4: String(row['field4'] ?? '') || undefined,
         },
         similarity: cosineSimilarity(queryVec, vec),
       };
@@ -456,12 +463,12 @@ export async function semanticSearch(
 // Result similarity is set to 1.0 to rank above vector results when exact match found.
 
 export async function keywordSearch(
-  query:    string,
+  query: string,
   opts: {
-    topK?:      number;
+    topK?: number;
     sourceRef?: string;
     /** Scope search to a specific field1 value (e.g. chatId) */
-    field1?:    string;
+    field1?: string;
   } = {},
 ): Promise<SearchResult[]> {
   const { topK = 5 } = opts;
@@ -470,19 +477,22 @@ export async function keywordSearch(
   // Extract meaningful tokens — skip short words, strip non-alphanum, deduplicate.
   // "Specific" = CamelCase or has digit — e.g. "TokenC", "TokenA", "0x1a2b"
   const isSpecific = (t: string) => /[A-Z]/.test(t.slice(1)) || /\d/.test(t);
-  const tokens = [...new Set(
-    query.split(/\s+/)
-      .map(w => w.replace(/[^a-zA-Z0-9]/g, ''))
-      .filter(w => w.length >= 4),
-  )];
+  const tokens = [
+    ...new Set(
+      query
+        .split(/\s+/)
+        .map((w) => w.replace(/[^a-zA-Z0-9]/g, ''))
+        .filter((w) => w.length >= 4),
+    ),
+  ];
   const specificTokens = tokens.filter(isSpecific);
 
   if (tokens.length === 0) return [];
 
-  const tokensLow = tokens.map(t => t.toLowerCase());
+  const tokensLow = tokens.map((t) => t.toLowerCase());
 
   // Full table scan with optional filters, then JS-side case-insensitive token matching.
-  // Combine all SQL conditions into one WHERE clause to avoid chaining uncertainty.
+  // LanceDB doesn't support case-insensitive LIKE, so we filter in JS after fetch.
   let baseQ = table.query().limit(100_000);
   const conditions: string[] = [];
   if (opts.sourceRef) {
@@ -499,33 +509,35 @@ export async function keywordSearch(
   const allRows = (await baseQ.toArray()) as Array<Record<string, unknown>>;
 
   // Keep only rows that contain at least one token (case-insensitive JS filter)
-  const rows = allRows.filter(row => {
+  const rows = allRows.filter((row) => {
     const cLow = String(row['content'] ?? '').toLowerCase();
-    return tokensLow.some(t => cLow.includes(t));
+    return tokensLow.some((t) => cLow.includes(t));
   });
 
   // Score by how many query tokens appear in the chunk (simple TF proxy)
   return rows
-    .map(row => {
-      const cLow   = String(row['content'] ?? '').toLowerCase();
-      const hits   = tokensLow.filter(t => cLow.includes(t)).length;
+    .map((row) => {
+      const cLow = String(row['content'] ?? '').toLowerCase();
+      const hits = tokensLow.filter((t) => cLow.includes(t)).length;
       // Boost: if chunk matches a specific (CamelCase/compound) token, score += 0.3 per specific hit
-      const specHits = specificTokens.filter(t => cLow.includes(t.toLowerCase())).length;
+      const specHits = specificTokens.filter((t) => cLow.includes(t.toLowerCase())).length;
       return {
         chunk: {
-          id:         String(row['id']),
-          sourceRef:  String(row['source_ref']),
+          id: String(row['id']),
+          sourceRef: String(row['source_ref']),
           sourceName: String(row['source_name']),
           chunkIndex: Number(row['chunk_index']),
-          content:    String(row['content']),
-          tags:       String(row['tags'] ?? '').split(',').filter(Boolean),
-          lineStart:  Number(row['line_start']) || undefined,
-          lineEnd:    Number(row['line_end'])   || undefined,
-          createdAt:  Number(row['created_at']),
-          field1:     String(row['field1'] ?? '') || undefined,
-          field2:     String(row['field2'] ?? '') || undefined,
-          field3:     String(row['field3'] ?? '') || undefined,
-          field4:     String(row['field4'] ?? '') || undefined,
+          content: String(row['content']),
+          tags: String(row['tags'] ?? '')
+            .split(',')
+            .filter(Boolean),
+          lineStart: Number(row['line_start']) || undefined,
+          lineEnd: Number(row['line_end']) || undefined,
+          createdAt: Number(row['created_at']),
+          field1: String(row['field1'] ?? '') || undefined,
+          field2: String(row['field2'] ?? '') || undefined,
+          field3: String(row['field3'] ?? '') || undefined,
+          field4: String(row['field4'] ?? '') || undefined,
         },
         similarity: Math.min(1.0, 0.5 + (hits / tokens.length) * 0.3 + specHits * 0.3),
       };
@@ -539,17 +551,17 @@ export async function keywordSearch(
 // keyword wins on score when both methods find the same chunk.
 
 export async function hybridSearch(
-  query:  string,
+  query: string,
   config: EmbeddingsConfig,
   opts: {
-    topK?:          number;
+    topK?: number;
     minSimilarity?: number;
-    sourceRef?:     string;
+    sourceRef?: string;
     /** Scope to a specific field1 value — prevents cross-chat context bleed */
-    field1?:        string;
-    field2?:        string;
-    field3?:        string;
-    field4?:        string;
+    field1?: string;
+    field2?: string;
+    field3?: string;
+    field4?: string;
   } = {},
 ): Promise<SearchResult[]> {
   const topK = opts.topK ?? 5;
@@ -564,25 +576,27 @@ export async function hybridSearch(
   // Merge: keyword results override vector results for same chunk id
   const merged = new Map<string, SearchResult>();
   for (const r of vecResults) merged.set(r.chunk.id, r);
-  for (const r of kwResults)  merged.set(r.chunk.id, r); // keyword wins
+  for (const r of kwResults) merged.set(r.chunk.id, r); // keyword wins
 
-  return [...merged.values()]
-    .sort((a, b) => b.similarity - a.similarity)
-    .slice(0, topK);
+  return [...merged.values()].sort((a, b) => b.similarity - a.similarity).slice(0, topK);
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
-export async function getIndexedSources(): Promise<Array<{ sourceRef: string; sourceName: string; chunks: number }>> {
+export async function getIndexedSources(): Promise<
+  Array<{ sourceRef: string; sourceName: string; chunks: number }>
+> {
   try {
     const table = await getTable();
-    const rows  = await table.query().select(['source_ref', 'source_name']).toArray() as Array<Record<string, unknown>>;
+    const rows = (await table.query().select(['source_ref', 'source_name']).toArray()) as Array<
+      Record<string, unknown>
+    >;
 
     const counts = new Map<string, { sourceName: string; chunks: number }>();
     for (const row of rows) {
-      const ref  = String(row['source_ref']);
+      const ref = String(row['source_ref']);
       const name = String(row['source_name']);
-      const cur  = counts.get(ref) ?? { sourceName: name, chunks: 0 };
+      const cur = counts.get(ref) ?? { sourceName: name, chunks: 0 };
       counts.set(ref, { ...cur, chunks: cur.chunks + 1 });
     }
 

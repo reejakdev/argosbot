@@ -36,7 +36,9 @@ db.exec(`
 `);
 
 // Check if TOTP already configured
-const existing = db.prepare('SELECT COUNT(*) as n FROM totp_secrets WHERE verified = 1').get() as { n: number };
+const existing = db.prepare('SELECT COUNT(*) as n FROM totp_secrets WHERE verified = 1').get() as {
+  n: number;
+};
 if (existing.n > 0) {
   console.log('⚠️  TOTP already configured. To reset, delete the totp_secrets table in argos.db.');
   console.log('   Run: sqlite3 ~/.argos/argos.db "DELETE FROM totp_secrets;"');
@@ -60,7 +62,9 @@ const uri = totp.toString();
 const base32 = secret.base32;
 
 // Store as verified immediately (CLI setup = trusted)
-const result = db.prepare("INSERT INTO totp_secrets (label, secret, verified) VALUES (?, ?, 1)").run('default', base32);
+const result = db
+  .prepare('INSERT INTO totp_secrets (label, secret, verified) VALUES (?, ?, 1)')
+  .run('default', base32);
 const secretId = result.lastInsertRowid;
 
 console.log('\n🔐 Argos TOTP Setup\n');
@@ -80,7 +84,11 @@ console.log(`Session lasts 13 hours.\n`);
 // Also generate a one-time login token valid for 5 minutes so you can access immediately
 const token = crypto.randomBytes(32).toString('hex');
 const expires = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-db.prepare('INSERT INTO auth_sessions (token, expires_at, method) VALUES (?, ?, ?)').run(token, expires, 'cli-setup');
+db.prepare('INSERT INTO auth_sessions (token, expires_at, method) VALUES (?, ?, ?)').run(
+  token,
+  expires,
+  'cli-setup',
+);
 
 const port = process.env.WEBAPP_PORT ?? 3000;
 console.log(`\n🚀 One-time access token (valid 5 min — open this URL now):`);

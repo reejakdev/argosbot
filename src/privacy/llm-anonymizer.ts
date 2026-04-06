@@ -33,16 +33,16 @@ const log = createLogger('llm-anonymizer');
 export type PiiCategory = 'person' | 'company' | 'project' | 'location' | 'account' | 'other';
 
 export interface LlmFinding {
-  text:       string;
-  type:       PiiCategory;
+  text: string;
+  type: PiiCategory;
   confidence: 'high' | 'medium' | 'low';
-  reason?:    string;
+  reason?: string;
 }
 
 export interface LlmAnonymizedResult extends AnonymizedResult {
-  llmFindings:    LlmFinding[];
-  llmApplied:     number;       // how many findings were actually applied
-  tokensUsed:     number;
+  llmFindings: LlmFinding[];
+  llmApplied: number; // how many findings were actually applied
+  tokensUsed: number;
 }
 
 // ─── Prompt ───────────────────────────────────────────────────────────────────
@@ -92,13 +92,10 @@ async function detectWithLlm(
   text: string,
   llmConfig: LLMConfig,
 ): Promise<{ findings: LlmFinding[]; tokensUsed: number }> {
-  const response = await llmCall(
-    { ...llmConfig, temperature: 0 },
-    [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user',   content: buildPrompt(text) },
-    ],
-  );
+  const response = await llmCall({ ...llmConfig, temperature: 0 }, [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: buildPrompt(text) },
+  ]);
 
   const tokensUsed = response.inputTokens + response.outputTokens;
 
@@ -109,14 +106,18 @@ async function detectWithLlm(
     if (!Array.isArray(raw)) return { findings: [], tokensUsed };
 
     const findings: LlmFinding[] = (raw as Array<Record<string, unknown>>)
-      .filter(f => typeof f.text === 'string' && f.text.length > 1)
-      .map(f => ({
-        text:       String(f.text),
-        type:       (['person', 'company', 'project', 'location', 'account', 'other'].includes(String(f.type))
-          ? f.type : 'other') as PiiCategory,
+      .filter((f) => typeof f.text === 'string' && f.text.length > 1)
+      .map((f) => ({
+        text: String(f.text),
+        type: (['person', 'company', 'project', 'location', 'account', 'other'].includes(
+          String(f.type),
+        )
+          ? f.type
+          : 'other') as PiiCategory,
         confidence: (['high', 'medium', 'low'].includes(String(f.confidence))
-          ? f.confidence : 'medium') as LlmFinding['confidence'],
-        reason:     f.reason ? String(f.reason) : undefined,
+          ? f.confidence
+          : 'medium') as LlmFinding['confidence'],
+        reason: f.reason ? String(f.reason) : undefined,
       }));
 
     return { findings, tokensUsed };
@@ -148,12 +149,12 @@ function applyFindings(
   }
 
   const typeToKey: Record<PiiCategory, string> = {
-    person:   'PERSON',
-    company:  'ORG',
-    project:  'PROJECT',
+    person: 'PERSON',
+    company: 'ORG',
+    project: 'PROJECT',
     location: 'LOC',
-    account:  'ACCOUNT',
-    other:    'PII',
+    account: 'ACCOUNT',
+    other: 'PII',
   };
 
   let result = text;

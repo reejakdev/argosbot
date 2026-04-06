@@ -25,20 +25,24 @@ const ulid = monotonicFactory();
 export async function indexDocument(doc: KnowledgeDocument, config: Config): Promise<void> {
   const db = getDb();
 
-  const existing = db.prepare(
-    `SELECT id FROM memories WHERE source_ref = ? AND category = 'context'`,
-  ).get(doc.key) as { id: string } | undefined;
+  const existing = db
+    .prepare(`SELECT id FROM memories WHERE source_ref = ? AND category = 'context'`)
+    .get(doc.key) as { id: string } | undefined;
 
   if (existing) {
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE memories SET content = ?, tags = ?, created_at = ? WHERE id = ?
-    `).run(doc.content, JSON.stringify(doc.tags), Date.now(), existing.id);
+    `,
+    ).run(doc.content, JSON.stringify(doc.tags), Date.now(), existing.id);
     log.debug(`Knowledge updated: ${doc.name}`);
   } else {
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO memories (id, content, tags, category, source_ref, importance, archived, expires_at, created_at)
       VALUES (?, ?, ?, 'context', ?, 7, 1, NULL, ?)
-    `).run(ulid(), doc.content, JSON.stringify(doc.tags), doc.key, Date.now());
+    `,
+    ).run(ulid(), doc.content, JSON.stringify(doc.tags), doc.key, Date.now());
     log.info(`Knowledge indexed: ${doc.name}`);
   }
 
@@ -62,11 +66,11 @@ export async function indexDocument(doc: KnowledgeDocument, config: Config): Pro
  * Check whether a document's cached version is stale based on its refreshDays setting.
  */
 export function isStale(key: string, refreshDays: number, now: number): boolean {
-  const db  = getDb();
-  const row = db.prepare(
-    `SELECT created_at FROM memories WHERE source_ref = ? AND category = 'context'`,
-  ).get(key) as { created_at: number } | undefined;
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT created_at FROM memories WHERE source_ref = ? AND category = 'context'`)
+    .get(key) as { created_at: number } | undefined;
 
   if (!row) return true;
-  return (now - row.created_at) > refreshDays * 24 * 60 * 60 * 1000;
+  return now - row.created_at > refreshDays * 24 * 60 * 60 * 1000;
 }

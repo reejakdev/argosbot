@@ -17,7 +17,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (res.status === 401) throw new ApiError('Unauthenticated', 401);
 
   const data = await res.json().catch(() => ({ error: res.statusText }));
-  if (!res.ok) throw new ApiError((data as Record<string, string>).error ?? res.statusText, res.status);
+  if (!res.ok)
+    throw new ApiError((data as Record<string, string>).error ?? res.statusText, res.status);
 
   return data as T;
 }

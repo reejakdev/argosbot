@@ -7,10 +7,11 @@
 
 import type { LLMConfig, LLMMessage, LLMResponse } from './index.js';
 import { createLogger } from '../logger.js';
+import { audit } from '../db/index.js';
 
 const log = createLogger('tool-loop');
 
-const MAX_ITERATIONS = 12;
+const DEFAULT_MAX_ITERATIONS = 12;
 
 export interface ToolDefinition {
   name: string;
@@ -49,7 +50,13 @@ export async function runToolLoop(
     body: Record<string, unknown>,
     onTextDelta?: (delta: string) => void,
   ) => Promise<{
-    content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>;
+    content: Array<{
+      type: string;
+      text?: string;
+      id?: string;
+      name?: string;
+      input?: Record<string, unknown>;
+    }>;
     stop_reason: string;
     usage: { input_tokens: number; output_tokens: number };
     model: string;
@@ -59,18 +66,19 @@ export async function runToolLoop(
   getInterrupt?: () => string | undefined,
 ): Promise<LLMResponse> {
   // Extract system prompt and build raw message array
-  const systemMsg = messages.find(m => m.role === 'system');
+  const systemMsg = messages.find((m) => m.role === 'system');
   const rawMessages: Array<Record<string, unknown>> = messages
-    .filter(m => m.role !== 'system')
-    .map(m => ({ role: m.role, content: m.content }));
+    .filter((m) => m.role !== 'system')
+    .map((m) => ({ role: m.role, content: m.content }));
 
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let finalText = '';
   let model = config.model;
   let iterations = 0;
+  const maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 
-  for (let i = 0; i < MAX_ITERATIONS; i++, iterations++) {
+  for (let i = 0; i < maxIterations; i++, iterations++) {
     const body: Record<string, unknown> = {
       model: config.model,
       max_tokens: config.maxTokens ?? 4096,
@@ -83,7 +91,9 @@ export async function runToolLoop(
 
     // Stream text deltas in real time via onEvent
     const streamDelta = onEvent
-      ? (delta: string) => { void onEvent({ type: 'text_chunk', text: delta }); }
+      ? (delta: string) => {
+          void onEvent({ type: 'text_chunk', text: delta });
+        }
       : undefined;
     const result = await callLlmRaw(config, body, streamDelta);
     model = result.model;
@@ -91,10 +101,10 @@ export async function runToolLoop(
     totalOutputTokens += result.usage.output_tokens;
 
     // Extract text and tool_use blocks
-    const textBlocks = result.content.filter(b => b.type === 'text');
-    const toolBlocks = result.content.filter(b => b.type === 'tool_use');
+    const textBlocks = result.content.filter((b) => b.type === 'text');
+    const toolBlocks = result.content.filter((b) => b.type === 'tool_use');
 
-    const newText = textBlocks.map(b => b.text ?? '').join('');
+    const newText = textBlocks.map((b) => b.text ?? '').join('');
     finalText += newText;
     // text_chunk already emitted in real-time via streamDelta above — no duplicate emit needed
 
@@ -104,7 +114,7 @@ export async function runToolLoop(
     }
 
     // Add assistant message with all blocks — clean internal fields
-    const cleanedContent = result.content.map(b => {
+    const cleanedContent = result.content.map((b) => {
       const clean = { ...b };
       delete (clean as Record<string, unknown>)._partialJson;
       return clean;
@@ -114,18 +124,38 @@ export async function runToolLoop(
     // Execute tools and collect results
     const toolResults: ToolResult[] = [];
     for (const block of toolBlocks) {
-      log.info(`Executing tool: ${block.name}`, { input: JSON.stringify(block.input).slice(0, 100) });
-      if (onEvent) await onEvent({ type: 'tool_call', name: block.name!, input: block.input ?? {} });
+      log.info(`Executing tool: ${block.name}`, {
+        input: JSON.stringify(block.input).slice(0, 100),
+      });
+      if (onEvent)
+        await onEvent({ type: 'tool_call', name: block.name!, input: block.input ?? {} });
 
       try {
-        const { output, error } = await executor(block.name!, block.input ?? {});
+        const toolTimeout = 60_000; // 60s max per tool execution
+        const { output, error } = await Promise.race([
+          executor(block.name!, block.input ?? {}),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () =>
+                reject(new Error(`Tool "${block.name}" timed out after ${toolTimeout / 1000}s`)),
+              toolTimeout,
+            ),
+          ),
+        ]);
         toolResults.push({ tool_use_id: block.id!, content: output, is_error: error });
-        if (onEvent) await onEvent({ type: 'tool_result', name: block.name!, output: output.slice(0, 200), error });
+        if (onEvent)
+          await onEvent({
+            type: 'tool_result',
+            name: block.name!,
+            output: output.slice(0, 200),
+            error,
+          });
         log.info(`Tool ${block.name} result: ${output.slice(0, 100)}`);
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
         toolResults.push({ tool_use_id: block.id!, content: `Error: ${errMsg}`, is_error: true });
-        if (onEvent) await onEvent({ type: 'tool_result', name: block.name!, output: errMsg, error: true });
+        if (onEvent)
+          await onEvent({ type: 'tool_result', name: block.name!, output: errMsg, error: true });
         log.error(`Tool ${block.name} failed: ${e}`);
       }
     }
@@ -133,7 +163,7 @@ export async function runToolLoop(
     // Add tool results as user message
     rawMessages.push({
       role: 'user',
-      content: toolResults.map(r => ({
+      content: toolResults.map((r) => ({
         type: 'tool_result',
         tool_use_id: r.tool_use_id,
         content: r.content,
@@ -146,19 +176,34 @@ export async function runToolLoop(
       const interrupt = getInterrupt();
       if (interrupt) {
         log.info(`Tool loop: injecting user interrupt — ${interrupt.slice(0, 80)}`);
-        rawMessages.push({ role: 'user', content: `[User sent a new message mid-task]: ${interrupt}` });
-        if (onEvent) await onEvent({ type: 'thinking', text: `↩️ User interrupted: ${interrupt.slice(0, 60)}` });
+        rawMessages.push({
+          role: 'user',
+          content: `[User sent a new message mid-task]: ${interrupt}`,
+        });
+        if (onEvent)
+          await onEvent({
+            type: 'thinking',
+            text: `↩️ User interrupted: ${interrupt.slice(0, 60)}`,
+          });
       }
     }
   }
 
-  log.info(`Tool loop tokens: ${totalInputTokens}in / ${totalOutputTokens}out (${iterations} iteration${iterations > 1 ? 's' : ''})`);
+  log.info(
+    `Tool loop tokens: ${totalInputTokens}in / ${totalOutputTokens}out (${iterations} iteration${iterations > 1 ? 's' : ''})`,
+  );
 
-  // If we exited the loop because we hit MAX_ITERATIONS (not because the model stopped),
+  // If we exited the loop because we hit maxIterations (not because the model stopped),
   // the task is incomplete — surface it explicitly so the user knows.
-  if (iterations >= MAX_ITERATIONS) {
-    log.warn(`Tool loop hit MAX_ITERATIONS (${MAX_ITERATIONS}) — task may be incomplete`);
-    finalText += `\n\n⚠️ *Limite atteinte* — j'ai utilisé ${MAX_ITERATIONS} itérations sans terminer. La tâche est incomplète. Dis-moi de continuer ou découpe en sous-tâches plus petites.`;
+  if (iterations >= maxIterations) {
+    log.warn(`Tool loop hit MAX_ITERATIONS (${maxIterations}) — task may be incomplete`);
+    audit('tool_loop_max_iterations', undefined, 'tool_loop', {
+      iterations,
+      model,
+      tokensIn: totalInputTokens,
+      tokensOut: totalOutputTokens,
+    });
+    finalText += `\n\n⚠️ *Limite atteinte* — j'ai utilisé ${maxIterations} itérations sans terminer. La tâche est incomplète. Dis-moi de continuer ou découpe en sous-tâches plus petites.`;
   }
 
   return {
