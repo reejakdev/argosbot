@@ -75,6 +75,7 @@ function buildVars(config: Config): Record<string, string> {
       : 'No chats monitored yet.';
 
   return {
+    bot_name: config.owner.botName ?? config.voice?.display?.botName ?? 'Argos',
     owner_name: config.owner.name,
     owner_language: (config.owner as unknown as Record<string, string>).language ?? 'en',
     owner_teams: config.owner.teams.join(', ') || 'not specified',

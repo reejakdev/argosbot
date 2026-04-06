@@ -284,6 +284,8 @@ const NotificationsSchema = z
 
 const OwnerSchema = z.object({
   name: z.string(),
+  /** Bot identity name — used in system prompts via {{bot_name}}. Default: "Argos" */
+  botName: z.string().default('Argos'),
   telegramUserId: z.number().optional(),
   teams: z.array(z.string()).default([]),
   roles: z.array(z.string()).default([]),

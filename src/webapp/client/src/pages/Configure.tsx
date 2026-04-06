@@ -1094,6 +1094,9 @@ function PipelineTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
   const [planTemp,        setPlanTemp]        = useState(cfg.claude?.planningTemperature ?? 0.3);
   const [maxIter,         setMaxIter]         = useState(cfg.claude?.maxIterations ?? 12);
 
+  // Identity
+  const [botName,       setBotName]       = useState(cfg.owner?.botName ?? cfg.voice?.display?.botName ?? 'Argos');
+
   // Shell exec
   const [shellEnabled,  setShellEnabled]  = useState(cfg.shellExec?.enabled ?? false);
   const [allowedCmds,   setAllowedCmds]   = useState(cfg.shellExec?.allowedCommands ?? []);
@@ -1113,6 +1116,9 @@ function PipelineTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
         <ToggleRow label="Cloud mode" hint="Forces YubiKey (FIDO2) for ALL risk levels. Enable when Argos runs on a remote server. Disables Telegram/Slack approval." checked={cloudMode} onChange={setCloudMode} />
         <FieldRow label="Log level">
           <Select value={logLevel} onChange={setLogLevel} options={['debug', 'info', 'warn', 'error'].map(v => ({ value: v, label: v }))} />
+        </FieldRow>
+        <FieldRow label="Bot name" hint="Identity name used in all prompts and display. Restart required.">
+          <Input value={botName} onChange={setBotName} placeholder="Argos" style={{ width: 200 }} />
         </FieldRow>
       </div>
 
@@ -1227,6 +1233,7 @@ function PipelineTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
 
       <SaveBar saving={saving} saved={saved} error={error} needsRestart={needsRestart} onSave={() => save({
         readOnly, logLevel,
+        owner:        { botName },
         security:     { cloudMode },
         triage:       { enabled: triageEnabled, myHandles, ignoreOwnTeam, mentionOnly },
         heartbeat:    { enabled: hbEnabled, intervalMinutes: hbInterval, ...(hbPrompt ? { prompt: hbPrompt } : {}) },

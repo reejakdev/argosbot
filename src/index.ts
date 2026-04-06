@@ -503,7 +503,7 @@ async function boot() {
     const display = config.voice.display ?? { botName: 'Argos', accentColor: '#4f6eff', port: 3005 };
     const { startJarvisDisplay } = await import('./webapp/jarvis.js');
     startJarvisDisplay({
-      botName: display.botName ?? 'Argos',
+      botName: config.owner.botName ?? display.botName ?? 'Argos',
       logoUrl: display.logoUrl,
       accentColor: display.accentColor ?? '#4f6eff',
       port: display.port ?? 3005,
