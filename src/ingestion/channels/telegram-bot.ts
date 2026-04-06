@@ -1578,10 +1578,9 @@ You are meeting this user for the first time. You MUST:
     let response: { content: string; inputTokens?: number; outputTokens?: number };
 
     const { callAnthropicBearerRaw: _bearerRaw } = await import('../../llm/index.js');
-    const providerRaw =
-      this.llmConfig.provider === 'anthropic'
-        ? _bearerRaw
-        : async (
+
+    // Build the compatible (OpenAI) provider function for fallback use
+    const compatProvider = async (
             cfg: import('../../llm/index.js').LLMConfig,
             body: Record<string, unknown>,
             onDelta?: (d: string) => void,
@@ -1727,7 +1726,7 @@ You are meeting this user for the first time. You MUST:
                 | undefined;
               const delta = choices?.[0]?.delta;
               // Some models (Qwen) put text in content, reasoning in a separate field
-              const textChunk = delta?.content || '';
+              const textChunk = delta?.content || (delta as Record<string,string>)?.reasoning || '';
               if (textChunk) {
                 fullText += textChunk;
                 if (onDelta) onDelta(textChunk);
@@ -1762,6 +1761,26 @@ You are meeting this user for the first time. You MUST:
             };
           };
 
+    // Select primary provider + wrap with fallback on retryable errors (429, 5xx, timeout)
+    const primaryProvider = this.llmConfig.provider === 'anthropic' ? _bearerRaw : compatProvider;
+    const fallbackCfg = this.llmConfig.fallback;
+
+    const providerWithFallback: typeof _bearerRaw = async (cfg, body, onDelta) => {
+      try {
+        return await primaryProvider(cfg, body, onDelta);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const retryable = /\b(5\d\d|429|402|rate.limit|timeout|overloaded|ECONNREFUSED|credit)/i.test(msg);
+        if (retryable && fallbackCfg) {
+          log.warn(`Primary LLM failed (${msg.slice(0, 100)}), falling back to ${fallbackCfg.provider}/${fallbackCfg.model}`);
+          // Switch config to fallback and use the appropriate provider
+          const fbProvider = fallbackCfg.provider === 'anthropic' ? _bearerRaw : compatProvider;
+          return fbProvider(fallbackCfg, body, onDelta);
+        }
+        throw e;
+      }
+    };
+
     try {
       response = await runToolLoop(
         this.llmConfig,
@@ -1769,7 +1788,7 @@ You are meeting this user for the first time. You MUST:
         messages,
         allTools,
         combinedExecutor,
-        providerRaw,
+        providerWithFallback,
         onEventWithAbort,
         getInterrupt,
       );

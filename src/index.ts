@@ -150,9 +150,10 @@ async function boot() {
     processWindow(llmConfig, privacyConfig, config, anonymizer, window),
   );
 
-  await ContextWindowManager.replayPending((window) =>
+  // Replay pending windows in background — never block boot
+  ContextWindowManager.replayPending((window) =>
     processWindow(llmConfig, privacyConfig, config, anonymizer, window),
-  );
+  ).catch(e => log.warn(`Window replay failed (non-blocking): ${e}`));
 
   // 6. Channels
   const tgPersonal = config.channels.telegram.personal;

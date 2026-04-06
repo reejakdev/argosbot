@@ -68,7 +68,7 @@ function saveSession(sessionPath: string, session: string): void {
 
 function prompt(question: string, silent = false): Promise<string> {
   return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const rl = readline.createInterface(process.stdin as never, process.stdout as never);
     if (silent) {
       process.stdout.write(question);
       process.stdin.once('data', (data) => {

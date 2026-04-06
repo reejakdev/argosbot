@@ -686,13 +686,18 @@ async function callOpenAICompat(config: LLMConfig, messages: LLMMessage[]): Prom
   }
 
   const data = (await response.json()) as {
-    choices: Array<{ message: { content: string } }>;
+    choices: Array<{ message: { content: string; reasoning?: string } }>;
     model: string;
     usage: { prompt_tokens: number; completion_tokens: number };
   };
 
+  // Some models (Qwen) put the answer in content and thinking in reasoning.
+  // If content is empty but reasoning exists, use reasoning as fallback.
+  const msg = data.choices[0]?.message;
+  const content = msg?.content || msg?.reasoning || '';
+
   return {
-    content: data.choices[0]?.message.content ?? '',
+    content,
     model: data.model,
     inputTokens: data.usage.prompt_tokens,
     outputTokens: data.usage.completion_tokens,

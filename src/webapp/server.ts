@@ -2537,9 +2537,9 @@ export function startWebApp(options: WebAppOptions): void {
   server.on('upgrade', (req, socket, head) => {
     const url = req.url ?? '/';
     if (url.startsWith('/jarvis-ws')) {
-      jarvisWss.handleUpgrade(req, socket, head, (ws) => jarvisWss.emit('connection', ws, req));
+      jarvisWss.handleUpgrade(req, socket, head, (ws) => (jarvisWss as unknown as NodeJS.EventEmitter).emit('connection', ws, req));
     } else if (url.startsWith('/ws')) {
-      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+      wss.handleUpgrade(req, socket, head, (ws) => (wss as unknown as NodeJS.EventEmitter).emit('connection', ws, req));
     } else {
       socket.destroy();
     }
@@ -2596,7 +2596,15 @@ export function startWebApp(options: WebAppOptions): void {
       }
     });
     caApp.use((_req, res) => res.status(404).send('Not found'));
-    http.createServer(caApp).listen(caPort, '0.0.0.0', () => {
+    const caServer = http.createServer(caApp);
+    caServer.on('error', (e: NodeJS.ErrnoException) => {
+      if (e.code === 'EADDRINUSE') {
+        log.warn(`CA server port ${caPort} already in use — skipping (CA still available via main HTTPS server at /ca.pem)`);
+      } else {
+        log.error(`CA server failed: ${e.message}`);
+      }
+    });
+    caServer.listen(caPort, '0.0.0.0', () => {
       const nets2 = os.networkInterfaces();
       const caIp =
         Object.values(nets2)

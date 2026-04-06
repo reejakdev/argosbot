@@ -134,7 +134,7 @@ console.log('║  Commands: /flush  /stats  /exit  /help              ║');
 console.log('╚══════════════════════════════════════════════════════╝');
 console.log('');
 
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const rl = readline.createInterface(process.stdin as never, process.stdout as never);
 const prompt = () => rl.question(`${PARTNER}> `, handleLine);
 
 async function handleLine(line: string) {

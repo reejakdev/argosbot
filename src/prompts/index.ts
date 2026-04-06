@@ -49,7 +49,16 @@ function loadSoul(dataDir?: string): string {
   }
 }
 
-function loadMd(name: string): string {
+function loadMd(name: string, dataDir?: string): string {
+  // Check for user override in ~/.argos/ first (e.g. SECURITY.md, user.md)
+  if (dataDir) {
+    const resolvedDir = dataDir.startsWith('~') ? join(homedir(), dataDir.slice(1)) : dataDir;
+    const userPath = join(resolvedDir, `${name.toUpperCase()}.md`);
+    try {
+      const content = readFileSync(userPath, 'utf-8');
+      if (content.trim()) return content;
+    } catch { /* fall through to bundled */ }
+  }
   try {
     return readFileSync(join(__dirname, `${name}.md`), 'utf-8');
   } catch {
@@ -93,11 +102,12 @@ export type PromptRole = 'classifier' | 'planner' | 'heartbeat' | 'setup' | 'cha
 export function buildSystemPrompt(role: PromptRole, config: Config): string {
   const vars = buildVars(config);
 
-  const soul = interpolate(loadSoul(config.dataDir), vars);
-  const security = interpolate(loadMd('security'), vars);
-  const user = interpolate(loadMd('user'), vars);
-  const operations = interpolate(loadMd('operations'), vars);
-  const memory = interpolate(loadMd('memory'), vars);
+  const dataDir = config.dataDir;
+  const soul = interpolate(loadSoul(dataDir), vars);
+  const security = interpolate(loadMd('security', dataDir), vars);
+  const user = interpolate(loadMd('user', dataDir), vars);
+  const operations = interpolate(loadMd('operations', dataDir), vars);
+  const memory = interpolate(loadMd('memory', dataDir), vars);
 
   switch (role) {
     case 'classifier':

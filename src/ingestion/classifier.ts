@@ -217,16 +217,16 @@ export async function classify(
       response: response.content.slice(0, 500),
     });
     result = {
-      category: 'info',
+      category: 'ignore',
       taskScope: 'info_only',
       ownerConfidence: 0,
       isMyTask: false,
       assignedTeam: null,
-      importance: 5, // elevated so it doesn't get silently dropped
-      urgency: 'medium',
+      importance: 0,
+      urgency: 'low',
       tags: ['classifier_error'],
-      summary: `Classification failed for window ${window.id} — review manually`,
-      requiresAction: true, // flag for attention
+      summary: 'Classification parse failed — message skipped',
+      requiresAction: false,
       completedTaskIds: [],
       completionSignal: 'none',
       isDuplicate: false,

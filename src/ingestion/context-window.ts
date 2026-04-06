@@ -337,6 +337,13 @@ export class ContextWindowManager {
       }
 
       try {
+        // Skip windows older than 1 hour — stale context, not worth replaying
+        if (Date.now() - row.opened_at > 3600_000) {
+          log.warn(`Skipping stale window ${row.id} (opened ${Math.round((Date.now() - row.opened_at) / 60000)}min ago)`);
+          db.prepare(`UPDATE context_windows SET status = 'done' WHERE id = ?`).run(row.id);
+          continue;
+        }
+
         const messages = JSON.parse(row.messages_json) as ContextWindow['messages'];
         const window: ContextWindow = {
           id: row.id,
@@ -354,7 +361,11 @@ export class ContextWindowManager {
         );
         db.prepare(`UPDATE context_windows SET status = 'processing' WHERE id = ?`).run(row.id);
 
-        await onReady(window);
+        // Timeout: 30s max per window — don't let a slow LLM block all replays
+        await Promise.race([
+          onReady(window),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('replay timeout (30s)')), 30_000)),
+        ]);
         db.prepare(`UPDATE context_windows SET status = 'done' WHERE id = ?`).run(row.id);
         log.info(`Window ${row.id} replayed successfully`);
       } catch (e) {

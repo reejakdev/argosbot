@@ -122,7 +122,7 @@ async function readInput(file?: string): Promise<string> {
   }
 
   return new Promise((resolve) => {
-    const rl = createInterface({ input: process.stdin });
+    const rl = createInterface(process.stdin as never);
     const lines: string[] = [];
     rl.on('line', (line) => lines.push(line));
     rl.on('close', () => resolve(lines.join('\n')));

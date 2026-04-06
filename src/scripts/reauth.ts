@@ -27,7 +27,7 @@ function openBrowser(url: string): void {
 
 function promptManualCode(): Promise<string> {
   return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const rl = readline.createInterface(process.stdin as never, process.stdout as never);
     rl.question(
       '\nPaste the callback URL or code#state (or Enter to wait for browser): ',
       (answer) => {
