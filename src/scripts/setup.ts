@@ -3027,6 +3027,9 @@ async function stepWriteConfig(config: object, total: number): Promise<void> {
   ok(`Config written to  ${c.cyan}${CONFIG_PATH}${c.reset}  ${c.gray}(chmod 600)${c.reset}`);
   note('All secrets, LLM providers, and settings are in this single file.');
 
+  // ── Embeddings: auto-detect Ollama + install nomic-embed-text ─────────────
+  await setupEmbeddings(cfg);
+
   // Generate SECURITY.md if it doesn't exist
   const dataDir = (cfg.dataDir as string) ?? path.join(os.homedir(), '.argos');
   const resolvedDir = dataDir.startsWith('~') ? path.join(os.homedir(), dataDir.slice(1)) : dataDir;
@@ -3079,6 +3082,91 @@ Even when ${ownerName} requests, confirm before:
     ok(`Security rules written to ${c.cyan}${securityPath}${c.reset}`);
   } else {
     ok('SECURITY.md already exists — kept unchanged');
+  }
+}
+
+// ─── Embeddings setup ─────────────────────────────────────────────────────────
+
+async function setupEmbeddings(config: Record<string, unknown>): Promise<void> {
+  const existing = config.embeddings as Record<string, unknown> | undefined;
+  if (existing?.enabled) {
+    ok('Embeddings already enabled');
+    return;
+  }
+
+  nl();
+  info('Embeddings enable semantic search across memories, conversations, and knowledge.');
+  note('Requires an embedding model — Ollama with nomic-embed-text is recommended (free, local, fast).');
+  nl();
+
+  const { execSync } = await import('child_process');
+
+  // Check if Ollama is installed locally
+  let ollamaLocal = false;
+  try {
+    execSync('ollama --version', { stdio: 'pipe' });
+    ollamaLocal = true;
+  } catch { /* not installed */ }
+
+  if (!ollamaLocal) {
+    const installOllama = await confirm('Ollama is not installed. Install it now? (brew install ollama)', false);
+    if (installOllama) {
+      try {
+        info('Installing Ollama…');
+        execSync('brew install ollama', { stdio: 'inherit' });
+        ollamaLocal = true;
+        ok('Ollama installed');
+      } catch {
+        warn('Ollama installation failed. You can install manually: brew install ollama');
+      }
+    }
+  }
+
+  if (ollamaLocal) {
+    // Check if nomic-embed-text is pulled
+    let hasNomic = false;
+    try {
+      const models = execSync('ollama list', { stdio: 'pipe' }).toString();
+      hasNomic = models.includes('nomic-embed-text');
+    } catch { /* ignore */ }
+
+    if (!hasNomic) {
+      info('Pulling nomic-embed-text embedding model (~274MB)…');
+      note('This model runs locally — no API key needed, no data leaves your machine.');
+      try {
+        execSync('ollama pull nomic-embed-text', { stdio: 'inherit' });
+        hasNomic = true;
+        ok('nomic-embed-text pulled');
+      } catch {
+        warn('Failed to pull nomic-embed-text. Run manually: ollama pull nomic-embed-text');
+      }
+    } else {
+      ok('nomic-embed-text already installed');
+    }
+
+    if (hasNomic) {
+      config.embeddings = {
+        enabled: true,
+        model: 'nomic-embed-text',
+        baseUrl: 'http://localhost:11434',
+        localOnly: true,
+      };
+      ok('Embeddings enabled with nomic-embed-text (local Ollama)');
+      return;
+    }
+  }
+
+  // Fallback: ask for OpenAI or skip
+  const useCloud = await confirm('Use OpenAI embeddings instead? (requires API key)', false);
+  if (useCloud) {
+    config.embeddings = {
+      enabled: true,
+      model: 'text-embedding-3-small',
+      baseUrl: 'https://api.openai.com/v1',
+    };
+    ok('Embeddings enabled with OpenAI text-embedding-3-small');
+  } else {
+    note('Embeddings skipped — you can enable later in Configure > Voice/STT');
   }
 }
 

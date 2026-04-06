@@ -256,7 +256,8 @@ function buildJarvisHtml(botName: string, logoUrl: string | undefined, accent: s
     transition:height 0.06s ease-out;
   }
   .text-display{
-    max-width:700px;min-height:60px;
+    max-width:700px;max-height:150px;
+    overflow-y:auto;
     text-align:center;font-size:1rem;
     line-height:1.8;color:var(--text);
     opacity:0;transition:opacity 0.6s;
@@ -620,10 +621,32 @@ async function playAudio(base64, format){
     animateVolume();
 
     source.onended = function(){
-      animating = false;
-      setBarLevels(new Array(BAR_COUNT).fill(0));
-      logoWrap.style.transform = 'scale(1)';
-      setStatusUI('idle');
+      // Gradual fade-out: keep animating for 1.5s (reverb/delay tail)
+      setTimeout(function(){
+        animating = false;
+        // Smooth bar fade-out over 500ms
+        var fadeSteps = 10;
+        var step = 0;
+        var fadeInterval = setInterval(function(){
+          step++;
+          var factor = 1 - (step / fadeSteps);
+          if(factor <= 0){
+            clearInterval(fadeInterval);
+            setBarLevels(new Array(BAR_COUNT).fill(0));
+            logoWrap.style.transform = 'scale(1)';
+            setStatusUI('idle');
+          } else {
+            // Reduce current bar levels gradually
+            if(analyser && freqData){
+              analyser.getByteFrequencyData(freqData);
+              var levels = [];
+              for(var i=0;i<BAR_COUNT;i++) levels.push((freqData[i]||0)/255*factor);
+              setBarLevels(levels);
+              logoWrap.style.transform = 'scale(' + (1 + factor * 0.05) + ')';
+            }
+          }
+        }, 50);
+      }, 1500);
     };
     source.start();
   }catch(e){
@@ -646,7 +669,10 @@ function showText(text){
   textEl.textContent = text;
   textEl.className = 'text-display visible';
   if(textTimer) clearTimeout(textTimer);
-  textTimer = setTimeout(function(){ textEl.className = 'text-display'; }, 15000);
+  // Duration based on word count: ~200ms per word, min 5s, max 60s
+  var words = text.split(/\s+/).length;
+  var duration = Math.max(5000, Math.min(60000, words * 200 + 3000));
+  textTimer = setTimeout(function(){ textEl.className = 'text-display'; }, duration);
 }
 
 // ── WebSocket ──────────────────────────────────────────────────────────
