@@ -13,15 +13,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
 const GITHUB_REPO = 'reejakdev/argosbot'; // owner/repo
-const RELEASES_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+const TAGS_URL = `https://api.github.com/repos/${GITHUB_REPO}/tags?per_page=30`;
 
 export interface UpdateInfo {
   current: string;       // local version e.g. "0.1.0"
-  latest: string;        // latest release tag e.g. "v0.2.0"
+  latest: string;        // latest tag name e.g. "v0.2.0"
   latestVersion: string; // tag without "v" prefix e.g. "0.2.0"
-  releaseUrl: string;    // GitHub release page URL
-  changelog: string;     // release notes (markdown)
-  publishedAt: string;   // ISO date
+  releaseUrl: string;    // GitHub tag page URL
+  changelog: string;     // commit message of the tagged commit
+  publishedAt: string;   // ISO date of the tagged commit
   hasUpdate: boolean;
   error?: string;
 }
@@ -54,17 +54,17 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
     };
     result.current = pkg.version;
 
-    // Fetch latest release from GitHub API
-    const res = await fetch(RELEASES_URL, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': `argos/${pkg.version}`,
-      },
+    // Fetch tags from GitHub API
+    const headers = {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': `argos/${pkg.version}`,
+    };
+    const res = await fetch(TAGS_URL, {
+      headers,
       signal: AbortSignal.timeout(10_000),
     });
 
     if (res.status === 404) {
-      // No releases yet — not an error, just nothing to update to
       return result;
     }
     if (!res.ok) {
@@ -72,26 +72,43 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
       return result;
     }
 
-    const data = (await res.json()) as {
-      tag_name: string;
-      html_url: string;
-      body?: string;
-      published_at: string;
-      draft: boolean;
-      prerelease: boolean;
-    };
+    const tags = (await res.json()) as Array<{
+      name: string;
+      commit: { sha: string; url: string };
+    }>;
 
-    if (data.draft || data.prerelease) {
-      // Skip drafts and prereleases
+    // Filter to vX.Y.Z tags only and pick the highest semver
+    const semverTags = tags
+      .filter((t) => /^v?\d+\.\d+\.\d+$/.test(t.name))
+      .sort((a, b) => (isNewer(a.name, b.name) ? 1 : -1));
+
+    const top = semverTags[0];
+    if (!top) {
+      // No semver tags published yet
       return result;
     }
 
-    result.latest = data.tag_name;
-    result.latestVersion = data.tag_name.replace(/^v/, '');
-    result.releaseUrl = data.html_url;
-    result.changelog = data.body ?? '';
-    result.publishedAt = data.published_at;
+    result.latest = top.name;
+    result.latestVersion = top.name.replace(/^v/, '');
+    result.releaseUrl = `https://github.com/${GITHUB_REPO}/releases/tag/${top.name}`;
     result.hasUpdate = isNewer(result.current, result.latestVersion);
+
+    // Fetch commit details for changelog + date
+    try {
+      const commitRes = await fetch(top.commit.url, {
+        headers,
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (commitRes.ok) {
+        const commit = (await commitRes.json()) as {
+          commit: { message: string; author: { date: string } };
+        };
+        result.changelog = commit.commit.message;
+        result.publishedAt = commit.commit.author.date;
+      }
+    } catch {
+      /* non-fatal */
+    }
   } catch (e) {
     result.error = e instanceof Error ? e.message : String(e);
   }
