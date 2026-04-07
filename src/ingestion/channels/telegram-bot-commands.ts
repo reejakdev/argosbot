@@ -11,7 +11,7 @@
 
 import { getDb } from '../../db/index.js';
 
-type Send = (text: string) => Promise<void>;
+type Send = (text: string, opts?: { html?: boolean }) => Promise<void>;
 
 // ─── /proposals ───────────────────────────────────────────────────────────────
 
@@ -63,10 +63,14 @@ export async function cmdTasks(send: Send): Promise<void> {
       const { formatMessageLinks } = await import('./telegram.js');
       const list = rows
         .map((r) => {
-          const partner = r.partner_name ? ` _${r.partner_name}_` : '';
+          const id = r.id.slice(-6);
+          const title = r.title.slice(0, 80);
+          const partner = r.partner_name ? ` — ${r.partner_name}` : '';
           const links = formatMessageLinks(r.message_url ?? undefined);
           const link = links ? `\n  ${links}` : '';
-          return `• \`${r.id.slice(-6)}\` ${r.title.slice(0, 80)}${partner}${link}\n  /done_${r.id.slice(-6)}`;
+          // /done_XXX with escaped underscore — Markdown V1 escapes _ as \_
+          // The \ is invisible in the rendered text but preserves the underscore
+          return `${id} — ${title}${partner}${link}\n/done\\_${id}`;
         })
         .join('\n\n');
       await send(`📋 *Open tasks (${rows.length}):*\n\n${list}`);

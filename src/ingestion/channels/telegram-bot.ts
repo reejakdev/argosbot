@@ -971,7 +971,7 @@ export class TelegramBot {
         break;
 
       case '/tasks':
-        await cmdTasks((t) => this.sendMessage(chatId, t));
+        await cmdTasks((t, opts) => this.sendMessage(chatId, t, true, opts));
         break;
 
       case '/done':
@@ -2076,14 +2076,16 @@ Only memorize: user preferences, important facts, decisions made, task outcomes.
     });
   }
 
-  async sendMessage(chatId: string, text: string, saveConv = true): Promise<void> {
+  async sendMessage(chatId: string, text: string, saveConv = true, opts?: { html?: boolean }): Promise<void> {
+    void saveConv;
     // Telegram max message length is 4096
     const chunks = this.splitMessage(text, 4096);
+    const parseMode = opts?.html ? 'HTML' : 'Markdown';
     for (const chunk of chunks) {
       await this.api('sendMessage', {
         chat_id: chatId,
         text: chunk,
-        parse_mode: 'Markdown',
+        parse_mode: parseMode,
       }).catch(async () => {
         await this.api('sendMessage', { chat_id: chatId, text: chunk });
       });

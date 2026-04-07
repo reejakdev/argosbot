@@ -431,7 +431,11 @@ export class TelegramChannel implements Channel {
         chatId,
         msgId,
         resolvedUsername,
-        (msg.replyTo as unknown as { replyToTopId?: number })?.replyToTopId,
+        // Forum topic ID: replyToTopId if present, else replyToMsgId when forumTopic flag is set
+        (msg.replyTo as unknown as { replyToTopId?: number; replyToMsgId?: number; forumTopic?: boolean })?.replyToTopId
+          ?? ((msg.replyTo as unknown as { forumTopic?: boolean; replyToMsgId?: number })?.forumTopic
+            ? (msg.replyTo as unknown as { replyToMsgId?: number })?.replyToMsgId
+            : undefined),
       ),
       links: extractLinks(content),
       isForward: !!msg.fwdFrom,

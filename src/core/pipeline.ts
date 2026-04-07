@@ -595,25 +595,33 @@ export async function processWindow(
   } else if (autoActions.length > 0 && config.readOnly) {
     // In readOnly mode: notify only, never execute (even owner workspace actions)
     log.info(`readOnly: skipping auto-execution of ${autoActions.length} action(s)`);
-    // Get the source message that triggered this — first message in the window
     const { formatMessageLinks } = await import('../ingestion/channels/telegram.js');
     const triggerMsg = window.messages[0];
-    const sender = triggerMsg?.senderName ?? 'unknown';
-    const preview = (triggerMsg?.content ?? '').slice(0, 100);
-    const links = formatMessageLinks(triggerMsg?.messageUrl);
+    const sender = (triggerMsg as { senderName?: string })?.senderName ?? window.partnerName ?? 'unknown';
+    const fullMessage = triggerMsg?.content ?? '';
+    const links = formatMessageLinks((triggerMsg as { messageUrl?: string })?.messageUrl);
     const sourceLink = links ? `\n${links}` : '';
+    const partner = window.partnerName ?? window.chatId;
 
-    for (const a of autoActions) {
+    // Group all action types into a single notification — show the FULL partner message
+    const actionLabels = autoActions.map(a => {
       const tool = (a.payload as { tool?: string })?.tool ?? 'action';
       const input = (a.payload as { input?: Record<string, unknown> })?.input ?? {};
       const title = String(input.title ?? input.message ?? a.description).slice(0, 120);
-      const partner = window.partnerName ?? window.chatId;
-      await _sendToApprovalChat(
-        `🔒 *Would ${tool}*: ${title}\n_${partner}_\n\n` +
-        `📨 *Triggered by* ${sender}:\n_"${preview}${preview.length >= 100 ? '…' : ''}"_${sourceLink}\n\n` +
-        `_Read-only mode — not executed._`
-      ).catch(() => {});
-    }
+      const icon = tool === 'create_notion_entry' ? '📝'
+        : tool === 'create_task' ? '📋'
+        : tool === 'set_reminder' ? '⏰'
+        : tool === 'add_knowledge_source' ? '📚'
+        : '🔧';
+      return `${icon} ${tool}: ${title}`;
+    }).join('\n');
+
+    await _sendToApprovalChat(
+      `🔒 *Action proposed* — ${partner}\n\n` +
+      `${actionLabels}\n\n` +
+      `📨 *${sender}:*\n${fullMessage}${sourceLink}\n\n` +
+      `_Read-only — not executed. Switch to Active mode to auto-execute._`
+    ).catch(() => {});
   }
 
   if (approvalActions.length > 0) {
