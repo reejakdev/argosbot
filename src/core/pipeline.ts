@@ -416,7 +416,6 @@ export async function processWindow(
     (result.category === 'client_request' && result.isMyTask && result.ownerConfidence >= 0.7);
 
   if (
-    !config.readOnly &&
     ownerInvolved &&
     (result.category === 'task' ||
       result.category === 'tx_request' ||
@@ -542,63 +541,25 @@ export async function processWindow(
       await _sendToApprovalChat(`${icon} *${title}*\n_${partner}_`).catch(() => {});
     }
   } else if (autoActions.length > 0 && config.readOnly) {
-    // In readOnly mode: notify only, never execute (even owner workspace actions)
-    log.info(`readOnly: skipping auto-execution of ${autoActions.length} action(s)`);
-    const { formatMessageLinks } = await import('../ingestion/channels/telegram.js');
-    const triggerMsg = window.messages[0];
-    const sender = (triggerMsg as { senderName?: string })?.senderName ?? window.partnerName ?? 'unknown';
-    const fullMessage = triggerMsg?.content ?? '';
-    const links = formatMessageLinks((triggerMsg as { messageUrl?: string })?.messageUrl);
-    const sourceLink = links ? `\n${links}` : '';
-    const partner = window.partnerName ?? window.chatId;
-
-    // Group all action types into a single notification — show the FULL partner message
-    const actionLabels = autoActions.map(a => {
-      const tool = (a.payload as { tool?: string })?.tool ?? 'action';
-      const input = (a.payload as { input?: Record<string, unknown> })?.input ?? {};
-      const title = String(input.title ?? input.message ?? a.description).slice(0, 120);
-      const icon = tool === 'create_notion_entry' ? '📝'
-        : tool === 'create_task' ? '📋'
-        : tool === 'set_reminder' ? '⏰'
-        : tool === 'add_knowledge_source' ? '📚'
-        : '🔧';
-      return `${icon} ${tool}: ${title}`;
-    }).join('\n');
-
-    await _sendToApprovalChat(
-      `🔒 *Action proposed* — ${partner}\n\n` +
-      `${actionLabels}\n\n` +
-      `📨 *${sender}:*\n${fullMessage}${sourceLink}\n\n` +
-      `_Read-only — not executed. Switch to Active mode to auto-execute._`
-    ).catch(() => {});
+    // In readOnly mode: silently skip — tasks are already persisted upstream
+    // by saveTask()/sinkTask(), so the owner sees them via /tasks. No spam notif.
+    log.info(`readOnly: suppressed ${autoActions.length} auto-action(s) — tasks already persisted upstream`);
   }
 
   if (approvalActions.length > 0) {
-    // In readOnly mode, draft_reply actions are sent directly to owner as notifications (no approval)
+    // In readOnly mode: drop draft_reply actions silently (no spam notifications),
+    // and skip the approval flow for everything else (since nothing can be executed).
+    // Tasks are still persisted upstream — that's the only durable artifact.
     if (config.readOnly) {
-      const draftActions = approvalActions.filter(a => (a.payload as { tool?: string })?.tool === 'draft_reply');
-      const otherActions = approvalActions.filter(a => (a.payload as { tool?: string })?.tool !== 'draft_reply');
-
-      // Notify drafts directly + create task for each
-      const { formatMessageLinks: _fml } = await import('../ingestion/channels/telegram.js');
-      const draftTriggerMsg = window.messages[0];
-      const draftLinks = _fml(draftTriggerMsg?.messageUrl);
-      for (const draft of draftActions) {
-        const input = (draft.payload as { input?: Record<string, unknown> })?.input ?? {};
-        const to = String(input.to ?? window.partnerName ?? 'partner');
-        const content = input.content as string ?? draft.description;
-        await _sendToApprovalChat(
-          `📝 *Draft for ${to}:*\n\n${content}\n\n${draftLinks ? draftLinks + '\n\n' : ''}_💡 Copy and send manually, or switch to Active mode for auto-send._`
-        ).catch(() => {});
-        // readOnly: do NOT persist a task — drafts are notifications only.
+      const draftCount = approvalActions.filter(
+        (a) => (a.payload as { tool?: string })?.tool === 'draft_reply',
+      ).length;
+      if (draftCount > 0) {
+        log.debug(`readOnly: suppressed ${draftCount} draft_reply notification(s)`);
       }
-
-      // Other actions still go through approval
-      if (otherActions.length > 0) {
-        proposal.actions = otherActions;
-        await requestApproval(proposal);
-        emitEvent(`proposal_created:${proposal.id}`, { proposalId: proposal.id });
-        broadcastEvent('proposal_created', { id: proposal.id, summary: proposal.contextSummary });
+      const otherCount = approvalActions.length - draftCount;
+      if (otherCount > 0) {
+        log.debug(`readOnly: suppressed ${otherCount} approval action(s)`);
       }
     } else {
       // Active mode — all actions go through approval, draft_reply sends on approve
