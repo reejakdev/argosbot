@@ -277,6 +277,34 @@ switch (subcmd) {
 
   case 'log':
   case 'logs':
+    if (rest.includes('--clean')) {
+      const dir = path.dirname(LOG_PATH);
+      const removed: string[] = [];
+      try {
+        for (const f of fs.readdirSync(dir)) {
+          if (/^argos\.log\.\d+$/.test(f)) {
+            const full = path.join(dir, f);
+            try {
+              fs.unlinkSync(full);
+              removed.push(full);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (fs.existsSync(LOG_PATH)) fs.truncateSync(LOG_PATH, 0);
+      } catch {
+        /* ignore */
+      }
+      console.log(`Truncated ${LOG_PATH}`);
+      if (removed.length) console.log(`Removed ${removed.length} rotated log(s):`);
+      for (const r of removed) console.log(`  ${r}`);
+      break;
+    }
     followLogs({ fromStart: rest.includes('--from-start') });
     break;
 
@@ -332,7 +360,7 @@ Commands:
   stop                 Stop the daemon
   restart              Restart the daemon and follow logs
   dev                  Run Argos in the foreground — logs direct, Ctrl+C to stop
-  logs                 Follow live logs  (--from-start to show all)
+  logs                 Follow live logs  (--from-start to show all, --clean to wipe rotated logs)
   dashboard            Open the web dashboard in your browser
   status               Show running status and health check  (--watch, --json)
   anthropic-login      Re-authenticate with Anthropic (OAuth token refresh)

@@ -207,11 +207,12 @@ function buildProviderConfig(
 
   const provider: LLMProvider = providerDef.api === 'anthropic' ? 'anthropic' : 'compatible';
   const authMode: AuthMode = (providerDef.auth as AuthMode) ?? 'api-key';
+  // oauthRefresh is optional — long-lived tokens (sk-ant-oat01-) don't need refresh
   const oauthTokens: OAuthTokens | undefined =
-    providerDef.oauthAccess && providerDef.oauthRefresh && providerDef.oauthExpires
+    providerDef.oauthAccess && providerDef.oauthExpires
       ? {
           access: providerDef.oauthAccess,
-          refresh: providerDef.oauthRefresh,
+          refresh: providerDef.oauthRefresh ?? '', // empty for long-lived tokens
           expires: providerDef.oauthExpires,
         }
       : undefined;

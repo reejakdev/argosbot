@@ -260,8 +260,41 @@ export class TelegramChannel implements Channel {
       return;
     }
 
-    // Skip own messages in group chats
-    if (isSelf && !isSavedMessages) return;
+    // Own messages in group chats: include as context (tagged [OWNER]) but don't classify as tasks.
+    // This gives the classifier conversation context without creating false tasks from owner messages.
+    if (isSelf && !isSavedMessages) {
+      // Still feed into context window for conversation context
+      // The classifier will see "[OWNER]: text" and understand the owner already responded
+      const content = msg.text || (msg as unknown as { message?: string }).message || '';
+      if (content.trim()) {
+        const monitored = config.channels.telegram.listener.monitoredChats.find(
+          c => c.chatId === chatId || c.chatId === `-100${chatId}`,
+        );
+        if (monitored) {
+          const msgId = typeof msg.id === 'number' ? msg.id : Number(msg.id);
+          const rawMessage: RawMessage = {
+            id: ulid(),
+            channel: 'telegram',
+            source: 'telegram',
+            chatId,
+            chatName: monitored.name,
+            chatType: resolveChatType(chatId, msg),
+            partnerName: monitored.name,
+            senderId: senderId ?? '',
+            senderName: `[OWNER] ${config.owner?.name ?? 'Me'}`,
+            content: `[OWNER]: ${content}`,
+            messageUrl: buildTelegramMessageUrl(chatId, msgId),
+            links: [],
+            isForward: false,
+            receivedAt: Date.now(),
+            timestamp: msg.date ? msg.date * 1000 : undefined,
+            meta: { telegram_message_id: msgId, telegram_chat_id: chatId, is_owner: true },
+          };
+          this.messageHandler?.(rawMessage);
+        }
+      }
+      return;
+    }
 
     // Skip messages sent by bots — automated notifications, not partner messages
     if (senderId) {
@@ -276,20 +309,44 @@ export class TelegramChannel implements Channel {
       }
     }
 
-    // Skip messages from ignored senders (by username or user ID)
-    const ignoredSenders = config.channels.telegram.listener.ignoredSenders ?? [];
+    // Skip messages from ignored senders (by username, display name, or user ID)
+    const ignoredSenders = (config.channels.telegram.listener.ignoredSenders ?? []).map(s => s.toLowerCase());
     if (ignoredSenders.length > 0 && senderId) {
       const senderIdStr = String(senderId);
       if (ignoredSenders.includes(senderIdStr)) {
-        log.debug(`[listener] skipping ignored sender ${senderId} in chat ${chatId}`);
+        log.info(`[listener] skipping ignored sender id=${senderId}`);
         return;
       }
-      // Also check by username
+      // Resolve entity to check username + first name + display name (and substring fallback)
       try {
-        const entity = (await this.client.getEntity(senderId)) as { username?: string };
-        if (entity?.username && ignoredSenders.includes(entity.username.toLowerCase())) {
-          log.debug(`[listener] skipping ignored sender @${entity.username} in chat ${chatId}`);
-          return;
+        const entity = (await this.client.getEntity(senderId)) as {
+          username?: string;
+          firstName?: string;
+          lastName?: string;
+        };
+        const candidates: string[] = [];
+        if (entity?.username) candidates.push(entity.username.toLowerCase());
+        if (entity?.firstName) candidates.push(entity.firstName.toLowerCase());
+        if (entity?.lastName) candidates.push(entity.lastName.toLowerCase());
+        if (entity?.firstName && entity?.lastName) {
+          candidates.push(`${entity.firstName} ${entity.lastName}`.toLowerCase());
+        }
+
+        // Exact match
+        for (const c of candidates) {
+          if (ignoredSenders.includes(c)) {
+            log.info(`[listener] skipping ignored sender "${c}"`);
+            return;
+          }
+        }
+        // Substring match — handles "midasamnotifierbotprod" vs "midasamnotifierbotprod_bot"
+        for (const ig of ignoredSenders) {
+          for (const c of candidates) {
+            if (c.includes(ig) || ig.includes(c)) {
+              log.info(`[listener] skipping ignored sender "${c}" (matches "${ig}")`);
+              return;
+            }
+          }
         }
       } catch {
         /* non-blocking */
@@ -1138,6 +1195,37 @@ function extractLinks(text: string): string[] {
   return [...new Set(text.match(URL_REGEX) ?? [])];
 }
 
+/**
+ * Format a message URL as a clickable link.
+ * Telegram links (t.me/...) are universal — they open in the app if installed,
+ * otherwise fall back to the web. No need for tg:// custom schemes.
+ * Web fallback links (web.telegram.org) are converted to t.me/c/ when possible.
+ */
+export function formatMessageLinks(messageUrl: string | undefined): string {
+  if (!messageUrl) return '';
+
+  // Convert web.telegram.org/a/#CHATID_MSGID → t.me/c/CHATID/MSGID (universal)
+  const webMatch = messageUrl.match(/web\.telegram\.org\/[a-z]\/#(-?\d+)(?:_(\d+))?/);
+  if (webMatch) {
+    const chatId = webMatch[1];
+    const msgId = webMatch[2];
+    // Strip -100 prefix for t.me/c/ format
+    const numericId = chatId.startsWith('-100') ? chatId.slice(4) : chatId.replace(/^-/, '');
+    const tmeUrl = msgId
+      ? `https://t.me/c/${numericId}/${msgId}`
+      : `https://t.me/c/${numericId}`;
+    return `[↗ open in Telegram](${tmeUrl})`;
+  }
+
+  // Already a t.me/... link → universal, opens in app if installed
+  if (messageUrl.includes('t.me/')) {
+    return `[↗ open in Telegram](${messageUrl})`;
+  }
+
+  // Other URLs (not Telegram)
+  return `[↗ source](${messageUrl})`;
+}
+
 // ─── Telegram message permalink ───────────────────────────────────────────────
 // Public channel (username known): https://t.me/{username}/{msgId}
 // Private group/channel (-100...): https://t.me/c/{numericId}/{msgId}
@@ -1151,25 +1239,25 @@ function buildTelegramMessageUrl(
 ): string | undefined {
   // DM (positive chatId = user ID)
   if (!chatId.startsWith('-')) {
-    // If we have a username, t.me/{username} opens in app and works universally
     if (username) return `https://t.me/${username}`;
-    // No username (user has none set) — open chat via web
+    // DM without username — t.me/c/ doesn't work for DMs, use web
     return `https://web.telegram.org/a/#${chatId}`;
   }
 
-  // Supergroup/channel with -100 prefix: use t.me/c/... format
-  if (chatId.startsWith('-100') && msgId) {
+  // Supergroup/channel with -100 prefix: use t.me/c/... format (works in app + web)
+  if (chatId.startsWith('-100')) {
     const numericId = chatId.slice(4); // strip "-100"
-    if (topicId) {
-      // Forum topic: https://t.me/c/{numericId}/{topicId}/{msgId}
+    if (topicId && msgId) {
       return `https://t.me/c/${numericId}/${topicId}/${msgId}`;
     }
-    return `https://t.me/c/${numericId}/${msgId}`;
+    if (msgId) return `https://t.me/c/${numericId}/${msgId}`;
+    return `https://t.me/c/${numericId}`;
   }
 
-  // Legacy group or no msgId — web anchor
-  if (msgId) return `https://web.telegram.org/a/#${chatId}_${msgId}`;
-  return `https://web.telegram.org/a/#${chatId}`;
+  // Legacy group — strip "-" prefix, use t.me/c/
+  const legacyId = chatId.startsWith('-') ? chatId.slice(1) : chatId;
+  if (msgId) return `https://t.me/c/${legacyId}/${msgId}`;
+  return `https://t.me/c/${legacyId}`;
 }
 
 // ─── Chat type ────────────────────────────────────────────────────────────────

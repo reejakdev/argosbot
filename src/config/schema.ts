@@ -300,6 +300,10 @@ const ModelProviderSchema = z.object({
   apiKey: z.string().optional(),
   baseUrl: z.string().optional(),
   models: z.array(z.string()).default([]),
+  // OAuth tokens — used by callAnthropicBearerRaw to auto-refresh on expiry
+  oauthAccess: z.string().optional(),
+  oauthRefresh: z.string().optional(),
+  oauthExpires: z.number().optional(),
 });
 
 const LlmSchema = z.object({
@@ -893,6 +897,12 @@ export const ConfigSchema = z.object({
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('debug'),
   dataDir: z.string().default('~/.argos'),
   readOnly: z.boolean().default(true),
+  /**
+   * Full autonomous mode — bypass approval gateway entirely.
+   * ALL planner actions auto-execute (drafts sent, scripts run, messages sent, etc.)
+   * No human gate. Use with extreme caution. Default: false.
+   */
+  autonomousMode: z.boolean().default(false),
 
   // ─── Backward compat ───────────────────────────────────────────────────────
   // Gardé temporairement pour éviter de casser les configs existantes.

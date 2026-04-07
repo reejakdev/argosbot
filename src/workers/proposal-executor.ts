@@ -286,14 +286,25 @@ export async function runScriptDirect(
 
   let success = false;
   try {
-    const cmd = lang === 'bash' || lang === 'sh' ? 'bash' : 'node';
+    // Pick interpreter per OS
+    const isWin = process.platform === 'win32';
+    let cmd: string;
+    if (lang === 'bash' || lang === 'sh') {
+      cmd = isWin ? 'bash.exe' : 'bash'; // Windows: requires Git Bash or WSL
+    } else if (lang === 'powershell' || lang === 'ps1') {
+      cmd = isWin ? 'powershell' : 'pwsh';
+    } else {
+      cmd = 'node';
+    }
     await new Promise<void>((resolve, reject) => {
-      // Ensure full PATH — launchd has a minimal PATH that misses common tools (lsof, brew, etc.)
+      // Ensure full PATH — launchd/systemd have minimal PATH that misses common tools
       const env = { ...process.env };
-      const extraPaths = ['/usr/sbin', '/usr/local/bin', '/opt/homebrew/bin', '/opt/homebrew/sbin'];
-      const currentPath = env.PATH ?? '';
-      const missingPaths = extraPaths.filter((p) => !currentPath.includes(p));
-      if (missingPaths.length) env.PATH = [...missingPaths, currentPath].join(':');
+      if (!isWin) {
+        const extraPaths = ['/usr/sbin', '/usr/local/bin', '/opt/homebrew/bin', '/opt/homebrew/sbin'];
+        const currentPath = env.PATH ?? '';
+        const missingPaths = extraPaths.filter((p) => !currentPath.includes(p));
+        if (missingPaths.length) env.PATH = [...missingPaths, currentPath].join(path.delimiter);
+      }
 
       const proc = spawn(cmd, [tmpFile], { env, timeout: timeoutSec * 1000 });
       const flushTimer = setInterval(() => {

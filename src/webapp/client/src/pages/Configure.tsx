@@ -85,6 +85,8 @@ interface ArgosConfig {
   notifications?: { preferredChannel?: string };
   security?: { cloudMode: boolean };
   readOnly: boolean;
+  autonomousMode?: boolean;
+  anonymizer?: { mode?: 'regex' | 'none' };
   logLevel?: string;
 }
 
@@ -1058,9 +1060,11 @@ function PipelineTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
   const { saving, saved, error, needsRestart, save } = useSave(onSaved);
 
   // System
-  const [readOnly,   setReadOnly]   = useState(cfg.readOnly ?? true);
-  const [cloudMode,  setCloudMode]  = useState(cfg.security?.cloudMode ?? false);
-  const [logLevel,   setLogLevel]   = useState(cfg.logLevel ?? 'debug');
+  const [readOnly,        setReadOnly]        = useState(cfg.readOnly ?? true);
+  const [autonomousMode,  setAutonomousMode]  = useState(cfg.autonomousMode ?? false);
+  const [anonymizerMode,  setAnonymizerMode]  = useState<'regex' | 'none'>(cfg.anonymizer?.mode ?? 'regex');
+  const [cloudMode,       setCloudMode]       = useState(cfg.security?.cloudMode ?? false);
+  const [logLevel,        setLogLevel]        = useState(cfg.logLevel ?? 'debug');
 
   // Triage
   const [triageEnabled,  setTriageEnabled]  = useState(cfg.triage?.enabled ?? false);

@@ -10,6 +10,7 @@
 import { createLogger } from '../logger.js';
 import { getDb, audit } from '../db/index.js';
 import { monotonicFactory } from 'ulid';
+import { formatMessageLinks } from '../ingestion/channels/telegram.js';
 import type { Config } from '../config/schema.js';
 import type { LLMConfig } from '../llm/index.js';
 import type { TriageResult } from './triage.js';
@@ -75,7 +76,7 @@ async function sinkTask(
     }
     const icon = isMyTask ? '📋' : '👥';
     const urgent = result.urgency === 'high' ? ' 🔴' : '';
-    const link = result.messageUrl ? `\n[↗ source](${result.messageUrl})` : '';
+    const link = result.messageUrl ? `\n${formatMessageLinks(result.messageUrl)}` : '';
     await notify(
       `${icon} *${result.title}*${urgent} _(task already open)_\n_${result.partner}_${link}`,
     ).catch(() => {});
@@ -149,7 +150,7 @@ async function sinkTask(
   const icon = isMyTask ? '📋' : '👥';
   const team = result.assignee && result.assignee !== 'me' ? ` → ${result.assignee}` : '';
   const urgent = result.urgency === 'high' ? ' 🔴' : '';
-  const link = result.messageUrl ? `\n[↗ source](${result.messageUrl})` : '';
+  const link = result.messageUrl ? `\n${formatMessageLinks(result.messageUrl)}` : '';
   await notify(`${icon} *${result.title}*${team}${urgent}\n_${result.partner}_${link}`).catch(
     () => {},
   );
@@ -403,7 +404,7 @@ async function sinkTxWhitelist(
   const addrNote = addrs.length
     ? `\nAddresses: \`${addrs.join('`, `')}\``
     : '\n⚠️ No address extracted';
-  const link = result.messageUrl ? `\n[↗ source](${result.messageUrl})` : '';
+  const link = result.messageUrl ? `\n${formatMessageLinks(result.messageUrl)}` : '';
 
   await notify(`🔐 *${result.title}*\n_${result.partner}_${addrNote}${link}`).catch(() => {});
 }

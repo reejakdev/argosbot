@@ -45,9 +45,10 @@ async function transcribeLocal(buffer: Buffer, filename: string, model: string):
   try {
     writeFileSync(tmpFile, buffer);
 
-    // Detect whisper CLI before entering Promise constructor (no await allowed inside)
+    // Detect whisper CLI — `where` on Windows, `which` elsewhere
+    const findCmd = process.platform === 'win32' ? 'where' : 'which';
     const whisperInPath = await new Promise<boolean>((res) => {
-      const check = spawn('which', ['whisper']);
+      const check = spawn(findCmd, ['whisper']);
       check.on('close', (code) => res(code === 0));
     });
     const outDir = voiceDir; // whisper writes output to ~/.argos/voice/

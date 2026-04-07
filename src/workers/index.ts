@@ -249,10 +249,11 @@ async function executeDraftReply(
   const chatId = (input.chatId as string | undefined) ?? to;
 
   if (config.readOnly) {
+    // Read-only: notify owner with draft, no approval needed, never sends
     return {
       success: true,
       dryRun: true,
-      output: `Draft (read-only):\n"${content.slice(0, 300)}"`,
+      output: `📝 Draft for ${to}:\n\n"${content.slice(0, 500)}"`,
       data: { to, content },
     };
   }

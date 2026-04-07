@@ -16,6 +16,9 @@ import { createLogger } from '../logger.js';
 
 const log = createLogger('oauth');
 
+// Cooldown for refresh-failed notifications (avoid spam)
+let _lastRefreshFailNotify = 0;
+
 // ─── Constants (same as pi-ai / Claude Code) ─────────────────────────────────
 
 const CLIENT_ID = atob('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl');
@@ -230,6 +233,21 @@ export async function refreshAnthropicToken(refreshToken: string): Promise<OAuth
 
   if (!res.ok) {
     const body = await res.text();
+    // Notify owner via Telegram bot — refresh token expired (~30d) requires manual reauth
+    // Cooldown: max 1 notification per hour to avoid spam
+    const now = Date.now();
+    if (now - _lastRefreshFailNotify > 3600_000) {
+      _lastRefreshFailNotify = now;
+      try {
+        const { getSendToApprovalChat } = await import('../core/pipeline.js');
+        const send = getSendToApprovalChat();
+        send(
+          '🔐 *Anthropic OAuth refresh failed*\n\n' +
+          'Run `argos reauth` from terminal to re-authenticate.\n\n' +
+          `Falling back to local LLM until then.`
+        ).catch(() => {});
+      } catch { /* not wired yet */ }
+    }
     throw new Error(`Token refresh failed: ${res.status} — ${body.slice(0, 200)}`);
   }
 
@@ -259,6 +277,13 @@ export async function getValidAccessToken(
   onRefresh?: (newTokens: OAuthTokens) => void,
 ): Promise<string> {
   if (Date.now() < tokens.expires) {
+    return tokens.access;
+  }
+
+  // Long-lived tokens (sk-ant-oat01- from `claude setup-token`) have no refresh token
+  // and don't need refresh — they're valid for ~1 year as-is
+  if (!tokens.refresh) {
+    log.warn('Access token expired but no refresh token available — token must be regenerated manually');
     return tokens.access;
   }
 

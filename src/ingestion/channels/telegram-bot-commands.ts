@@ -60,11 +60,13 @@ export async function cmdTasks(send: Send): Promise<void> {
     if (!rows.length) {
       await send('✅ No open tasks.');
     } else {
+      const { formatMessageLinks } = await import('./telegram.js');
       const list = rows
         .map((r) => {
           const partner = r.partner_name ? ` _${r.partner_name}_` : '';
-          const link = r.message_url ? `\n  [↗ source](${r.message_url})` : '';
-          return `• \`${r.id.slice(-6)}\` ${r.title.slice(0, 80)}${partner}${link}\n  /done ${r.id.slice(-6)}`;
+          const links = formatMessageLinks(r.message_url ?? undefined);
+          const link = links ? `\n  ${links}` : '';
+          return `• \`${r.id.slice(-6)}\` ${r.title.slice(0, 80)}${partner}${link}\n  /done_${r.id.slice(-6)}`;
         })
         .join('\n\n');
       await send(`📋 *Open tasks (${rows.length}):*\n\n${list}`);

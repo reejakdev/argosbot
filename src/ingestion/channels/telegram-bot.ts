@@ -57,6 +57,12 @@ export class TelegramBot {
   private interruptMessages: Map<string, string[]> = new Map();
   private approvalChatIdSaved = false;
   private mtprotoChannel: TelegramChannel | undefined;
+  // Rate limiting — sliding window per user (timestamps in ms)
+  private rateLimitTimestamps: Map<string, number[]> = new Map();
+  private rateLimitNotified: Map<string, number> = new Map();
+  private static readonly RATE_LIMIT_PER_MINUTE = 10;
+  private static readonly RATE_LIMIT_PER_HOUR = 50;
+  private static readonly RATE_LIMIT_NOTIFY_COOLDOWN_MS = 60_000;
 
   constructor(options: TelegramBotOptions) {
     this.token = options.token;
@@ -206,6 +212,39 @@ export class TelegramBot {
     // Returns immediately — polling loop stays non-blocking
   }
 
+  /** Sliding-window rate limit check. Returns false if user exceeded limits. */
+  private checkRateLimit(userId: string): boolean {
+    const now = Date.now();
+    const HOUR = 3_600_000;
+    const MINUTE = 60_000;
+    const arr = this.rateLimitTimestamps.get(userId) ?? [];
+    // Drop entries older than 1h
+    const recent = arr.filter((t) => now - t < HOUR);
+    const lastMinute = recent.filter((t) => now - t < MINUTE).length;
+    if (lastMinute >= TelegramBot.RATE_LIMIT_PER_MINUTE) {
+      this.rateLimitTimestamps.set(userId, recent);
+      return false;
+    }
+    if (recent.length >= TelegramBot.RATE_LIMIT_PER_HOUR) {
+      this.rateLimitTimestamps.set(userId, recent);
+      return false;
+    }
+    recent.push(now);
+    this.rateLimitTimestamps.set(userId, recent);
+    // Periodic cleanup — drop empty/stale user entries (cheap, runs ~1/100 calls)
+    if (Math.random() < 0.01) {
+      for (const [uid, times] of this.rateLimitTimestamps) {
+        const kept = times.filter((t) => now - t < HOUR);
+        if (kept.length === 0) this.rateLimitTimestamps.delete(uid);
+        else this.rateLimitTimestamps.set(uid, kept);
+      }
+      for (const [uid, t] of this.rateLimitNotified) {
+        if (now - t > HOUR) this.rateLimitNotified.delete(uid);
+      }
+    }
+    return true;
+  }
+
   private async _handleUpdateInner(update: TgUpdate): Promise<void> {
     const msg = update.message;
     if (!msg?.from) return;
@@ -217,6 +256,21 @@ export class TelegramBot {
     // If allowedUsers is empty, deny everyone (fail-closed — avoids open bot)
     if (this.allowedUsers.size === 0 || !this.allowedUsers.has(userId)) {
       log.warn(`Ignoring message from unauthorized user ${userId}`);
+      return;
+    }
+
+    // Rate limiting — protect against credit-burning spam
+    if (!this.checkRateLimit(userId)) {
+      const now = Date.now();
+      const lastNotified = this.rateLimitNotified.get(userId) ?? 0;
+      if (now - lastNotified > TelegramBot.RATE_LIMIT_NOTIFY_COOLDOWN_MS) {
+        this.rateLimitNotified.set(userId, now);
+        await this.sendMessage(
+          chatId,
+          `⏳ Doucement ! Limite atteinte (${TelegramBot.RATE_LIMIT_PER_MINUTE}/min, ${TelegramBot.RATE_LIMIT_PER_HOUR}/h). Réessaie dans un instant.`,
+        );
+      }
+      log.warn(`Rate limit hit for user ${userId} — message dropped`);
       return;
     }
 
@@ -438,6 +492,20 @@ export class TelegramBot {
         ? path.join(os.homedir(), dataDir.slice(1))
         : dataDir;
       const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+      // Caption "/train" → style training from file content
+      if (/^\/train\b/i.test(caption.trim())) {
+        let fileContent = '';
+        try { fileContent = buffer.toString('utf8'); } catch { /* binary file */ }
+        if (fileContent.length > 50) {
+          // Reuse the /train command handler
+          const fakeText = `/train ${fileContent}`;
+          await this.handleCommand(chatId, userId, fakeText);
+        } else {
+          await this.sendMessage(chatId, '⚠️ File too short or not text — need at least 50 chars of conversation sample.');
+        }
+        return;
+      }
 
       // Caption "knowledge" (or starts with /knowledge) → save to ~/.argos/knowledge/
       const isKnowledge = /^\/?(knowledge|ref|reference)\b/i.test(caption.trim());
@@ -1128,6 +1196,53 @@ export class TelegramBot {
         break;
       }
 
+      case '/train': {
+        // Analyze writing style from the message text (everything after /train)
+        const sample = text.slice('/train'.length).trim();
+        if (!sample || sample.length < 50) {
+          await this.sendMessage(chatId,
+            '📝 *Style training*\n\n' +
+            'Paste a conversation or text sample after the command:\n' +
+            '`/train Hey John, just checking in on the redemption — can you confirm the USDC amount? We need to process it today. Thanks`\n\n' +
+            'Or send a file with `/train` as caption.\n' +
+            'I\'ll analyze your writing style and update my drafting profile.'
+          );
+          break;
+        }
+        await this.sendMessage(chatId, '🔍 Analyzing your writing style…');
+        try {
+          const { llmCall } = await import('../../llm/index.js');
+          const styleAnalysis = await llmCall(this.llmConfig, [
+            { role: 'system', content: 'You are a writing style analyst. Analyze the text sample and extract writing patterns. Output a markdown section that can be appended to a user profile. Include: tone, sentence structure, vocabulary habits, formality level, language mixing patterns, greeting/closing habits, punctuation style. Be specific with examples from the text.' },
+            { role: 'user', content: `Analyze this writing sample and extract my style:\n\n${sample}` },
+          ]);
+
+          // Append to user.md
+          const userMdPath = this.getUserMdPath();
+          let existing = '';
+          try { existing = fs.readFileSync(userMdPath, 'utf8'); } catch { /* new file */ }
+
+          const styleSection = `\n\n## Writing Style (trained from sample)\n\n${styleAnalysis.content}`;
+
+          // Replace existing style section or append
+          if (existing.includes('## Writing Style')) {
+            const before = existing.split('## Writing Style')[0];
+            fs.writeFileSync(userMdPath, before.trimEnd() + styleSection, 'utf8');
+          } else {
+            fs.writeFileSync(userMdPath, existing.trimEnd() + styleSection, 'utf8');
+          }
+
+          await this.sendMessage(chatId,
+            '✅ Style profile updated!\n\n' +
+            styleAnalysis.content.slice(0, 500) +
+            '\n\n_Saved to user.md — I\'ll use this style for all future drafts._'
+          );
+        } catch (e) {
+          await this.sendMessage(chatId, `⚠️ Style analysis failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        break;
+      }
+
       case '/help':
         await this.sendMessage(
           chatId,
@@ -1161,7 +1276,10 @@ export class TelegramBot {
             '/add_source github owner/repo\n' +
             '/remove_source <index>\n' +
             '/refresh_sources — re-indexer\n\n' +
-            '*Filtres*\n' +
+            '*Style*\n' +
+          '/train <texte> — analyser ton style d\'écriture\n' +
+          'Envoie un fichier avec caption /train\n\n' +
+          '*Filtres*\n' +
             '/ignore @user — ignorer un sender (pas de tâches)\n' +
             '/unignore @user — ne plus ignorer\n' +
             '/ignore — lister les ignorés\n\n' +

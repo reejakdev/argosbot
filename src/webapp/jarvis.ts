@@ -599,9 +599,27 @@ function animateVolume(){
 }
 
 // ── Audio playback ─────────────────────────────────────────────────────
+let currentSource = null;
+let currentFadeTimeout = null;
+
+function stopCurrentAudio(){
+  if(currentSource){
+    try { currentSource.onended = null; currentSource.stop(0); } catch(e){}
+    try { currentSource.disconnect(); } catch(e){}
+    currentSource = null;
+  }
+  if(currentFadeTimeout){
+    clearTimeout(currentFadeTimeout);
+    currentFadeTimeout = null;
+  }
+}
+
 async function playAudio(base64, format){
   if(!audioCtx) initAudio();
   if(audioCtx.state === 'suspended') await audioCtx.resume();
+
+  // Cut current audio — new message takes precedence
+  stopCurrentAudio();
 
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -611,6 +629,7 @@ async function playAudio(base64, format){
     const buffer = await audioCtx.decodeAudioData(bytes.buffer.slice(0));
     const source = audioCtx.createBufferSource();
     source.buffer = buffer;
+    currentSource = source;
 
     source.connect(dryGain);
     if(delayNode) source.connect(delayNode);
@@ -621,8 +640,9 @@ async function playAudio(base64, format){
     animateVolume();
 
     source.onended = function(){
+      if(currentSource === source) currentSource = null;
       // Gradual fade-out: keep animating for 1.5s (reverb/delay tail)
-      setTimeout(function(){
+      currentFadeTimeout = setTimeout(function(){
         animating = false;
         // Smooth bar fade-out over 500ms
         var fadeSteps = 10;

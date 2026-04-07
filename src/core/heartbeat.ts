@@ -99,6 +99,12 @@ function buildStateSnapshot(): string {
     )
     .all() as Array<{ name: string; schedule: string; last_run: number | null }>;
 
+  // Recent proposals (last 6h) — so heartbeat doesn't re-propose the same things
+  const recentProposals = db.prepare(`
+    SELECT context_summary, status, created_at FROM proposals
+    WHERE created_at > ? ORDER BY created_at DESC LIMIT 10
+  `).all(now - 6 * 3600_000) as Array<{ context_summary: string; status: string; created_at: number }>;
+
   const lines: string[] = [];
 
   lines.push(`=== CURRENT TIME: ${new Date().toISOString()} ===\n`);
@@ -139,6 +145,14 @@ function buildStateSnapshot(): string {
     for (const j of agentCrons) {
       const lastRun = j.last_run ? `last ran ${new Date(j.last_run).toISOString()}` : 'never ran';
       lines.push(`  • ${j.name} [${j.schedule}] — ${lastRun}`);
+    }
+    lines.push('');
+  }
+
+  if (recentProposals.length) {
+    lines.push(`ALREADY PROPOSED IN LAST 6H (${recentProposals.length}) — DO NOT re-propose these:`);
+    for (const p of recentProposals) {
+      lines.push(`  • [${p.status}] ${p.context_summary?.slice(0, 100)}`);
     }
     lines.push('');
   }
@@ -328,7 +342,30 @@ export async function runProactivePlan(
   log.info(`Heartbeat [${label}]: ${actions.length} action(s) proposed → ${proposal.id}`);
   audit('heartbeat_proposal', proposal.id, 'heartbeat', { label, actions: actions.length });
 
-  await requestApproval(proposal);
+  // In readOnly mode, draft_reply actions are sent directly as notifications (no approval)
+  if (config.readOnly) {
+    const draftActions = actions.filter(a => (a.payload as { tool?: string })?.tool === 'draft_reply');
+    const otherActions = actions.filter(a => (a.payload as { tool?: string })?.tool !== 'draft_reply');
+
+    for (const draft of draftActions) {
+      const input = (draft.payload as { input?: Record<string, unknown> })?.input ?? {};
+      const to = String(input.to ?? 'partner');
+      const content = input.content as string ?? draft.description;
+      await opts.sendToApprovalChat(
+        `📝 *Draft for ${to}:*\n\n${content}\n\n_💡 Copy and send manually, or switch to Active mode for auto-send._`
+      ).catch(() => {});
+    }
+
+    if (otherActions.length > 0) {
+      proposal.actions = otherActions;
+      await requestApproval(proposal);
+    } else {
+      // Mark proposal as auto-handled (no approval needed)
+      db.prepare(`UPDATE proposals SET status = 'executed' WHERE id = ?`).run(proposal.id);
+    }
+  } else {
+    await requestApproval(proposal);
+  }
 }
 
 // ─── Regular heartbeat (called by cron) ──────────────────────────────────────

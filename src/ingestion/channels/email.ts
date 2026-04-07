@@ -291,7 +291,7 @@ export function createEmailChannel(): EmailChannel | null {
   const password = process.env.EMAIL_IMAP_PASSWORD;
 
   if (!host || !user || !password) {
-    log.warn(
+    log.debug(
       'Email channel not configured — set EMAIL_IMAP_HOST, EMAIL_IMAP_USER, EMAIL_IMAP_PASSWORD in .env',
     );
     return null;

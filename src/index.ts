@@ -17,6 +17,8 @@
  */
 
 import 'dotenv/config';
+import os from 'node:os';
+import path from 'node:path';
 import { loadConfig, getDataDir, hardenDataDir } from './config/index.js';
 import { initDb, loadUlid, audit } from './db/index.js';
 import { setLogLevel, setAuditCallback, createLogger } from './logger.js';
@@ -276,7 +278,7 @@ async function boot() {
       signalCliBin: config.channels.signal.signalCliBin ?? 'signal-cli',
       phoneNumber: config.channels.signal.phoneNumber,
       allowedNumbers: config.channels.signal.allowedNumbers ?? [],
-      socketPath: config.channels.signal.socketPath ?? '/tmp/argos-signal.sock',
+      socketPath: config.channels.signal.socketPath ?? path.join(os.tmpdir(), 'argos-signal.sock'),
       signalDataDir: config.channels.signal.signalDataDir,
     });
     registerChannel(signalChannel);

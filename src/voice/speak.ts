@@ -140,9 +140,17 @@ export async function speak(
 /**
  * Play audio bytes on the local machine speakers.
  * Uses afplay (macOS), ffplay (Linux), or PowerShell (Windows).
- * Works with MP3, AIFF, WAV — any format the OS player supports.
+ * If a previous playback is in progress, it is interrupted (new audio takes precedence).
  */
+let _currentPlaybackProc: import('child_process').ChildProcess | null = null;
+
 async function playAudioLocal(audio: Buffer, ext: string): Promise<void> {
+  // Cut current playback — new message takes precedence
+  if (_currentPlaybackProc) {
+    try { _currentPlaybackProc.kill('SIGTERM'); } catch { /* ignore */ }
+    _currentPlaybackProc = null;
+  }
+
   const voiceDir = join(homedir(), '.argos', 'voice');
   mkdirSync(voiceDir, { recursive: true });
   const tmpFile = join(voiceDir, `playback_${Date.now()}.${ext}`);
@@ -163,11 +171,14 @@ async function playAudioLocal(audio: Buffer, ext: string): Promise<void> {
     }
 
     const proc = spawn(cmd, args, { stdio: 'ignore' });
+    _currentPlaybackProc = proc;
     proc.on('close', () => {
+      if (_currentPlaybackProc === proc) _currentPlaybackProc = null;
       try { unlinkSync(tmpFile); } catch { /* ignore */ }
       resolve();
     });
     proc.on('error', () => {
+      if (_currentPlaybackProc === proc) _currentPlaybackProc = null;
       try { unlinkSync(tmpFile); } catch { /* ignore */ }
       resolve();
     });

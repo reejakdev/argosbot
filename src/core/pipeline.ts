@@ -55,6 +55,10 @@ export function setSendToApprovalChat(fn: (text: string) => Promise<void>): void
   _sendToApprovalChat = fn;
 }
 
+export function getSendToApprovalChat(): (text: string) => Promise<void> {
+  return _sendToApprovalChat;
+}
+
 // ─── Message ingestion ────────────────────────────────────────────────────────
 
 export async function ingestMessage(
@@ -113,10 +117,9 @@ export async function ingestMessage(
 
   // LLM second pass — catches what regex missed (names, companies, project names…)
   // ONLY runs if a local privacy provider is configured for the llmAnon role.
-  // Never runs with the primary (cloud) LLM — sending raw content to a cloud model
-  // to "anonymize" it defeats the entire privacy model.
+  // Skipped entirely when anonymizer.mode === 'none'.
   const llmAnonConfig = llmForRole('llmAnon', llmConfig, privacyConfig, config);
-  if (llmAnonConfig !== llmConfig) {
+  if (config.anonymizer.mode !== 'none' && llmAnonConfig !== llmConfig) {
     try {
       const { enhanceWithLlm } = await import('../privacy/llm-anonymizer.js');
       const enhanced = await enhanceWithLlm(anon, llmAnonConfig, { skipIfClean: false });
@@ -468,7 +471,8 @@ export async function processWindow(
     ownerInvolved &&
     (result.category === 'task' ||
       result.category === 'tx_request' ||
-      result.category === 'client_request')
+      result.category === 'client_request' ||
+      result.requiresAction)
   ) {
     const taskId = saveTask(result.summary.slice(0, 120), result, window);
     broadcastEvent('task_created', {
@@ -551,11 +555,17 @@ export async function processWindow(
     return;
   }
 
-  // Auto-execute owner workspace actions (Notion, tasks, reminders)
-  const autoActions = proposal.actions.filter((a) => !a.requiresApproval);
-  const approvalActions = proposal.actions.filter((a) => a.requiresApproval);
+  // Auto-execute owner workspace actions (Notion, tasks, reminders) — DISABLED in readOnly mode
+  // In autonomousMode, ALL actions are auto-executed (bypass approval entirely)
+  const autonomous = (config as Record<string, unknown>).autonomousMode === true;
+  const autoActions = autonomous
+    ? proposal.actions
+    : proposal.actions.filter((a) => !a.requiresApproval);
+  const approvalActions = autonomous
+    ? []
+    : proposal.actions.filter((a) => a.requiresApproval);
 
-  if (autoActions.length > 0) {
+  if (autoActions.length > 0 && !config.readOnly) {
     const { executeProposal } = await import('../workers/index.js');
     const { generateExecutionToken } = await import('../gateway/approval.js');
     const autoToken = generateExecutionToken(proposal.id);
@@ -582,13 +592,72 @@ export async function processWindow(
       const icon = (a.payload as { tool?: string })?.tool === 'set_reminder' ? '⏰' : '📋';
       await _sendToApprovalChat(`${icon} *${title}*\n_${partner}_`).catch(() => {});
     }
+  } else if (autoActions.length > 0 && config.readOnly) {
+    // In readOnly mode: notify only, never execute (even owner workspace actions)
+    log.info(`readOnly: skipping auto-execution of ${autoActions.length} action(s)`);
+    // Get the source message that triggered this — first message in the window
+    const { formatMessageLinks } = await import('../ingestion/channels/telegram.js');
+    const triggerMsg = window.messages[0];
+    const sender = triggerMsg?.senderName ?? 'unknown';
+    const preview = (triggerMsg?.content ?? '').slice(0, 100);
+    const links = formatMessageLinks(triggerMsg?.messageUrl);
+    const sourceLink = links ? `\n${links}` : '';
+
+    for (const a of autoActions) {
+      const tool = (a.payload as { tool?: string })?.tool ?? 'action';
+      const input = (a.payload as { input?: Record<string, unknown> })?.input ?? {};
+      const title = String(input.title ?? input.message ?? a.description).slice(0, 120);
+      const partner = window.partnerName ?? window.chatId;
+      await _sendToApprovalChat(
+        `🔒 *Would ${tool}*: ${title}\n_${partner}_\n\n` +
+        `📨 *Triggered by* ${sender}:\n_"${preview}${preview.length >= 100 ? '…' : ''}"_${sourceLink}\n\n` +
+        `_Read-only mode — not executed._`
+      ).catch(() => {});
+    }
   }
 
   if (approvalActions.length > 0) {
-    proposal.actions = approvalActions;
-    await requestApproval(proposal);
-    emitEvent(`proposal_created:${proposal.id}`, { proposalId: proposal.id });
-    broadcastEvent('proposal_created', { id: proposal.id, summary: proposal.contextSummary });
+    // In readOnly mode, draft_reply actions are sent directly to owner as notifications (no approval)
+    if (config.readOnly) {
+      const draftActions = approvalActions.filter(a => (a.payload as { tool?: string })?.tool === 'draft_reply');
+      const otherActions = approvalActions.filter(a => (a.payload as { tool?: string })?.tool !== 'draft_reply');
+
+      // Notify drafts directly + create task for each
+      const { formatMessageLinks: _fml } = await import('../ingestion/channels/telegram.js');
+      const draftTriggerMsg = window.messages[0];
+      const draftLinks = _fml(draftTriggerMsg?.messageUrl);
+      for (const draft of draftActions) {
+        const input = (draft.payload as { input?: Record<string, unknown> })?.input ?? {};
+        const to = String(input.to ?? window.partnerName ?? 'partner');
+        const content = input.content as string ?? draft.description;
+        await _sendToApprovalChat(
+          `📝 *Draft for ${to}:*\n\n${content}\n\n${draftLinks ? draftLinks + '\n\n' : ''}_💡 Copy and send manually, or switch to Active mode for auto-send._`
+        ).catch(() => {});
+
+        // Create a task so it shows in /tasks
+        saveTask(`Reply to ${to}`, {
+          summary: `Reply to ${to}: ${content.slice(0, 80)}`,
+          category: 'client_request',
+          importance: 6,
+          isMyTask: true,
+          tags: [],
+        } as unknown as ClassificationResult, window);
+      }
+
+      // Other actions still go through approval
+      if (otherActions.length > 0) {
+        proposal.actions = otherActions;
+        await requestApproval(proposal);
+        emitEvent(`proposal_created:${proposal.id}`, { proposalId: proposal.id });
+        broadcastEvent('proposal_created', { id: proposal.id, summary: proposal.contextSummary });
+      }
+    } else {
+      // Active mode — all actions go through approval, draft_reply sends on approve
+      proposal.actions = approvalActions;
+      await requestApproval(proposal);
+      emitEvent(`proposal_created:${proposal.id}`, { proposalId: proposal.id });
+      broadcastEvent('proposal_created', { id: proposal.id, summary: proposal.contextSummary });
+    }
   }
 }
 

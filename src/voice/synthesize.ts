@@ -109,7 +109,15 @@ export async function synthesizeSpeech(text: string, config: TtsConfig): Promise
  * Speak text on the local machine speaker (non-blocking).
  * macOS: `say`, Windows: PowerShell SAPI, Linux: `espeak`.
  */
+let _currentSayProc: import('child_process').ChildProcess | null = null;
+
 export async function speakLocal(text: string, voice?: string): Promise<void> {
+  // Cut current `say` if running — new message takes precedence
+  if (_currentSayProc) {
+    try { _currentSayProc.kill('SIGTERM'); } catch { /* ignore */ }
+    _currentSayProc = null;
+  }
+
   const sanitized = text.replace(/[`$"\\]/g, ''); // prevent injection
   return new Promise((resolve, _reject) => {
     let proc;
@@ -123,8 +131,13 @@ export async function speakLocal(text: string, voice?: string): Promise<void> {
     } else {
       proc = spawn('espeak', [...(voice ? ['-v', voice] : []), sanitized]);
     }
-    proc.on('close', () => resolve());
+    _currentSayProc = proc;
+    proc.on('close', () => {
+      if (_currentSayProc === proc) _currentSayProc = null;
+      resolve();
+    });
     proc.on('error', (e) => {
+      if (_currentSayProc === proc) _currentSayProc = null;
       log.warn(`Local TTS failed: ${e.message}`);
       resolve();
     });
