@@ -270,41 +270,9 @@ export class TelegramChannel implements Channel {
       return;
     }
 
-    // Own messages in group chats: include as context (tagged [OWNER]) but don't classify as tasks.
-    // This gives the classifier conversation context without creating false tasks from owner messages.
-    if (isSelf && !isSavedMessages) {
-      // Still feed into context window for conversation context
-      // The classifier will see "[OWNER]: text" and understand the owner already responded
-      const content = msg.text || (msg as unknown as { message?: string }).message || '';
-      if (content.trim()) {
-        const monitored = config.channels.telegram.listener.monitoredChats.find(
-          c => c.chatId === chatId || c.chatId === `-100${chatId}`,
-        );
-        if (monitored) {
-          const msgId = typeof msg.id === 'number' ? msg.id : Number(msg.id);
-          const rawMessage: RawMessage = {
-            id: ulid(),
-            channel: 'telegram',
-            source: 'telegram',
-            chatId,
-            chatName: monitored.name,
-            chatType: resolveChatType(chatId, msg),
-            partnerName: monitored.name,
-            senderId: senderId ?? '',
-            senderName: `[OWNER] ${config.owner?.name ?? 'Me'}`,
-            content: `[OWNER]: ${content}`,
-            messageUrl: buildTelegramMessageUrl(chatId, msgId),
-            links: [],
-            isForward: false,
-            receivedAt: Date.now(),
-            timestamp: msg.date ? msg.date * 1000 : undefined,
-            meta: { telegram_message_id: msgId, telegram_chat_id: chatId, is_owner: true },
-          };
-          this.messageHandler?.(rawMessage);
-        }
-      }
-      return;
-    }
+    // Skip own messages entirely — they should never trigger tasks/proposals.
+    // (Previously we tried to inject as context but the classifier still processed them.)
+    if (isSelf && !isSavedMessages) return;
 
     // Skip messages sent by bots — automated notifications, not partner messages
     if (senderId) {

@@ -352,6 +352,30 @@ switch (subcmd) {
     process.exit(success ? 0 : 1);
   }
 
+  case 'check-update':
+  case 'version': {
+    const { checkForUpdate } = await import('./check-update.js');
+    const info = await checkForUpdate();
+    if (info.error) {
+      console.error(`❌ ${info.error}`);
+      process.exit(1);
+    }
+    console.log(`Current:  v${info.current}`);
+    if (info.latest) {
+      console.log(`Latest:   ${info.latest}  (${new Date(info.publishedAt).toLocaleDateString()})`);
+    }
+    if (info.hasUpdate) {
+      console.log(`\n🆕 Update available — ${info.releaseUrl}`);
+      console.log(`\nChangelog:\n${info.changelog.slice(0, 500)}`);
+      console.log(`\nUpdate: git pull && npm install && npm run build && argos restart`);
+    } else if (!info.latest) {
+      console.log(`\nℹ️  No releases published yet`);
+    } else {
+      console.log(`\n✅ Up to date`);
+    }
+    process.exit(0);
+  }
+
   default:
     console.log(`\nArgos CLI\n\nUsage: argos <command> [options]\n
 Commands:

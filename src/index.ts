@@ -538,7 +538,7 @@ async function boot() {
     readOnly: config.readOnly,
   });
 
-  // Check for updates in background — non-blocking
+  // Check for updates in background — non-blocking, GitHub Releases API
   void (async () => {
     try {
       const { checkForUpdate } = await import('./scripts/check-update.js');
@@ -548,20 +548,22 @@ async function boot() {
         return;
       }
       if (info.hasUpdate) {
-        log.info(`🆕 Update available: ${info.behind} commit(s) behind — latest: ${info.latest} "${info.latestMessage}"`);
+        log.info(`🆕 Update available: v${info.current} → ${info.latest}`);
         // Notify owner via Telegram bot
         try {
-          const send = sendToApprovalChat;
-          await send(
-            `🆕 *Argos update available*\n\n` +
-            `Current: \`${info.current}\` ${info.currentMessage}\n` +
-            `Latest:  \`${info.latest}\` ${info.latestMessage}\n` +
-            `${info.behind} commit(s) behind\n\n` +
+          const changelogPreview = info.changelog.slice(0, 400);
+          await sendToApprovalChat(
+            `🆕 *Argos ${info.latest} available*\n\n` +
+            `You're on v${info.current}\n\n` +
+            `*Changelog:*\n${changelogPreview}${info.changelog.length > 400 ? '…' : ''}\n\n` +
+            `[View release](${info.releaseUrl})\n\n` +
             `Update: \`git pull && npm install && npm run build && argos restart\``
           );
         } catch { /* non-blocking */ }
+      } else if (info.latest) {
+        log.info(`✅ Argos is up to date (v${info.current}, latest: ${info.latest})`);
       } else {
-        log.info(`✅ Argos is up to date (${info.current})`);
+        log.debug(`No releases published yet for ${'reejakdev/argosbot'}`);
       }
     } catch (e) {
       log.debug(`Update check failed: ${e instanceof Error ? e.message : String(e)}`);
