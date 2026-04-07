@@ -971,7 +971,7 @@ export class TelegramBot {
         break;
 
       case '/tasks':
-        await cmdTasks((t, opts) => this.sendMessage(chatId, t, true, opts));
+        await cmdTasks((t, opts) => this.sendMessage(chatId, t, true, opts), arg);
         break;
 
       case '/done':

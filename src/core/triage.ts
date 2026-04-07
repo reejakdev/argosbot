@@ -59,10 +59,13 @@ export interface TriageResult {
 interface PreScreenResult {
   mentionsMe: boolean;
   isReplyToMe: boolean; // message is a direct reply to the owner's own message
-  mentionedTeams: string[]; // team names
+  mentionedTeams: string[]; // teams matched by handle OR keyword (broad)
+  mentionedTeamsByHandle: string[]; // teams matched by handle ONLY (strict, no keyword)
   isWhitelistReq: boolean;
   isExternal: boolean; // message from a monitored partner chat (always triage)
   isFromOwnTeam: boolean; // sender is a member of an internal team
+  isFromAnyTeam: boolean; // sender is a member of ANY watched team
+  senderTeam?: string; // the team name the sender belongs to
 }
 
 function preScreen(
@@ -83,6 +86,18 @@ function preScreen(
       return lower.includes(needle) || lower.includes(h.toLowerCase());
     });
 
+  // Teams matched by handle ONLY (explicit mention of @team or @member)
+  const mentionedTeamsByHandle = triage.watchedTeams
+    .filter((team: { handles: string[] }) => {
+      return team.handles.some((h: string) => {
+        const withAt = h.startsWith('@') ? h.toLowerCase() : `@${h.toLowerCase()}`;
+        const withoutAt = h.startsWith('@') ? h.slice(1).toLowerCase() : h.toLowerCase();
+        return lower.includes(withAt) || lower.includes(withoutAt);
+      });
+    })
+    .map((t: { name: string }) => t.name);
+
+  // Teams matched by handle OR keyword (broader — used for external partners)
   const mentionedTeams = triage.watchedTeams
     .filter((team: { handles: string[]; keywords: string[] }) => {
       const handleMatch = team.handles.some((h: string) => {
@@ -99,22 +114,40 @@ function preScreen(
     lower.includes(kw.toLowerCase()),
   );
 
-  // Detect if sender is from own internal team (isOwnTeam flag)
+  // Detect which team the sender belongs to (any watched team, not just own)
   const senderId = msg?.senderId ?? '';
   const senderName = (msg?.senderName ?? '').toLowerCase();
-  const isFromOwnTeam = config.triage.watchedTeams
-    .filter((t: { isOwnTeam?: boolean }) => t.isOwnTeam)
-    .some((t: { handles: string[] }) =>
-      t.handles.some((h: string) => {
-        const needle = h.startsWith('@') ? h.slice(1).toLowerCase() : h.toLowerCase();
-        return senderName.includes(needle) || senderId === needle;
-      }),
-    );
+  let senderTeam: string | undefined;
+  let senderTeamIsOwn = false;
+  for (const team of config.triage.watchedTeams) {
+    const t = team as { name: string; handles?: string[]; isOwnTeam?: boolean };
+    const match = (t.handles ?? []).some((h: string) => {
+      const needle = h.startsWith('@') ? h.slice(1).toLowerCase() : h.toLowerCase();
+      return senderName.includes(needle) || senderId === needle;
+    });
+    if (match) {
+      senderTeam = t.name;
+      senderTeamIsOwn = t.isOwnTeam ?? false;
+      break;
+    }
+  }
+  const isFromOwnTeam = senderTeamIsOwn;
+  const isFromAnyTeam = senderTeam !== undefined;
 
   // Any message from a monitored partner chat is a candidate — the LLM decides if it's actionable
-  const isExternal = !!msg?.partnerName && !isFromOwnTeam;
+  const isExternal = !!msg?.partnerName && !isFromAnyTeam;
 
-  return { mentionsMe, isReplyToMe, mentionedTeams, isWhitelistReq, isExternal, isFromOwnTeam };
+  return {
+    mentionsMe,
+    isReplyToMe,
+    mentionedTeams,
+    mentionedTeamsByHandle,
+    isWhitelistReq,
+    isExternal,
+    isFromOwnTeam,
+    senderTeam,
+    isFromAnyTeam,
+  };
 }
 
 // ─── LLM extraction ────────────────────────────────────────────────────────────
@@ -232,9 +265,15 @@ export async function triage(
     return null;
   }
 
-  // ignoreOwnTeam: skip internal team messages unless they @mention me
-  if (triageCfg.ignoreOwnTeam && pre.isFromOwnTeam && !pre.mentionsMe) {
-    log.debug(`Triage skip [${msg.partnerName}]: ignoreOwnTeam`);
+  // Sender is a teammate (any watched team):
+  //   - if they @mention me → process normally (creates my_task)
+  //   - if they @mention another team handle → process as team_task for that team (silent)
+  //   - if they just use keywords (whitelist, etc.) → SKIP, no task
+  //   - if they say nothing relevant → SKIP
+  if (pre.isFromAnyTeam && !pre.mentionsMe && pre.mentionedTeamsByHandle.length === 0) {
+    log.debug(
+      `Triage skip [${msg.partnerName}]: sender "${msg.senderName}" in team "${pre.senderTeam}", no explicit team handle mention`,
+    );
     return null;
   }
 

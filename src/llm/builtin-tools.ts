@@ -329,6 +329,42 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'create_agent',
+    description:
+      'Create a new persistent sub-agent registered in the system. ' +
+      'USE THIS (not write_file) whenever the owner asks to create an "agent", "bot", "specialist", or any reusable AI worker. ' +
+      'The agent is saved to config.agents[] and persists across restarts. ' +
+      'Once created, you can invoke it with spawn_agent({ agents: [{ name: "<agent_name>", input: "..." }] }). ' +
+      'NEVER write agent definitions to .md files — they would not be executable. ' +
+      'Always verify with list_agents after creation.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Agent name in snake_case (e.g. whitelist_verifier)' },
+        description: { type: 'string', description: 'One-line description of what this agent does' },
+        systemPrompt: { type: 'string', description: 'Full system prompt defining the agent persona, rules, and domain' },
+        tools: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tool names: ["web_search","fetch_url"] or ["*"] for all available tools',
+        },
+        provider: { type: 'string', description: 'LLM provider key (optional, defaults to global primary)' },
+        model: { type: 'string', description: 'Model name (optional, defaults to provider default)' },
+        linkedChannels: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Channel refs to auto-trigger this agent (optional, e.g. ["telegram:-100123"])',
+        },
+      },
+      required: ['name', 'description', 'systemPrompt', 'tools'],
+    },
+  },
+  {
+    name: 'list_agents',
+    description: 'List all registered user-defined agents.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'cancel_proposals',
     description:
       'Cancel/reject all pending proposals, or a specific one by ID. Use this to clean up old proposals before creating new ones.',
@@ -456,10 +492,11 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
   {
     name: 'spawn_agent',
     description:
-      'Spawn specialized sub-agents to run tasks in parallel. Each sub-agent runs independently ' +
-      'with its own context and tool subset. Use when you need to research multiple topics ' +
-      'simultaneously or parallelize independent work. Max 5 agents. Results are collected and ' +
-      'returned together. Sub-agents CANNOT spawn more agents (depth = 1 only).',
+      'Spawn sub-agents to run tasks in parallel. Two modes: ' +
+      '(1) Ad-hoc — provide a one-shot systemPrompt + tools list inline. ' +
+      '(2) Named — reference a pre-registered user-defined agent by its name (created via create_agent). Use list_agents to see what is available. ' +
+      'Each sub-agent runs independently with its own context and tool subset. Max 5 agents. ' +
+      'Results are collected and returned together. Sub-agents CANNOT spawn more agents (depth = 1 only).',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -559,6 +596,10 @@ export const executeBuiltinTool: ToolExecutor = async (name, input) => {
       return await toolCancelProposals(input.proposal_id as string | undefined);
     case 'list_proposals':
       return await toolListProposals();
+    case 'create_agent':
+      return await toolCreateAgent(input);
+    case 'list_agents':
+      return await toolListAgents();
     case 'create_proposal':
       return await toolCreateProposal(
         input.action as string,
@@ -1139,6 +1180,83 @@ async function toolListProposals(): Promise<{ output: string; error?: boolean }>
     };
   } catch (e) {
     return { output: `Error: ${e instanceof Error ? e.message : String(e)}`, error: true };
+  }
+}
+
+async function toolCreateAgent(
+  input: Record<string, unknown>,
+): Promise<{ output: string; error?: boolean }> {
+  try {
+    const name = input.name as string;
+    const description = input.description as string;
+    const systemPrompt = input.systemPrompt as string;
+    const tools = (input.tools as string[]) ?? [];
+    const provider = input.provider as string | undefined;
+    const model = input.model as string | undefined;
+    const linkedChannels = (input.linkedChannels as string[]) ?? [];
+
+    if (!name || !description || !systemPrompt) {
+      return { output: 'create_agent: name, description, and systemPrompt are required', error: true };
+    }
+    if (!/^[a-z][a-z0-9_]*$/.test(name)) {
+      return { output: `create_agent: name "${name}" must be snake_case (lowercase, underscores)`, error: true };
+    }
+
+    const { patchConfig, getConfig } = await import('../config/index.js');
+    const cfg = getConfig() as unknown as { agents?: Array<Record<string, unknown>> };
+    const existing = (cfg.agents ?? []).find((a) => a.name === name);
+    if (existing) {
+      return { output: `Agent "${name}" already exists. Use a different name or delete it first.`, error: true };
+    }
+
+    const newAgent: Record<string, unknown> = {
+      name,
+      description,
+      systemPrompt,
+      tools,
+      enabled: true,
+      ...(provider ? { provider } : {}),
+      ...(model ? { model } : {}),
+      ...(linkedChannels.length ? { linkedChannels } : {}),
+    };
+
+    patchConfig((c) => {
+      const cAgents = c as unknown as { agents?: Array<Record<string, unknown>> };
+      if (!cAgents.agents) cAgents.agents = [];
+      cAgents.agents.push(newAgent);
+    });
+
+    return {
+      output:
+        `✅ Agent "${name}" created and saved to ~/.argos/.config.json\n\n` +
+        `Description: ${description}\n` +
+        `Tools: ${tools.join(', ')}\n` +
+        `${linkedChannels.length ? `Linked channels: ${linkedChannels.join(', ')}\n` : ''}` +
+        `\nThe agent is now available via spawn_agent. Restart Argos to apply linkedChannels routing.`,
+    };
+  } catch (e) {
+    return {
+      output: `create_agent failed: ${e instanceof Error ? e.message : String(e)}`,
+      error: true,
+    };
+  }
+}
+
+async function toolListAgents(): Promise<{ output: string; error?: boolean }> {
+  try {
+    const { getConfig } = await import('../config/index.js');
+    const cfg = getConfig() as unknown as { agents?: Array<{ name: string; description: string; tools?: string[]; enabled?: boolean }> };
+    const agents = cfg.agents ?? [];
+    if (agents.length === 0) {
+      return { output: 'No user-defined agents. Create one with create_agent.' };
+    }
+    return {
+      output: agents
+        .map((a) => `• ${a.name}${a.enabled === false ? ' (disabled)' : ''} — ${a.description}\n  tools: ${(a.tools ?? []).join(', ')}`)
+        .join('\n\n'),
+    };
+  } catch (e) {
+    return { output: `list_agents failed: ${e instanceof Error ? e.message : String(e)}`, error: true };
   }
 }
 

@@ -146,14 +146,16 @@ async function sinkTask(
     );
   }
 
-  // 4. Notification
-  const icon = isMyTask ? '📋' : '👥';
-  const team = result.assignee && result.assignee !== 'me' ? ` → ${result.assignee}` : '';
-  const urgent = result.urgency === 'high' ? ' 🔴' : '';
-  const link = result.messageUrl ? `\n${formatMessageLinks(result.messageUrl)}` : '';
-  await notify(`${icon} *${result.title}*${team}${urgent}\n_${result.partner}_${link}`).catch(
-    () => {},
-  );
+  // 4. Notification — only for tasks assigned to me
+  // team_task (other team) → silent: task is created but no notification
+  // user can still see them via /tasks <team> or /tasks all
+  if (isMyTask) {
+    const urgent = result.urgency === 'high' ? ' 🔴' : '';
+    const link = result.messageUrl ? `\n${formatMessageLinks(result.messageUrl)}` : '';
+    await notify(`📋 *${result.title}*${urgent}\n_${result.partner}_${link}`).catch(() => {});
+  } else {
+    log.info(`Silent team_task created for "${result.assignee ?? 'unassigned'}" — no notification`);
+  }
 }
 
 // ─── Draft reply generator ────────────────────────────────────────────────────

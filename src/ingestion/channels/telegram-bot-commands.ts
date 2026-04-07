@@ -41,40 +41,76 @@ export async function cmdProposals(send: Send): Promise<void> {
 
 // ─── /tasks ───────────────────────────────────────────────────────────────────
 
-export async function cmdTasks(send: Send): Promise<void> {
+export async function cmdTasks(send: Send, arg?: string): Promise<void> {
   try {
     const db = getDb();
+    const filter = (arg ?? '').trim().toLowerCase();
+
+    // Build query based on filter
+    let where = "status IN ('open','in_progress','done_inferred')";
+    const params: unknown[] = [];
+
+    if (filter === 'all') {
+      // No additional filter — show all tasks
+    } else if (filter === '' || filter === 'me' || filter === 'mine') {
+      // Default: only my tasks
+      where += ' AND is_my_task = 1';
+    } else {
+      // Filter by team name
+      where += ' AND assigned_team = ?';
+      params.push(filter);
+    }
+
     const rows = db
       .prepare(
-        "SELECT id, title, status, partner_name, message_url, detected_at FROM tasks WHERE status IN ('open','in_progress','done_inferred') ORDER BY detected_at DESC LIMIT 15",
+        `SELECT id, title, status, partner_name, message_url, assigned_team, is_my_task, detected_at
+         FROM tasks WHERE ${where}
+         ORDER BY is_my_task DESC, detected_at DESC LIMIT 30`,
       )
-      .all() as Array<{
+      .all(...params) as Array<{
       id: string;
       title: string;
       status: string;
       partner_name: string | null;
       message_url: string | null;
+      assigned_team: string | null;
+      is_my_task: number;
       detected_at: number;
     }>;
 
     if (!rows.length) {
-      await send('✅ No open tasks.');
-    } else {
-      const { formatMessageLinks } = await import('./telegram.js');
-      const list = rows
+      const label = filter === 'all' ? 'all teams' : filter || 'you';
+      await send(`✅ No open tasks (${label}).\n\n_Try \`/tasks all\` or \`/tasks <team>\`_`);
+      return;
+    }
+
+    const { formatMessageLinks } = await import('./telegram.js');
+
+    // Group by team (mine first, then by team name, then unassigned)
+    const groups = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const key = r.is_my_task ? '👤 Mine' : r.assigned_team ? `👥 ${r.assigned_team}` : '❓ Unassigned';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(r);
+    }
+
+    const sections: string[] = [];
+    for (const [team, items] of groups) {
+      const list = items
         .map((r) => {
           const id = r.id.slice(-6);
           const title = r.title.slice(0, 80);
           const partner = r.partner_name ? ` — ${r.partner_name}` : '';
           const links = formatMessageLinks(r.message_url ?? undefined);
           const link = links ? `\n  ${links}` : '';
-          // /done_XXX with escaped underscore — Markdown V1 escapes _ as \_
-          // The \ is invisible in the rendered text but preserves the underscore
           return `${id} — ${title}${partner}${link}\n/done\\_${id}`;
         })
         .join('\n\n');
-      await send(`📋 *Open tasks (${rows.length}):*\n\n${list}`);
+      sections.push(`*${team}* (${items.length})\n\n${list}`);
     }
+
+    const filterLabel = filter === 'all' ? ' — all teams' : filter && filter !== 'me' && filter !== 'mine' ? ` — ${filter}` : '';
+    await send(`📋 *Open tasks (${rows.length})${filterLabel}*\n\n${sections.join('\n\n────────\n\n')}`);
   } catch (e) {
     await send(`⚠️ Error: ${e instanceof Error ? e.message : String(e)}`);
   }

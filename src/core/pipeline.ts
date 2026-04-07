@@ -230,58 +230,6 @@ export async function ingestMessage(
     log.warn('Completion detection error (non-blocking):', e),
   );
 
-  // Proactive whitelist verification — if partner has an open tx_request task and
-  // replies with a URL, auto-run verification and notify owner immediately.
-  checkWhitelistUrl(msg, llmConfig).catch((e) =>
-    log.warn('Whitelist URL check error (non-blocking):', e),
-  );
-}
-
-// ─── Proactive whitelist URL detection ───────────────────────────────────────
-// If a message arrives from a partner who has an open tx_request task, and the
-// message contains a URL (typically "here are the docs"), automatically run the
-// whitelist verifier and push the result to the owner — no manual trigger needed.
-
-async function checkWhitelistUrl(msg: RawMessage, llmConfig: LLMConfig): Promise<void> {
-  // Quick URL scan on raw content — skip if no HTTP link present
-  const urlRegex = /https?:\/\/[^\s<>"]+/g;
-  const urls = msg.content.match(urlRegex);
-  if (!urls?.length) return;
-
-  // Check for open tx_request task from this chat
-  const db = getDb();
-  const openTask = db
-    .prepare(
-      `
-    SELECT id, title FROM tasks
-    WHERE chat_id = ? AND category = 'tx_request' AND status IN ('open', 'in_progress')
-    ORDER BY detected_at DESC
-    LIMIT 1
-  `,
-    )
-    .get(msg.chatId) as { id: string; title: string } | undefined;
-
-  if (!openTask) return;
-
-  log.info(`Proactive whitelist check triggered — partner sent URL in active tx_request chat`, {
-    taskId: openTask.id,
-    partner: msg.partnerName ?? msg.chatId,
-    urls: urls.slice(0, 3),
-  });
-
-  const { verifyWhitelistDocs, formatVerificationNotif } = await import('./whitelist-verifier.js');
-
-  const verif = await verifyWhitelistDocs(msg.content, llmConfig);
-
-  const header = `🔍 *Vérification auto — ${msg.partnerName ?? msg.chatId}*\n_Réponse avec doc détectée pour la tâche \`${openTask.id.slice(-8)}\`_\n\n`;
-  await _sendToApprovalChat(header + formatVerificationNotif(verif));
-
-  audit('whitelist_auto_verify', openTask.id, 'task', {
-    partner: msg.partnerName ?? msg.chatId,
-    decision: verif.decision,
-    score: verif.score,
-    urls: urls.slice(0, 3),
-  });
 }
 
 // ─── Task completion detection ────────────────────────────────────────────────

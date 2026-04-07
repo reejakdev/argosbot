@@ -113,6 +113,46 @@ function uid(): string {
   return execSync('id -u').toString().trim();
 }
 
+/**
+ * Pre-flight health check before starting the daemon.
+ * Detects broken native bindings (better-sqlite3) — common cause of boot crash loops
+ * after a system Node version mismatch (e.g. npm install with wrong Node).
+ * Auto-rebuilds and returns true if fixed.
+ */
+function healthCheckNativeBindings(): boolean {
+  const argosDir = path.dirname(path.dirname(__dirname));
+  const sqliteBindingDir = path.join(argosDir, 'node_modules', 'better-sqlite3', 'build', 'Release');
+  const expectedFile = path.join(sqliteBindingDir, 'better_sqlite3.node');
+
+  if (fs.existsSync(expectedFile)) {
+    // Try a quick require — catches version mismatch even when file exists
+    try {
+      execSync(
+        `${process.execPath} -e "require('${argosDir}/node_modules/better-sqlite3')"`,
+        { stdio: 'pipe', timeout: 5000 },
+      );
+      return true;
+    } catch {
+      console.log('⚠️  better-sqlite3 binding mismatch detected — rebuilding…');
+    }
+  } else {
+    console.log('⚠️  better-sqlite3 binding missing — rebuilding…');
+  }
+
+  try {
+    execSync('npm rebuild better-sqlite3', {
+      cwd: argosDir,
+      stdio: 'inherit',
+      env: { ...process.env, PATH: `${path.dirname(process.execPath)}:${process.env.PATH ?? ''}` },
+    });
+    console.log('✅ better-sqlite3 rebuilt successfully');
+    return true;
+  } catch (e) {
+    console.error('❌ Failed to rebuild better-sqlite3:', e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
 // macOS — launchd
 // KeepAlive is true, so "stop" must unload the plist; "start" must load it.
 const mac = {
@@ -134,6 +174,10 @@ const mac = {
       console.log('Argos is already running. Use "argos restart" to reload.');
       process.exit(0);
     }
+    if (!healthCheckNativeBindings()) {
+      console.error('Pre-flight check failed. Aborting start.');
+      process.exit(1);
+    }
     execSync(`launchctl load -w "${PLIST_PATH}"`, { stdio: 'inherit' });
     console.log('Argos started.');
   },
@@ -153,6 +197,10 @@ const mac = {
     } catch {
       /* not loaded — ok */
     }
+    if (!healthCheckNativeBindings()) {
+      console.error('Pre-flight check failed. Aborting restart.');
+      process.exit(1);
+    }
     execSync(`launchctl load -w "${PLIST_PATH}"`, { stdio: 'inherit' });
     console.log('Argos restarted.');
   },
@@ -171,6 +219,10 @@ const linux = {
       }
     } catch {
       /* not running — proceed */
+    }
+    if (!healthCheckNativeBindings()) {
+      console.error('Pre-flight check failed. Aborting start.');
+      process.exit(1);
     }
     execSync('systemctl --user start argos', { stdio: 'inherit' });
     console.log('Argos started.');
