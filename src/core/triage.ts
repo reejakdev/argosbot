@@ -117,13 +117,22 @@ function preScreen(
   // Detect which team the sender belongs to (any watched team, not just own)
   const senderId = msg?.senderId ?? '';
   const senderName = (msg?.senderName ?? '').toLowerCase();
+  const senderUsername = (
+    (msg as { senderUsername?: string } | undefined)?.senderUsername ?? ''
+  ).toLowerCase();
   let senderTeam: string | undefined;
   let senderTeamIsOwn = false;
   for (const team of config.triage.watchedTeams) {
     const t = team as { name: string; handles?: string[]; isOwnTeam?: boolean };
     const match = (t.handles ?? []).some((h: string) => {
       const needle = h.startsWith('@') ? h.slice(1).toLowerCase() : h.toLowerCase();
-      return senderName.includes(needle) || senderId === needle;
+      // Strict @username match first (Telegram handle), then numeric ID, then display name
+      return (
+        senderUsername === needle ||
+        senderId === needle ||
+        senderName === needle ||
+        senderName.includes(needle)
+      );
     });
     if (match) {
       senderTeam = t.name;

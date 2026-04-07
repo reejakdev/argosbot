@@ -394,6 +394,7 @@ export class TelegramChannel implements Channel {
       partnerName: resolvedChatName,
       senderId,
       senderName: await this.resolveSenderName(msg),
+      senderUsername: await this.resolveSenderUsername(msg),
       content,
       messageUrl: buildTelegramMessageUrl(
         chatId,
@@ -667,6 +668,17 @@ export class TelegramChannel implements Channel {
       );
     } catch {
       return 'unknown';
+    }
+  }
+
+  private async resolveSenderUsername(msg: Api.Message): Promise<string | undefined> {
+    try {
+      const sender = await msg.getSender();
+      if (!sender) return undefined;
+      const user = sender as Api.User;
+      return user.username ? user.username.toLowerCase() : undefined;
+    } catch {
+      return undefined;
     }
   }
 

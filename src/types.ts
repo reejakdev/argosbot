@@ -73,6 +73,8 @@ export interface RawMessage {
   // ─── Sender ──────────────────────────────────────────────────────────────
   senderId?: string;
   senderName?: string;
+  /** Sender's @handle (Telegram username, Slack handle, etc.) — without leading @ */
+  senderUsername?: string;
   /** Partner display name resolved from monitoredChats config */
   partnerName?: string;
 
