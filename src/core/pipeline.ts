@@ -416,6 +416,7 @@ export async function processWindow(
     (result.category === 'client_request' && result.isMyTask && result.ownerConfidence >= 0.7);
 
   if (
+    !config.readOnly &&
     ownerInvolved &&
     (result.category === 'task' ||
       result.category === 'tx_request' ||
@@ -589,15 +590,7 @@ export async function processWindow(
         await _sendToApprovalChat(
           `📝 *Draft for ${to}:*\n\n${content}\n\n${draftLinks ? draftLinks + '\n\n' : ''}_💡 Copy and send manually, or switch to Active mode for auto-send._`
         ).catch(() => {});
-
-        // Create a task so it shows in /tasks
-        saveTask(`Reply to ${to}`, {
-          summary: `Reply to ${to}: ${content.slice(0, 80)}`,
-          category: 'client_request',
-          importance: 6,
-          isMyTask: true,
-          tags: [],
-        } as unknown as ClassificationResult, window);
+        // readOnly: do NOT persist a task — drafts are notifications only.
       }
 
       // Other actions still go through approval

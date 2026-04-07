@@ -83,9 +83,26 @@ async function sinkTask(
     return;
   }
 
+  // readOnly mode: never persist tasks. Only notify so the owner sees what
+  // *would* have been created. The DB stays clean and nothing accumulates.
+  if (config.readOnly) {
+    if (isMyTask) {
+      const urgent = result.urgency === 'high' ? ' 🔴' : '';
+      const link = result.messageUrl ? `\n${formatMessageLinks(result.messageUrl)}` : '';
+      await notify(
+        `🔒 *Would create task* ${urgent}\n${result.title}\n_${result.partner}_${link}\n\n_Read-only — not persisted._`,
+      ).catch(() => {});
+    } else {
+      log.info(
+        `readOnly: skipping team_task creation for "${result.assignee ?? 'unassigned'}" — "${result.title.slice(0, 60)}"`,
+      );
+    }
+    return;
+  }
+
   const id = ulid();
 
-  // 1. SQLite — always
+  // 1. SQLite
   db.prepare(
     `
     INSERT INTO tasks (id, title, description, category, source_ref, partner_name,
