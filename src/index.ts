@@ -407,15 +407,25 @@ async function boot() {
 
   setSendToApprovalChat(sendToApprovalChat);
 
-  // Wire direct message sender — bot only (MTProto listener is read-only).
-  // If a personal bot token is configured, use it to send approved draft replies.
-  // Bot can only send to chats where it has been added / started a conversation.
-  if (telegramBot) {
+  // Wire direct message sender — used by approved draft_reply actions.
+  // Priority: MTProto user client (sends as YOU) > Bot (sends from the bot account).
+  // SAFETY: only wired when readOnly === false. In readOnly mode, no sender is wired
+  // so even a buggy/hallucinated approval cannot trigger a real send.
+  if (!config.readOnly) {
     const { setSendDirectMessage } = await import('./workers/index.js');
-    setSendDirectMessage(async (chatId, text) => {
-      await telegramBot!.sendMessage(chatId, text);
-    });
-    log.info('Direct message sender wired via bot');
+    if (telegramChannel) {
+      setSendDirectMessage(async (chatId, text) => {
+        await telegramChannel.sendMessage(chatId, text);
+      });
+      log.info('Direct message sender wired via MTProto (sends as user)');
+    } else if (telegramBot) {
+      setSendDirectMessage(async (chatId, text) => {
+        await telegramBot!.sendMessage(chatId, text);
+      });
+      log.info('Direct message sender wired via bot (MTProto unavailable)');
+    }
+  } else {
+    log.info('readOnly mode: direct message sender NOT wired — drafts will never be sent automatically');
   }
 
   // 9. Heartbeat — core, channel-agnostic
@@ -527,6 +537,36 @@ async function boot() {
     model: llmConfig.model,
     readOnly: config.readOnly,
   });
+
+  // Check for updates in background — non-blocking
+  void (async () => {
+    try {
+      const { checkForUpdate } = await import('./scripts/check-update.js');
+      const info = await checkForUpdate();
+      if (info.error) {
+        log.debug(`Update check skipped: ${info.error}`);
+        return;
+      }
+      if (info.hasUpdate) {
+        log.info(`🆕 Update available: ${info.behind} commit(s) behind — latest: ${info.latest} "${info.latestMessage}"`);
+        // Notify owner via Telegram bot
+        try {
+          const send = sendToApprovalChat;
+          await send(
+            `🆕 *Argos update available*\n\n` +
+            `Current: \`${info.current}\` ${info.currentMessage}\n` +
+            `Latest:  \`${info.latest}\` ${info.latestMessage}\n` +
+            `${info.behind} commit(s) behind\n\n` +
+            `Update: \`git pull && npm install && npm run build && argos restart\``
+          );
+        } catch { /* non-blocking */ }
+      } else {
+        log.info(`✅ Argos is up to date (${info.current})`);
+      }
+    } catch (e) {
+      log.debug(`Update check failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  })();
 
   const shutdown = async (signal: string) => {
     log.info(`Shutting down (${signal})…`);
