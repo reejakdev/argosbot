@@ -230,15 +230,25 @@ export class TelegramChannel implements Channel {
     if (!text && !msg?.media) return;
 
     const config = getConfig();
-    const chatId = String(
-      msg.peerId
-        ? (msg.peerId as unknown as { userId?: bigint; channelId?: bigint; chatId?: bigint })
-            .userId ||
-            (msg.peerId as unknown as { channelId?: bigint }).channelId ||
-            (msg.peerId as unknown as { chatId?: bigint }).chatId ||
-            msg.chatId
-        : msg.chatId,
-    );
+    // Determine chat ID with proper prefix:
+    //   userId    → DM (positive raw ID)
+    //   chatId    → legacy group (prefix with "-")
+    //   channelId → supergroup/channel (prefix with "-100")
+    const peer = msg.peerId as unknown as {
+      userId?: bigint;
+      channelId?: bigint;
+      chatId?: bigint;
+    } | undefined;
+    let chatId: string;
+    if (peer?.userId) {
+      chatId = String(peer.userId);
+    } else if (peer?.channelId) {
+      chatId = `-100${peer.channelId.toString()}`;
+    } else if (peer?.chatId) {
+      chatId = `-${peer.chatId.toString()}`;
+    } else {
+      chatId = String(msg.chatId);
+    }
 
     const senderId = String((msg.fromId as { userId?: bigint })?.userId ?? '');
 
