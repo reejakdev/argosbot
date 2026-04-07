@@ -1117,6 +1117,18 @@ function PipelineTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
       <div style={cardStyle}>
         <SectionTitle>System</SectionTitle>
         <ToggleRow label="Read-only mode" hint="When ON: Argos observes and proposes but cannot execute any action. Safest default." checked={readOnly} onChange={setReadOnly} />
+        <ToggleRow
+          label="⚠️ Autonomous mode"
+          hint="DANGER: bypass approval gateway entirely. ALL planner actions auto-execute (drafts sent, scripts run, messages sent). Argos becomes fully autonomous — no human gate. Only enable if you fully trust the model and have audit logging in place."
+          checked={autonomousMode}
+          onChange={setAutonomousMode}
+        />
+        <ToggleRow
+          label="🔓 Disable anonymizer"
+          hint="DANGER: when ON, raw message content (names, addresses, amounts) is sent to the cloud LLM without anonymization. Only enable if you use a local-only LLM (Ollama) or fully trust your provider with raw data."
+          checked={anonymizerMode === 'none'}
+          onChange={(v) => setAnonymizerMode(v ? 'none' : 'regex')}
+        />
         <ToggleRow label="Cloud mode" hint="Forces YubiKey (FIDO2) for ALL risk levels. Enable when Argos runs on a remote server. Disables Telegram/Slack approval." checked={cloudMode} onChange={setCloudMode} />
         <FieldRow label="Log level">
           <Select value={logLevel} onChange={setLogLevel} options={['debug', 'info', 'warn', 'error'].map(v => ({ value: v, label: v }))} />
@@ -1236,7 +1248,8 @@ function PipelineTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
       </div>
 
       <SaveBar saving={saving} saved={saved} error={error} needsRestart={needsRestart} onSave={() => save({
-        readOnly, logLevel,
+        readOnly, autonomousMode, logLevel,
+        anonymizer:   { mode: anonymizerMode },
         owner:        { botName },
         security:     { cloudMode },
         triage:       { enabled: triageEnabled, myHandles, ignoreOwnTeam, mentionOnly },
