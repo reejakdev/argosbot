@@ -292,15 +292,25 @@ export async function cleanSource(sourceRef: string): Promise<void> {
     const table = await getTable();
     const escaped = sourceRef.replace(/"/g, '\\"').replace(/[%_]/g, '\\$&');
     await table.delete(`source_ref LIKE "${escaped}%" ESCAPE '\\'`);
-    // Compact to physically purge soft-deleted rows (available in lancedb ≥0.4)
-    try {
-      await (table as unknown as { optimize: () => Promise<void> }).optimize();
-    } catch {
-      /* older lancedb versions without optimize — safe to ignore */
-    }
     log.debug(`cleanSource: removed rows for prefix "${sourceRef}"`);
   } catch (e) {
     log.warn(`cleanSource failed for "${sourceRef}": ${e}`);
+  }
+}
+
+/**
+ * Full LanceDB compaction: compact data files + purge old versions.
+ * Should run daily — reduces disk from many small fragments to a few large files.
+ */
+export async function compactVectorStore(): Promise<void> {
+  try {
+    const table = await getTable();
+    const olderThan = new Date(); // clean all old versions
+    await (table as unknown as { optimize: (opts?: { cleanupOlderThan?: Date }) => Promise<void> })
+      .optimize({ cleanupOlderThan: olderThan });
+    log.info('Vector store compacted and old versions cleaned up');
+  } catch (e) {
+    log.warn(`Vector store compaction failed: ${e}`);
   }
 }
 
@@ -315,12 +325,9 @@ export async function purgeOldConversations(olderThanDays: number): Promise<void
     const table = await getTable();
     const threshold = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
     await table.delete(`source_ref LIKE "conversation:%" AND created_at < ${threshold}`);
-    try {
-      await (table as unknown as { optimize: () => Promise<void> }).optimize();
-    } catch {
-      /* older lancedb versions — safe to ignore */
-    }
     log.info(`Purged conversation vectors older than ${olderThanDays} days`);
+    // Full compaction after bulk delete — removes fragments and old version files
+    await compactVectorStore();
   } catch (e) {
     log.warn(`purgeOldConversations failed: ${e}`);
   }

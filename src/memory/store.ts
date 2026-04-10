@@ -296,13 +296,43 @@ export function purgeExpired(): number {
     }
   });
 
-  // Purge conversation vectors older than 30 days — rolling window
+  // Purge conversation vectors older than 30 days — rolling window + compact
   setImmediate(async () => {
     try {
       const { purgeOldConversations } = await import('../vector/store.js');
       await purgeOldConversations(30);
     } catch (e) {
       log.warn(`Conversation vector purge failed: ${e}`);
+    }
+  });
+
+  // WAL checkpoint — keeps argos.db-wal from growing unbounded
+  setImmediate(() => {
+    try {
+      db.pragma('wal_checkpoint(TRUNCATE)');
+      log.debug('SQLite WAL checkpoint done');
+    } catch (e) {
+      log.warn(`WAL checkpoint failed: ${e}`);
+    }
+  });
+
+  // Log rotation — keep last 50k lines (trim head of file)
+  setImmediate(async () => {
+    try {
+      const { readFileSync, writeFileSync, statSync } = await import('fs');
+      const { homedir } = await import('os');
+      const logPath = `${homedir()}/.argos/argos.log`;
+      const stat = statSync(logPath);
+      if (stat.size > 10 * 1024 * 1024) { // >10MB
+        const content = readFileSync(logPath, 'utf8');
+        const lines = content.split('\n');
+        if (lines.length > 50_000) {
+          writeFileSync(logPath, lines.slice(-50_000).join('\n'));
+          log.info(`Log rotated — trimmed to last 50k lines`);
+        }
+      }
+    } catch (e) {
+      log.warn(`Log rotation failed: ${e}`);
     }
   });
 

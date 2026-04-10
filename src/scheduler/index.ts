@@ -107,7 +107,13 @@ async function runJob(job: CronJob): Promise<void> {
     }
   }
 
-  log.info(`Running cron job: ${job.name}`);
+  // High-frequency jobs (check_triggers, approval_expiry) → debug to avoid log spam
+  const isHighFreq = job.name === 'check_triggers' || job.name === 'approval_expiry';
+  if (isHighFreq) {
+    log.debug(`Running cron job: ${job.name}`);
+  } else {
+    log.info(`Running cron job: ${job.name}`);
+  }
   const start = Date.now();
 
   try {
@@ -328,7 +334,12 @@ export function registerBuiltinJobs(
     });
   }
 
+  registerHandler('vector_compact', async () => {
+    const { compactVectorStore } = await import('../vector/store.js');
+    await compactVectorStore();
+  });
   upsertCronJob('memory_purge', '0 3 * * *', 'memory_purge'); // 03:00 daily
+  upsertCronJob('vector_compact', '30 3 * * *', 'vector_compact'); // 03:30 daily
   upsertCronJob('approval_expiry', '*/5 * * * *', 'approval_expiry'); // every 5min
   if (briefingOpts?.enabled !== false) {
     upsertCronJob(
