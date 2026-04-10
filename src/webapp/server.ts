@@ -488,14 +488,25 @@ function buildApi(
   // ── Speak — test TTS output ────────────────────────────────────────────
   router.post('/speak', requireAuth('standard'), async (req, res) => {
     const { text, output } = req.body as { text?: string; output?: string };
-    if (!text) { res.status(400).json({ error: 'text required' }); return; }
+    if (!text) {
+      res.status(400).json({ error: 'text required' });
+      return;
+    }
     try {
       const { getConfig: _gc } = await import('../config/index.js');
       const cfg = _gc() as unknown as import('../config/schema.js').Config;
       const voiceCfg = (cfg.voice ?? {}) as Record<string, unknown>;
-      const { speak } = await import('../voice/speak.js');
-      const { jarvisSendText, jarvisSendAudio, jarvisSendStatus } = await import('./jarvis.js');
+      const { jarvisSendText, jarvisSendAudio, jarvisSendStatus, hasJarvisClients } =
+        await import('./jarvis.js');
       const { synthesizeSpeech } = await import('../voice/synthesize.js');
+      const { stripThinking } = await import('../voice/speak.js');
+
+      // Strip any inline reasoning blocks before TTS / display
+      const cleanText = stripThinking(text);
+      if (!cleanText.trim()) {
+        res.json({ ok: true, skipped: 'empty after strip' });
+        return;
+      }
 
       const ttsOutput = (output ?? 'all') as import('../voice/speak.js').TtsOutput;
       const wantMachine = ttsOutput === 'machine' || ttsOutput === 'both' || ttsOutput === 'all';
@@ -504,17 +515,29 @@ function buildApi(
       // Machine
       if (wantMachine) {
         const { speakLocal } = await import('../voice/synthesize.js');
-        speakLocal(text, voiceCfg.localTtsVoice as string | undefined).catch(() => {});
+        speakLocal(cleanText, voiceCfg.localTtsVoice as string | undefined).catch(() => {});
       }
 
-      // Webspeak
+      // Webspeak — gated on display clients to avoid wasting TTS API credits
       if (wantWebspeak) {
-        jarvisSendStatus('speaking');
-        jarvisSendText(text);
-        try {
-          const audio = await synthesizeSpeech(text, voiceCfg as import('../voice/synthesize.js').TtsConfig);
-          jarvisSendAudio(audio, String(voiceCfg.ttsProvider ?? 'local') === 'local' ? 'aiff' : 'mp3');
-        } catch (e) { log.warn(`Speak webspeak failed: ${e}`); }
+        if (!hasJarvisClients()) {
+          log.debug('Webspeak skipped — no display clients connected');
+        } else {
+          jarvisSendStatus('speaking');
+          jarvisSendText(cleanText);
+          try {
+            const audio = await synthesizeSpeech(
+              cleanText,
+              voiceCfg as import('../voice/synthesize.js').TtsConfig,
+            );
+            jarvisSendAudio(
+              audio,
+              String(voiceCfg.ttsProvider ?? 'local') === 'local' ? 'aiff' : 'mp3',
+            );
+          } catch (e) {
+            log.warn(`Speak webspeak failed: ${e}`);
+          }
+        }
       }
 
       res.json({ ok: true });
@@ -880,7 +903,9 @@ function buildApi(
         category: 'channel',
         configured: !!slackConfigured,
         detail: slackConfigured
-          ? 'xoxp- token active'
+          ? String(secret('SLACK_USER_TOKEN')).startsWith('xoxc-')
+            ? 'browser token active (xoxc- + cookie)'
+            : 'OAuth token active (xoxp-)'
           : slackEnabled
             ? 'SLACK_USER_TOKEN missing'
             : 'Not enabled',

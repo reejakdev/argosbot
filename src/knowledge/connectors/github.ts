@@ -45,7 +45,17 @@ export async function fetchGitHub(source: ContextGitHub): Promise<KnowledgeDocum
       }
     }
 
-    const fullText = parts.join('\n');
+    let fullText = parts.join('\n');
+    const MAX_BYTES = 500 * 1024;
+    if (fullText.length > MAX_BYTES) {
+      log.warn(
+        `[knowledge:github] document ${repoLabel} truncated from ${Math.round(fullText.length / 1024)} KB to 500 KB`,
+      );
+      fullText = fullText.slice(0, MAX_BYTES);
+    }
+    log.info(
+      `[knowledge:github] fetched ${source.paths.length} docs, ~${Math.round(fullText.length / 1024)} KB`,
+    );
     const isLarge = fullText.length > 8000;
 
     return {

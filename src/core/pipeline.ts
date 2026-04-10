@@ -134,8 +134,12 @@ export async function ingestMessage(
 
   // ── Phase 3: LLM deep injection scan on ANONYMIZED text ──────────────────────
   // Now safe to use any LLM provider — PII has already been stripped.
-  // Only runs for longer messages where regex alone isn't sufficient.
-  if (anon.text.length > 500) {
+  // Optimization: only run the LLM scan when the regex pre-screen flagged something
+  // suspicious. Clean messages skip the LLM call entirely. fastScreen already ran on
+  // raw content above (and blocks on hit), so by re-checking the anonymized text we
+  // catch any pattern that survived anonymization without paying for clean messages.
+  const deepCheck = fastScreen(anon.text);
+  if (anon.text.length > 500 && !deepCheck.safe) {
     const sanitizerConfig = llmForRole('sanitize', llmConfig, privacyConfig, config);
     const deep = await deepSanitize(anon.text, msg.channel, sanitizerConfig);
     if (!deep.safe) {
@@ -608,38 +612,172 @@ async function suggestKeyword(result: ClassificationResult, config: Config): Pro
 
 // ─── Daily briefing ───────────────────────────────────────────────────────────
 
-export async function sendDailyBriefing(config: Config, telegram: TelegramChannel): Promise<void> {
-  const db = getDb();
-
-  const openTasks = db.prepare(`SELECT COUNT(*) as c FROM tasks WHERE status = 'open'`).get() as {
-    c: number;
+export async function sendDailyBriefing(
+  config: Config,
+  telegram: TelegramChannel,
+): Promise<void> {
+  const briefing = config.briefing ?? {
+    enabled: true,
+    cronExpression: '0 8 * * 1-5',
+    sections: { needsReply: true, stagnatingTasks: true, newTodos: true, pendingApprovals: true },
+    silentWhenEmpty: true,
+    language: 'fr' as const,
   };
-  const pendingApprovals = db
-    .prepare(`SELECT COUNT(*) as c FROM approvals WHERE status = 'pending'`)
-    .get() as { c: number };
-  const myTasks = db
-    .prepare(
-      `SELECT * FROM tasks WHERE status = 'open' AND is_my_task = 1 ORDER BY detected_at DESC LIMIT 5`,
-    )
-    .all() as Array<{ title: string; partner_name: string | null }>;
+  if (briefing.enabled === false) {
+    log.info('briefing skipped — disabled in config');
+    return;
+  }
+  const lang = briefing.language ?? 'fr';
+  const L = lang === 'en'
+    ? {
+        title: '☀️ *Daily briefing*',
+        respond: '📩 *To reply*',
+        stagnate: '🚧 *Stagnating tasks*',
+        todos: '🆕 *New todos*',
+        approvals: '🔔 *Pending approvals*',
+        empty: 'Nothing to report today.',
+        dayShort: 'd',
+      }
+    : {
+        title: '☀️ *Briefing du jour*',
+        respond: '📩 *À répondre*',
+        stagnate: '🚧 *Tâches qui stagnent*',
+        todos: '🆕 *Nouveaux todos*',
+        approvals: '🔔 *Approvals en attente*',
+        empty: 'Rien à signaler aujourd\'hui.',
+        dayShort: 'j',
+      };
 
-  const lines = [
-    `☀️ *Argos Morning Briefing*`,
-    ``,
-    `📋 Open tasks: **${openTasks.c}** (${pendingApprovals.c} pending approval)`,
-    ``,
-  ];
+  const db = getDb();
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  const since24h = now - DAY;
+  const stagnateCutoff = now - 3 * DAY;
 
-  if (myTasks.length > 0) {
-    lines.push(`👤 *Your tasks:*`);
-    for (const t of myTasks) {
-      lines.push(`• ${t.title}${t.partner_name ? ` [${t.partner_name}]` : ''}`);
+  // ─ Section 1: À répondre ────────────────────────────────────────────────
+  const sectionRespond: string[] = [];
+  if (briefing.sections?.needsReply !== false) try {
+    const notifs = db
+      .prepare(
+        `SELECT title, partner_name, message_url FROM notifications
+         WHERE status = 'unread' AND created_at > ? ORDER BY created_at DESC LIMIT 5`,
+      )
+      .all(since24h) as Array<{
+      title: string;
+      partner_name: string | null;
+      message_url: string | null;
+    }>;
+    if (notifs.length > 0) {
+      for (const n of notifs) {
+        const who = n.partner_name ? `[${n.partner_name}] ` : '';
+        const link = n.message_url ? ` → ${n.message_url}` : '';
+        sectionRespond.push(`• ${who}${n.title}${link}`);
+      }
+    } else {
+      // Fallback: recent my-tasks
+      const fallback = db
+        .prepare(
+          `SELECT title, partner_name FROM tasks
+           WHERE status = 'open' AND is_my_task = 1 AND detected_at > ?
+           ORDER BY detected_at DESC LIMIT 5`,
+        )
+        .all(since24h) as Array<{ title: string; partner_name: string | null }>;
+      for (const t of fallback) {
+        sectionRespond.push(`• ${t.partner_name ? `[${t.partner_name}] ` : ''}${t.title}`);
+      }
     }
-  } else {
-    lines.push(`✅ No tasks assigned to you`);
+  } catch (e) {
+    log.warn(`briefing: respond section failed: ${e}`);
   }
 
-  lines.push(``, `_Have a productive day, ${config.owner.name}._`);
+  // ─ Section 2: Tâches qui stagnent ───────────────────────────────────────
+  const sectionStagnate: string[] = [];
+  if (briefing.sections?.stagnatingTasks !== false) try {
+    const stale = db
+      .prepare(
+        `SELECT title, partner_name, detected_at FROM tasks
+         WHERE status IN ('open', 'in_progress') AND detected_at < ?
+         ORDER BY detected_at ASC LIMIT 5`,
+      )
+      .all(stagnateCutoff) as Array<{
+      title: string;
+      partner_name: string | null;
+      detected_at: number;
+    }>;
+    for (const t of stale) {
+      const days = Math.floor((now - t.detected_at) / DAY);
+      sectionStagnate.push(
+        `• ${t.partner_name ? `[${t.partner_name}] ` : ''}${t.title} _(${days}${L.dayShort})_`,
+      );
+    }
+  } catch (e) {
+    log.warn(`briefing: stagnate section failed: ${e}`);
+  }
 
-  await telegram.sendToApprovalChat(lines.join('\n'));
+  // ─ Section 3: Nouveaux todos ────────────────────────────────────────────
+  const sectionTodos: string[] = [];
+  if (briefing.sections?.newTodos !== false) try {
+    const newTodos = db
+      .prepare(
+        `SELECT title, partner_name FROM todos
+         WHERE status = 'open' AND created_at > ?
+         ORDER BY created_at DESC LIMIT 5`,
+      )
+      .all(since24h) as Array<{ title: string; partner_name: string | null }>;
+    for (const t of newTodos) {
+      sectionTodos.push(`• ${t.partner_name ? `[${t.partner_name}] ` : ''}${t.title}`);
+    }
+  } catch (e) {
+    log.warn(`briefing: todos section failed: ${e}`);
+  }
+
+  // ─ Section 4: Approvals en attente ──────────────────────────────────────
+  const sectionApprovals: string[] = [];
+  if (briefing.sections?.pendingApprovals !== false) try {
+    const proposals = db
+      .prepare(
+        `SELECT id, reasoning FROM proposals
+         WHERE status = 'proposed' AND (expires_at IS NULL OR expires_at > ?)
+         ORDER BY created_at DESC LIMIT 5`,
+      )
+      .all(now) as Array<{ id: string; reasoning: string | null }>;
+    for (const p of proposals) {
+      const label = (p.reasoning ?? '').slice(0, 80).replace(/\n/g, ' ') || p.id.slice(-8);
+      sectionApprovals.push(`• ${label}`);
+    }
+  } catch (e) {
+    log.warn(`briefing: approvals section failed: ${e}`);
+  }
+
+  // ─ Assemble ─────────────────────────────────────────────────────────────
+  const allEmpty =
+    sectionRespond.length === 0 &&
+    sectionStagnate.length === 0 &&
+    sectionTodos.length === 0 &&
+    sectionApprovals.length === 0;
+
+  if (allEmpty) {
+    if (briefing.silentWhenEmpty !== false) {
+      log.info('briefing skipped — nothing actionable today');
+      return;
+    }
+    await telegram.sendToApprovalChat(`${L.title}\n\n${L.empty}`);
+    return;
+  }
+
+  const lines: string[] = [L.title, ``];
+  if (sectionRespond.length) {
+    lines.push(L.respond, ...sectionRespond, ``);
+  }
+  if (sectionStagnate.length) {
+    lines.push(L.stagnate, ...sectionStagnate, ``);
+  }
+  if (sectionTodos.length) {
+    lines.push(L.todos, ...sectionTodos, ``);
+  }
+  if (sectionApprovals.length) {
+    lines.push(L.approvals, ...sectionApprovals, ``);
+  }
+
+  await telegram.sendToApprovalChat(lines.join('\n').trimEnd());
 }

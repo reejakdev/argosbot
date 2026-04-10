@@ -78,6 +78,8 @@ function runMigrations(db: Database.Database): void {
     { version: 15, sql: MIGRATION_15 },
     { version: 16, sql: MIGRATION_16 },
     { version: 17, sql: MIGRATION_17 },
+    { version: 18, sql: MIGRATION_18 },
+    { version: 19, sql: MIGRATION_19 },
   ];
 
   for (const migration of migrations) {
@@ -415,6 +417,46 @@ const MIGRATION_16 = `
 // Image data is excluded (ephemeral by design).
 const MIGRATION_17 = `
   ALTER TABLE context_windows ADD COLUMN messages_json TEXT;
+`;
+
+// ─── Migration 18: notifications (real-time owner alerts) ────────────────────
+const MIGRATION_18 = `
+  CREATE TABLE IF NOT EXISTS notifications (
+    id            TEXT PRIMARY KEY,
+    chat_id       TEXT,
+    partner_name  TEXT,
+    channel       TEXT,
+    title         TEXT NOT NULL,
+    body          TEXT,
+    urgency       TEXT,
+    message_url   TEXT,
+    source_ref    TEXT,
+    status        TEXT NOT NULL DEFAULT 'unread',
+    created_at    INTEGER NOT NULL,
+    seen_at       INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_notifications_status_created ON notifications(status, created_at);
+  CREATE INDEX IF NOT EXISTS idx_notifications_chat ON notifications(chat_id);
+`;
+
+// ─── Migration 19: todos (batch-extracted from chat history) ─────────────────
+const MIGRATION_19 = `
+  CREATE TABLE IF NOT EXISTS todos (
+    id                TEXT PRIMARY KEY,
+    title             TEXT NOT NULL,
+    description       TEXT,
+    chat_id           TEXT,
+    partner_name      TEXT,
+    channel           TEXT,
+    source_window_ids TEXT,
+    status            TEXT NOT NULL DEFAULT 'open',
+    priority          TEXT,
+    created_at        INTEGER NOT NULL,
+    completed_at      INTEGER,
+    notion_page_id    TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
+  CREATE INDEX IF NOT EXISTS idx_todos_chat ON todos(chat_id);
 `;
 
 // ─── Migration 11: knowledge graph ───────────────────────────────────────────

@@ -12,6 +12,8 @@ import { audit } from '../db/index.js';
 const log = createLogger('tool-loop');
 
 const DEFAULT_MAX_ITERATIONS = 12;
+const HARD_MAX_ITERATIONS = 50; // safety ceiling — config can use up to this
+const TOOL_RESULT_MAX_CHARS = 4000; // cap each tool result to prevent context bloat
 
 export interface ToolDefinition {
   name: string;
@@ -41,7 +43,7 @@ export type ToolLoopEvent =
  */
 export async function runToolLoop(
   config: LLMConfig,
-  systemPrompt: string,
+  _systemPrompt: string,
   messages: LLMMessage[],
   tools: ToolDefinition[],
   executor: ToolExecutor,
@@ -76,16 +78,62 @@ export async function runToolLoop(
   let finalText = '';
   let model = config.model;
   let iterations = 0;
-  const maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+  // Hard-cap iterations to prevent runaway token costs (MCP tool floods)
+  const maxIterations = Math.min(
+    config.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+    HARD_MAX_ITERATIONS,
+  );
+
+  // Detect Anthropic provider — only Anthropic supports cache_control
+  const isAnthropic = config.provider === 'anthropic';
 
   for (let i = 0; i < maxIterations; i++, iterations++) {
+    // Build system blocks with cache_control on Anthropic for prefix caching
+    // (saves ~90% on input tokens for the system prompt across iterations)
+    const systemForBody = isAnthropic && systemMsg
+      ? [
+          {
+            type: 'text',
+            text: systemMsg.content as string,
+            cache_control: { type: 'ephemeral' },
+          },
+        ]
+      : systemMsg?.content;
+
+    // Cache_control on the last user message anchors the rolling cache.
+    // The tool definitions array also gets cached implicitly when system is cached.
+    const messagesForBody = isAnthropic
+      ? rawMessages.map((m, idx) => {
+          const isLast = idx === rawMessages.length - 1;
+          if (!isLast || m.role !== 'user') return m;
+          // Add cache_control to the last user message's last content block
+          if (typeof m.content === 'string') {
+            return {
+              ...m,
+              content: [
+                { type: 'text', text: m.content, cache_control: { type: 'ephemeral' } },
+              ],
+            };
+          }
+          if (Array.isArray(m.content) && m.content.length > 0) {
+            const newContent = [...(m.content as Array<Record<string, unknown>>)];
+            newContent[newContent.length - 1] = {
+              ...newContent[newContent.length - 1],
+              cache_control: { type: 'ephemeral' },
+            };
+            return { ...m, content: newContent };
+          }
+          return m;
+        })
+      : rawMessages;
+
     const body: Record<string, unknown> = {
       model: config.model,
       max_tokens: config.maxTokens ?? 4096,
       stream: true,
       ...(config.temperature !== undefined && { temperature: config.temperature }),
-      ...(systemMsg && { system: systemMsg.content }),
-      messages: rawMessages,
+      ...(systemForBody !== undefined && { system: systemForBody }),
+      messages: messagesForBody,
       ...(tools.length > 0 && { tools }),
     };
 
@@ -142,7 +190,15 @@ export async function runToolLoop(
             ),
           ),
         ]);
-        toolResults.push({ tool_use_id: block.id!, content: output, is_error: error });
+        // Truncate large tool results to prevent context bloat / token waste.
+        // Without this, MCP tools returning JSON blobs can blow up the context
+        // window across many iterations.
+        const truncated =
+          output.length > TOOL_RESULT_MAX_CHARS
+            ? output.slice(0, TOOL_RESULT_MAX_CHARS) +
+              `\n\n[... truncated ${output.length - TOOL_RESULT_MAX_CHARS} chars]`
+            : output;
+        toolResults.push({ tool_use_id: block.id!, content: truncated, is_error: error });
         if (onEvent)
           await onEvent({
             type: 'tool_result',

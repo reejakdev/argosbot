@@ -1145,8 +1145,8 @@ async function stepApiKeys(total: number, config: Record<string, unknown>): Prom
   nl();
   console.log(rule('Slack listener (optional)'));
   nl();
-  info('Uses YOUR personal Slack account (user token xoxp-), not a bot.');
-  info('Argos will see all your DMs and channels — no bot invite needed.');
+  info('Uses YOUR personal Slack account — Argos sees all your DMs and channels.');
+  info('Two auth methods available: browser token (easy) or OAuth token (requires a Slack app).');
   nl();
 
   const existingSlackToken = existingSecrets.SLACK_USER_TOKEN;
@@ -1164,56 +1164,165 @@ async function stepApiKeys(total: number, config: Record<string, unknown>): Prom
   const enableSlack = await confirm('Enable Slack listener?', false);
 
   if (enableSlack) {
-    tutorial('Get your Slack user token', [
-      '1. Go to  https://api.slack.com/apps  → Create New App → From scratch',
-      '2. OAuth & Permissions → User Token Scopes, add:',
-      '     channels:history  channels:read  groups:history  groups:read',
-      '     im:history  im:read  mpim:history  mpim:read  users:read',
-      '3. Install to Workspace',
-      '4. Copy the  User OAuth Token  (starts with xoxp-)',
-    ]);
+    const slackAuthMode = await select<'browser' | 'oauth'>(
+      'Auth method',
+      [
+        {
+          label: 'Browser token  (xoxc- + cookie — no app needed, 2 min setup)',
+          value: 'browser',
+          hint: 'Recommended — grab credentials straight from Chrome DevTools',
+        },
+        {
+          label: 'OAuth user token  (xoxp- — requires creating a Slack app)',
+          value: 'oauth',
+          hint: 'Classic approach via api.slack.com/apps',
+        },
+      ],
+      0,
+    );
 
-    const slackToken = await askSecret('Slack user token (xoxp-...)');
+    if (slackAuthMode === 'browser') {
+      tutorial('Get your browser token + cookie (Chrome, ~2 min)', [
+        '── Token (xoxc-) ─────────────────────────────────────────────────',
+        '1. Open  https://app.slack.com  in Chrome (not the desktop app)',
+        '2. F12 → Console, paste:',
+        '     JSON.parse(localStorage.localConfig_v2).teams',
+        '3. Find your workspace, copy the token starting with  xoxc-',
+        '',
+        '── Cookie (xoxd-) ────────────────────────────────────────────────',
+        '4. DevTools → Application → Cookies → https://app.slack.com',
+        '5. Find the cookie named  d  — copy its value (starts with  xoxd-)',
+        '',
+        'Note: tokens expire on logout or password change — re-run setup if needed.',
+      ]);
 
-    if (slackToken) {
-      setPath(config, 'secrets.SLACK_USER_TOKEN', slackToken);
-      setPath(config, 'channels.slack.enabled', true);
+      const slackToken = await askSecret('Slack browser token (xoxc-...)');
+      const slackCookie = await askSecret('Slack cookie d (xoxd-...)');
 
-      const pollInterval = await ask('Poll interval in seconds (default: 60)', '60');
-      const pollSec = parseInt(pollInterval, 10);
-      if (!isNaN(pollSec) && pollSec >= 10) {
-        setPath(config, 'channels.slack.pollIntervalSeconds', pollSec);
-      }
+      if (slackToken && slackCookie) {
+        setPath(config, 'secrets.SLACK_USER_TOKEN', slackToken);
+        setPath(config, 'secrets.SLACK_COOKIE_D', slackCookie);
+        setPath(config, 'channels.slack.enabled', true);
 
-      const limitChannels = await confirm(
-        'Limit to specific Slack channels? (default: all joined channels + DMs)',
-        false,
-      );
-      if (limitChannels) {
-        info(
-          'Enter channel IDs one by one (find them in the channel URL or right-click → Copy Link).',
+        const pollInterval = await ask('Poll interval in seconds (default: 300 — keeps you low-profile)', '300');
+        const pollSec = parseInt(pollInterval, 10);
+        if (!isNaN(pollSec) && pollSec >= 30) {
+          setPath(config, 'channels.slack.pollIntervalSeconds', pollSec);
+        }
+
+        const limitChannels = await confirm(
+          'Limit to specific Slack channels? (default: all joined channels + DMs)',
+          false,
         );
-        const monitoredChannels: Array<{ channelId: string; name: string }> = [];
-        let addMore = true;
-        while (addMore) {
-          const channelId = await ask('Channel ID (e.g. C0123ABCDEF)');
-          const channelName = await ask('Channel name (for display)');
-          if (channelId && channelName) {
-            monitoredChannels.push({ channelId, name: channelName });
+        if (limitChannels) {
+          info(
+            'Enter channel IDs one by one (find them in the channel URL or right-click → Copy Link).',
+          );
+          const monitoredChannels: Array<{ channelId: string; name: string }> = [];
+          let addMore = true;
+          while (addMore) {
+            const channelId = await ask('Channel ID (e.g. C0123ABCDEF)');
+            const channelName = await ask('Channel name (for display)');
+            if (channelId && channelName) {
+              monitoredChannels.push({ channelId, name: channelName });
+            }
+            addMore = await confirm('Add another channel?', false);
           }
-          addMore = await confirm('Add another channel?', false);
+          if (monitoredChannels.length > 0) {
+            setPath(config, 'channels.slack.monitoredChannels', monitoredChannels);
+          }
         }
-        if (monitoredChannels.length > 0) {
-          setPath(config, 'channels.slack.monitoredChannels', monitoredChannels);
+
+        const monitorDMs = await confirm('Monitor Slack DMs?', true);
+        setPath(config, 'channels.slack.monitorDMs', monitorDMs);
+
+        const customHours = await confirm('Set active listening hours? (default: 09:00–22:00)', false);
+        if (customHours) {
+          const startStr = await ask('Start hour (0–23, default: 9)', '9');
+          const endStr = await ask('End hour (0–23, default: 22)', '22');
+          const startH = parseInt(startStr, 10);
+          const endH = parseInt(endStr, 10);
+          if (!isNaN(startH) && !isNaN(endH) && startH >= 0 && startH <= 23 && endH >= 0 && endH <= 23) {
+            setPath(config, 'channels.slack.listener.activeHoursStart', startH);
+            setPath(config, 'channels.slack.listener.activeHoursEnd', endH);
+          }
+        } else {
+          setPath(config, 'channels.slack.listener.activeHoursStart', 9);
+          setPath(config, 'channels.slack.listener.activeHoursEnd', 22);
         }
+
+        ok('Slack browser token + cookie saved — polling starts on next boot');
+      } else {
+        warn('Token or cookie missing — skipping Slack config');
       }
-
-      const monitorDMs = await confirm('Monitor Slack DMs?', true);
-      setPath(config, 'channels.slack.monitorDMs', monitorDMs);
-
-      ok('Slack user token saved — polling starts on next boot');
     } else {
-      warn('No token provided — skipping Slack config');
+      // OAuth / xoxp- flow
+      tutorial('Get your Slack OAuth user token', [
+        '1. Go to  https://api.slack.com/apps  → Create New App → From scratch',
+        '2. OAuth & Permissions → User Token Scopes, add:',
+        '     channels:history  channels:read  groups:history  groups:read',
+        '     im:history  im:read  mpim:history  mpim:read  users:read',
+        '3. Install to Workspace',
+        '4. Copy the  User OAuth Token  (starts with xoxp-)',
+      ]);
+
+      const slackToken = await askSecret('Slack user token (xoxp-...)');
+
+      if (slackToken) {
+        setPath(config, 'secrets.SLACK_USER_TOKEN', slackToken);
+        setPath(config, 'channels.slack.enabled', true);
+
+        const pollInterval = await ask('Poll interval in seconds (default: 300 — keeps you low-profile)', '300');
+        const pollSec = parseInt(pollInterval, 10);
+        if (!isNaN(pollSec) && pollSec >= 30) {
+          setPath(config, 'channels.slack.pollIntervalSeconds', pollSec);
+        }
+
+        const limitChannels = await confirm(
+          'Limit to specific Slack channels? (default: all joined channels + DMs)',
+          false,
+        );
+        if (limitChannels) {
+          info(
+            'Enter channel IDs one by one (find them in the channel URL or right-click → Copy Link).',
+          );
+          const monitoredChannels: Array<{ channelId: string; name: string }> = [];
+          let addMore = true;
+          while (addMore) {
+            const channelId = await ask('Channel ID (e.g. C0123ABCDEF)');
+            const channelName = await ask('Channel name (for display)');
+            if (channelId && channelName) {
+              monitoredChannels.push({ channelId, name: channelName });
+            }
+            addMore = await confirm('Add another channel?', false);
+          }
+          if (monitoredChannels.length > 0) {
+            setPath(config, 'channels.slack.monitoredChannels', monitoredChannels);
+          }
+        }
+
+        const monitorDMs = await confirm('Monitor Slack DMs?', true);
+        setPath(config, 'channels.slack.monitorDMs', monitorDMs);
+
+        const customHours = await confirm('Set active listening hours? (default: 09:00–22:00)', false);
+        if (customHours) {
+          const startStr = await ask('Start hour (0–23, default: 9)', '9');
+          const endStr = await ask('End hour (0–23, default: 22)', '22');
+          const startH = parseInt(startStr, 10);
+          const endH = parseInt(endStr, 10);
+          if (!isNaN(startH) && !isNaN(endH) && startH >= 0 && startH <= 23 && endH >= 0 && endH <= 23) {
+            setPath(config, 'channels.slack.listener.activeHoursStart', startH);
+            setPath(config, 'channels.slack.listener.activeHoursEnd', endH);
+          }
+        } else {
+          setPath(config, 'channels.slack.listener.activeHoursStart', 9);
+          setPath(config, 'channels.slack.listener.activeHoursEnd', 22);
+        }
+
+        ok('Slack OAuth token saved — polling starts on next boot');
+      } else {
+        warn('No token provided — skipping Slack config');
+      }
     }
   }
 

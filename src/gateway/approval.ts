@@ -232,11 +232,44 @@ export function validateAndConsumeToken(proposalId: string, token: string): bool
 export async function requestApproval(proposal: Proposal): Promise<ApprovalRequest> {
   if (!_sendMessage) throw new Error('Approval gateway not initialized');
 
+  const db = getDb();
+
+  // ── Dedup: check for existing pending/awaiting approval with same actions ──
+  // Hash the actions JSON to detect duplicates regardless of context_summary phrasing.
+  // Window: last 24h. Same hash + still pending → reuse the existing approval.
+  const actionsJson = JSON.stringify(proposal.actions);
+  const cutoff = Date.now() - 24 * 3600_000;
+  const existing = db
+    .prepare(
+      `SELECT p.id, p.context_summary, a.id AS approval_id FROM proposals p
+       LEFT JOIN approvals a ON a.proposal_id = p.id AND a.status = 'pending'
+       WHERE p.actions = ?
+         AND p.status IN ('proposed', 'awaiting_approval')
+         AND p.created_at > ?
+       ORDER BY p.created_at DESC LIMIT 1`,
+    )
+    .get(actionsJson, cutoff) as { id: string; context_summary: string; approval_id?: string } | undefined;
+
+  if (existing) {
+    log.info(
+      `Dedup: skipping duplicate approval — proposal ${existing.id.slice(-8)} already pending with same actions`,
+    );
+    audit('approval_dedup', proposal.id, 'approval', { existingId: existing.id });
+    // Mark this new proposal as duplicate so it doesn't pile up in DB
+    db.prepare(`UPDATE proposals SET status = 'rejected' WHERE id = ?`).run(proposal.id);
+    return {
+      id: existing.approval_id ?? existing.id,
+      proposalId: existing.id,
+      status: 'pending',
+      createdAt: Date.now(),
+      expiresAt: proposal.expiresAt,
+    };
+  }
+
   const text = formatApprovalMessage(proposal);
   const keyboard = buildInlineKeyboard(proposal.id, proposal.actions);
 
   // Update proposal status
-  const db = getDb();
   db.prepare(`UPDATE proposals SET status = 'awaiting_approval' WHERE id = ?`).run(proposal.id);
 
   let tgMessageId: number | undefined;

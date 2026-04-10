@@ -28,8 +28,18 @@ export async function fetchUrl(source: ContextUrl): Promise<KnowledgeDocument | 
       text = await res.text();
     }
 
+    const MAX_BYTES = 500 * 1024;
+    if (text.length > MAX_BYTES) {
+      log.warn(
+        `[knowledge:url] document ${source.name} truncated from ${Math.round(text.length / 1024)} KB to 500 KB`,
+      );
+      text = text.slice(0, MAX_BYTES);
+    }
+
     const header = `[${source.name}]\nSource: ${source.url}\n\n`;
     const isLarge = text.length > 8000;
+
+    log.info(`[knowledge:url] fetched 1 docs, ~${Math.round(text.length / 1024)} KB`);
 
     return {
       key: `url:${source.url}`,

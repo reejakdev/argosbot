@@ -96,12 +96,11 @@ export async function executeSkill(
 export async function loadBuiltinSkills(): Promise<void> {
   const modules = [
     import('./builtins/web-search.js'),
-    import('./builtins/crypto-price.js'),
     import('./builtins/fetch-url.js'),
     import('./builtins/notion-search.js'),
     import('./builtins/memory-search.js'),
-    import('./builtins/verify-address.js'),
     import('./builtins/graph-search.js'),
+    import('./builtins/notion-db-query.js'),
   ];
 
   const results = await Promise.allSettled(modules);
@@ -112,6 +111,22 @@ export async function loadBuiltinSkills(): Promise<void> {
   }
 
   log.info(`${_registry.size} built-in skill(s) loaded`);
+
+  // ─── Load personal addons (src/addons/index.ts) — excluded from public build
+  // Uses a runtime path so the public build (which excludes src/addons/) doesn't
+  // fail on a missing module. Silent if no addons present.
+  try {
+    const before = _registry.size;
+    // String-based path so tsc doesn't try to resolve at compile time
+    const addonModulePath = ['..', 'addons', 'index.js'].join('/');
+    await import(/* @vite-ignore */ addonModulePath).catch(() => null);
+    const added = _registry.size - before;
+    if (added > 0) {
+      log.info(`${added} addon skill(s) loaded`);
+    }
+  } catch {
+    /* no addons present — silent */
+  }
 }
 
 // ─── Skill catalog (for setup wizard display) ─────────────────────────────────

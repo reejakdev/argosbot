@@ -37,6 +37,26 @@ export interface VoiceOutputConfig extends TtsConfig {
 }
 
 /**
+ * Strip "thinking" / reasoning blocks from text before TTS.
+ * Some models (Qwen, DeepSeek-R1, GPT-o1, etc.) emit reasoning inline using
+ * <think>, <thinking>, <reasoning>, or [THINKING] tags. We never want to
+ * speak the model's internal reasoning — only the final answer.
+ */
+export function stripThinking(text: string): string {
+  if (!text) return text;
+  return text
+    // <think>...</think> and <thinking>...</thinking>
+    .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
+    // <reasoning>...</reasoning>
+    .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
+    // Markdown-style [THINKING] ... [/THINKING]
+    .replace(/\[THINKING\][\s\S]*?\[\/THINKING\]/gi, '')
+    // Unclosed thinking block at start (model didn't close it before output)
+    .replace(/^<think(?:ing)?>[\s\S]*?(?=\n\n|$)/i, '')
+    .trim();
+}
+
+/**
  * Get the output mode for a trigger. Returns null if voice shouldn't fire.
  */
 export function getTriggerOutput(config: VoiceOutputConfig, trigger: VoiceTrigger): TtsOutput | null {
@@ -67,8 +87,13 @@ export async function speak(
   if (!output) return;
   if (!text?.trim()) return;
 
+  // Strip any reasoning/thinking blocks the model may have emitted inline
+  // (Qwen <think>, DeepSeek-R1, GPT-o1, etc.). Never speak the model's reasoning.
+  const cleaned = stripThinking(text);
+  if (!cleaned.trim()) return;
+
   // Truncate for TTS (most providers cap at 4-5k chars)
-  const truncated = text.slice(0, 4000);
+  const truncated = cleaned.slice(0, 4000);
 
   log.info(
     `Speaking (trigger=${trigger}, output=${output}, provider=${config.ttsProvider ?? 'local'}): ${truncated.slice(0, 60)}…`,

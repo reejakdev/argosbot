@@ -50,6 +50,13 @@ src/scripts/test-*.ts
 src/scripts/test-chunks-*.ts
 src/scripts/index-doc.ts
 
+# Personal addons — anything in src/addons/ EXCEPT the README and example template.
+# Excluded from public build via tsconfig.public.json. See src/addons/README.md.
+src/addons/*
+!src/addons/README.md
+!src/addons/example.ts
+!src/addons/.gitkeep
+
 # TypeScript incremental cache
 *.tsbuildinfo
 

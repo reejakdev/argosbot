@@ -306,6 +306,9 @@ export function registerBuiltinJobs(
   expireApprovals: () => void,
   sendDailyBriefing: () => Promise<void>,
   refreshContext?: () => Promise<void>,
+  todoExtraction?: { handler: () => Promise<void>; intervalHours: number; enabled: boolean },
+  notionTodoTracker?: { handler: () => Promise<void>; enabled: boolean; cronExpression?: string },
+  briefingOpts?: { enabled: boolean; cronExpression: string },
 ): void {
   registerHandler('memory_purge', async () => {
     purgeExpiredMemory();
@@ -327,10 +330,40 @@ export function registerBuiltinJobs(
 
   upsertCronJob('memory_purge', '0 3 * * *', 'memory_purge'); // 03:00 daily
   upsertCronJob('approval_expiry', '*/5 * * * *', 'approval_expiry'); // every 5min
-  upsertCronJob('daily_briefing', '0 8 * * 1-5', 'daily_briefing'); // 08:00 weekdays
+  if (briefingOpts?.enabled !== false) {
+    upsertCronJob(
+      'daily_briefing',
+      briefingOpts?.cronExpression ?? '0 8 * * 1-5',
+      'daily_briefing',
+    );
+  }
   upsertCronJob('check_triggers', '* * * * *', 'check_triggers'); // every minute
   if (refreshContext) {
     upsertCronJob('context_refresh', '0 4 * * *', 'context_refresh'); // 04:00 daily
+  }
+  if (todoExtraction?.enabled) {
+    registerHandler('todo_extraction', async () => {
+      await todoExtraction.handler();
+    });
+    const h = Math.max(1, Math.min(24, todoExtraction.intervalHours));
+    // Run every N hours, on the hour
+    upsertCronJob('todo_extraction', `0 */${h} * * *`, 'todo_extraction');
+  }
+
+  // Notion Todo tracker — scans priority DBs for stagnating P1 items.
+  // Only register the cron when enabled. Handler still registered (no-op when
+  // disabled) so any stale cron row from previous installs is harmless.
+  registerHandler('notion_todo_tracker', async () => {
+    if (notionTodoTracker?.enabled) {
+      await notionTodoTracker.handler();
+    }
+  });
+  if (notionTodoTracker?.enabled) {
+    upsertCronJob(
+      'notion_todo_tracker',
+      notionTodoTracker.cronExpression ?? '0 9 * * *',
+      'notion_todo_tracker',
+    );
   }
 }
 

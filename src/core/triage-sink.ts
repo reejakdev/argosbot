@@ -18,6 +18,38 @@ import type { TriageResult } from './triage.js';
 const log = createLogger('triage-sink');
 const ulid = monotonicFactory();
 
+// ─── In-memory LRU cache for memory+knowledge searches in generateDraftReply ──
+// Process-local, TTL 5 min, cap 50 entries. Cuts duplicate FTS5/vector searches
+// when the same partner sends similar messages in a short window.
+interface DraftSearchCacheEntry {
+  memories: Array<{ content: string }>;
+  knowledgeContext: string;
+  expires: number;
+}
+const _draftSearchCache = new Map<string, DraftSearchCacheEntry>();
+const DRAFT_CACHE_TTL_MS = 5 * 60 * 1000;
+const DRAFT_CACHE_MAX = 50;
+function _draftCacheGet(key: string): DraftSearchCacheEntry | undefined {
+  const entry = _draftSearchCache.get(key);
+  if (!entry) return undefined;
+  if (entry.expires < Date.now()) {
+    _draftSearchCache.delete(key);
+    return undefined;
+  }
+  // LRU touch
+  _draftSearchCache.delete(key);
+  _draftSearchCache.set(key, entry);
+  return entry;
+}
+function _draftCacheSet(key: string, entry: DraftSearchCacheEntry): void {
+  _draftSearchCache.set(key, entry);
+  while (_draftSearchCache.size > DRAFT_CACHE_MAX) {
+    const oldest = _draftSearchCache.keys().next().value;
+    if (oldest === undefined) break;
+    _draftSearchCache.delete(oldest);
+  }
+}
+
 // ─── Main sink ─────────────────────────────────────────────────────────────────
 
 export async function triageSink(
@@ -68,12 +100,7 @@ async function sinkTask(
     log.debug(
       `Task dedup — open task ${existing.id} already exists for ${result.partner}, skipping`,
     );
-    // Still generate draft reply and notify, but no new task
-    if (llmConfig && !config.readOnly) {
-      generateDraftReply(result, existing.id, config, llmConfig, notify).catch((e) =>
-        log.warn(`Draft reply generation failed: ${e}`),
-      );
-    }
+    // Dedup path: skip draft regeneration — original task already has its draft proposal
     const icon = isMyTask ? '📋' : '👥';
     const urgent = result.urgency === 'high' ? ' 🔴' : '';
     const link = result.messageUrl ? `\n${formatMessageLinks(result.messageUrl)}` : '';
@@ -110,6 +137,15 @@ async function sinkTask(
 
   log.info(`Task saved: ${id} — "${result.title.slice(0, 60)}"`);
   audit('triage_task_created', id, 'task', { route: result.route, partner: result.partner });
+
+  // Real-time notification — additive to the existing task flow.
+  // Smart-filtered (regex pre-screen already done by triage + LLM second opinion).
+  try {
+    const { createNotification } = await import('./notifications.js');
+    await createNotification(result, config, llmConfig);
+  } catch (e) {
+    log.warn(`createNotification failed: ${e}`);
+  }
 
   // 2. Notion — if configured and not read-only
   if (config.notion && !config.readOnly) {
@@ -148,13 +184,15 @@ async function sinkTask(
     );
   }
 
-  // 4. Notification — only for tasks assigned to me
-  // team_task (other team) → silent: task is created but no notification
-  // user can still see them via /tasks <team> or /tasks all
-  if (isMyTask) {
-    const urgent = result.urgency === 'high' ? ' 🔴' : '';
+  // 4. Notification — only for HIGH-urgency my_task.
+  // Lower-urgency my_task still gets persisted (silent todo) but no ping —
+  // the owner pulls them via /tasks instead of being interrupted.
+  // team_task (other team) → silent regardless of urgency.
+  if (isMyTask && result.urgency === 'high') {
     const link = result.messageUrl ? `\n${formatMessageLinks(result.messageUrl)}` : '';
-    await notify(`📋 *${result.title}*${urgent}\n_${result.partner}_${link}`).catch(() => {});
+    await notify(`📋 *${result.title}* 🔴\n_${result.partner}_${link}`).catch(() => {});
+  } else if (isMyTask) {
+    log.info(`Silent my_task (urgency=${result.urgency}) — no notification ping`);
   } else {
     log.info(`Silent team_task created for "${result.assignee ?? 'unassigned'}" — no notification`);
   }
@@ -173,34 +211,52 @@ async function generateDraftReply(
   const { search } = await import('../memory/store.js');
   const ownerName = config.owner?.name ?? 'the owner';
 
-  // 1. Search memory for relevant context (addresses, past interactions, docs)
-  const memories = search({
-    query: result.body,
-    partnerName: result.partner,
-    limit: 5,
-  });
-  log.debug(
-    `generateDraftReply: ${memories.length} memory result(s) for partner=${result.partner}`,
-  );
+  // Cache key — partner + first 200 chars of body
+  const cacheKey = `${result.partner}::${result.body.slice(0, 200)}`;
+  const cached = _draftCacheGet(cacheKey);
 
-  // 2. Search knowledge sources (Notion, files) via semantic search if available
+  let memories: Array<{ content: string }>;
   let knowledgeContext = '';
-  try {
-    const { hybridSearch } = await import('../vector/store.js');
-    const embCfg = (
-      config as unknown as { embeddings?: import('../config/schema.js').EmbeddingsConfig }
-    ).embeddings;
-    log.debug(`generateDraftReply: embeddings enabled=${embCfg?.enabled}`);
-    if (embCfg?.enabled) {
-      // hybridSearch = semantic + keyword — catches camelCase token names that don't embed well
-      const results = await hybridSearch(result.body, embCfg, { topK: 3, minSimilarity: 0.35 });
-      log.debug(`generateDraftReply: ${results.length} knowledge chunk(s) found`);
-      if (results.length) {
-        knowledgeContext = results.map((r) => r.chunk.content).join('\n\n');
+
+  if (cached) {
+    memories = cached.memories;
+    knowledgeContext = cached.knowledgeContext;
+    log.debug(`generateDraftReply: cache hit for ${result.partner}`);
+  } else {
+    // 1. Search memory for relevant context (addresses, past interactions, docs)
+    memories = search({
+      query: result.body,
+      partnerName: result.partner,
+      limit: 5,
+    });
+    log.debug(
+      `generateDraftReply: ${memories.length} memory result(s) for partner=${result.partner}`,
+    );
+
+    // 2. Search knowledge sources (Notion, files) via semantic search if available
+    try {
+      const { hybridSearch } = await import('../vector/store.js');
+      const embCfg = (
+        config as unknown as { embeddings?: import('../config/schema.js').EmbeddingsConfig }
+      ).embeddings;
+      log.debug(`generateDraftReply: embeddings enabled=${embCfg?.enabled}`);
+      if (embCfg?.enabled) {
+        // hybridSearch = semantic + keyword — catches camelCase token names that don't embed well
+        const results = await hybridSearch(result.body, embCfg, { topK: 3, minSimilarity: 0.35 });
+        log.debug(`generateDraftReply: ${results.length} knowledge chunk(s) found`);
+        if (results.length) {
+          knowledgeContext = results.map((r) => r.chunk.content).join('\n\n');
+        }
       }
+    } catch (e) {
+      log.warn(`Knowledge semantic search failed in generateDraftReply: ${e}`);
     }
-  } catch (e) {
-    log.warn(`Knowledge semantic search failed in generateDraftReply: ${e}`);
+
+    _draftCacheSet(cacheKey, {
+      memories,
+      knowledgeContext,
+      expires: Date.now() + DRAFT_CACHE_TTL_MS,
+    });
   }
   log.debug(
     `generateDraftReply: calling LLM for draft (knowledgeContext=${knowledgeContext.length} chars, body="${result.body.slice(0, 80)}")`,

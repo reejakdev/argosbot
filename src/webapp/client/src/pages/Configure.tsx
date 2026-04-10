@@ -65,6 +65,27 @@ interface ArgosConfig {
   triage?: {
     enabled: boolean; myHandles: string[]; ignoreOwnTeam: boolean;
     mentionOnly: boolean; notionTodoDatabaseId?: string;
+    notificationsLlmFilter?: boolean;
+  };
+  todoExtraction?: { enabled: boolean; intervalHours: number; lookbackHours: number };
+  briefing?: {
+    enabled: boolean;
+    cronExpression: string;
+    sections: { needsReply: boolean; stagnatingTasks: boolean; newTodos: boolean; pendingApprovals: boolean };
+    silentWhenEmpty: boolean;
+    language: 'fr' | 'en';
+  };
+  notion?: {
+    todoDatabaseIds?: string[];
+    recursionDepth?: number;
+    todoTracker?: {
+      enabled: boolean;
+      cronExpression: string;
+      stagnationDays: number;
+      priorityKeywords: string[];
+      statusDoneKeywords: string[];
+      maxAlerts: number;
+    };
   };
   heartbeat?: { enabled: boolean; intervalMinutes: number; prompt?: string };
   memory?: { defaultTtlDays: number; archiveTtlDays: number; purgeIntervalHours: number; autoArchiveThreshold: number };
@@ -82,7 +103,7 @@ interface ArgosConfig {
     discord?: { enabled: boolean; monitorDMs: boolean };
     whatsapp?: { approvalJid?: string };
   };
-  notifications?: { preferredChannel?: string };
+  notifications?: { preferredChannel?: string; enabled?: boolean; minUrgency?: 'low' | 'medium' | 'high' };
   security?: { cloudMode: boolean };
   readOnly: boolean;
   autonomousMode?: boolean;
@@ -92,13 +113,14 @@ interface ArgosConfig {
 
 // ─── Tabs ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'models' | 'privacy' | 'voice' | 'channels' | 'pipeline' | 'agents' | 'plugins' | 'secrets';
+type Tab = 'models' | 'privacy' | 'voice' | 'channels' | 'pipeline' | 'assistance' | 'agents' | 'plugins' | 'secrets';
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'models',   label: 'Models'       },
-  { id: 'privacy',  label: 'Privacy'      },
-  { id: 'voice',    label: 'Voice / STT'  },
-  { id: 'channels', label: 'Channels'     },
-  { id: 'pipeline', label: 'Pipeline'     },
+  { id: 'models',     label: 'Models'           },
+  { id: 'privacy',    label: 'Privacy'          },
+  { id: 'voice',      label: 'Voice / STT'      },
+  { id: 'channels',   label: 'Channels'         },
+  { id: 'pipeline',   label: 'Pipeline'         },
+  { id: 'assistance', label: 'Argos Assistance' },
   { id: 'agents',   label: 'Agents'       },
   { id: 'plugins',  label: 'MCP & Skills' },
   { id: 'secrets',  label: 'Secrets'      },
@@ -949,6 +971,8 @@ function ChannelsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
   const [slEnabled,        setSlEnabled]        = useState(sl.listener?.enabled ?? false);
   const [slPollSec,        setSlPollSec]        = useState(sl.listener?.pollIntervalSeconds ?? 60);
   const [slMonitorDMs,     setSlMonitorDMs]     = useState(sl.listener?.monitorDMs ?? true);
+  const [slActiveStart,    setSlActiveStart]    = useState(sl.listener?.activeHoursStart ?? 9);
+  const [slActiveEnd,      setSlActiveEnd]      = useState(sl.listener?.activeHoursEnd ?? 22);
   const [dcEnabled,        setDcEnabled]        = useState(ch.discord?.enabled ?? false);
   const [dcMonitorDMs,     setDcMonitorDMs]     = useState(ch.discord?.monitorDMs ?? true);
   const [waJid,            setWaJid]            = useState(ch.whatsapp?.approvalJid ?? '');
@@ -1010,8 +1034,16 @@ function ChannelsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
         <FieldRow label="Poll interval (seconds)">
           <NumberInput value={slPollSec} onChange={setSlPollSec} min={10} max={600} />
         </FieldRow>
+        <FieldRow label="Active hours start (0–23)" hint="Polling is skipped before this hour (local time). Set both to 0 to always listen.">
+          <NumberInput value={slActiveStart} onChange={setSlActiveStart} min={0} max={23} />
+        </FieldRow>
+        <FieldRow label="Active hours end (0–23)" hint="Polling is skipped from this hour onwards.">
+          <NumberInput value={slActiveEnd} onChange={setSlActiveEnd} min={0} max={23} />
+        </FieldRow>
         <div style={{ ...inter, fontSize: '0.68rem', color: 'var(--text2)' }}>
-          Tokens: <code style={mono}>SLACK_USER_TOKEN</code> (xoxp-) · <code style={mono}>SLACK_BOT_TOKEN</code> (xoxb-)
+          Browser mode: set <code style={mono}>SLACK_USER_TOKEN</code> (xoxc-) + <code style={mono}>SLACK_COOKIE_D</code> (xoxd-) in Secrets tab.
+          OAuth mode: set <code style={mono}>SLACK_USER_TOKEN</code> (xoxp-) only.
+          Bot: <code style={mono}>SLACK_BOT_TOKEN</code> (xoxb-).
         </div>
       </div>
 
@@ -1045,7 +1077,7 @@ function ChannelsTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
             listener: { ...tg.listener, mode: tgMode, discoverUnknownChats: tgDiscover, ignoredSenders: tgIgnoredSenders.split(',').map(s => s.trim().toLowerCase()).filter(Boolean), contextWindow: { waitMs: tgWaitMs, maxMessages: tgMaxMsgs } },
             personal: { ...tg.personal, approvalChatId: tgApprovalChat },
           },
-          slack: { ...sl, listener: { enabled: slEnabled, pollIntervalSeconds: slPollSec, monitorDMs: slMonitorDMs } },
+          slack: { ...sl, listener: { enabled: slEnabled, pollIntervalSeconds: slPollSec, monitorDMs: slMonitorDMs, activeHoursStart: slActiveStart, activeHoursEnd: slActiveEnd } },
           discord: { enabled: dcEnabled, monitorDMs: dcMonitorDMs },
           whatsapp: { ...(ch.whatsapp ?? {}), approvalJid: waJid || undefined },
         },
@@ -1260,6 +1292,184 @@ function PipelineTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void 
         claude:       { customInstructions: customInstr || undefined, planningTemperature: planTemp, maxIterations: maxIter },
         shellExec:    { enabled: shellEnabled, allowedCommands: allowedCmds, workingDir: shellWorkdir || undefined },
         orchestration:{ enabled: orchEnabled, maxSubAgents: maxAgents, timeoutSeconds: orchTimeout },
+      })} />
+    </div>
+  );
+}
+
+// ─── Tab: Argos Assistance ────────────────────────────────────────────────────
+
+function AssistanceTab({ cfg, onSaved }: { cfg: ArgosConfig; onSaved?: () => void }) {
+  const { saving, saved, error, needsRestart, save } = useSave(onSaved);
+
+  // Briefing
+  const b = cfg.briefing ?? {
+    enabled: true,
+    cronExpression: '0 8 * * 1-5',
+    sections: { needsReply: true, stagnatingTasks: true, newTodos: true, pendingApprovals: true },
+    silentWhenEmpty: true,
+    language: 'fr' as const,
+  };
+  const [brEnabled,   setBrEnabled]   = useState(b.enabled ?? true);
+  const [brCron,      setBrCron]      = useState(b.cronExpression ?? '0 8 * * 1-5');
+  const [brNeeds,     setBrNeeds]     = useState(b.sections?.needsReply ?? true);
+  const [brStag,      setBrStag]      = useState(b.sections?.stagnatingTasks ?? true);
+  const [brNew,       setBrNew]       = useState(b.sections?.newTodos ?? true);
+  const [brApp,       setBrApp]       = useState(b.sections?.pendingApprovals ?? true);
+  const [brSilent,    setBrSilent]    = useState(b.silentWhenEmpty ?? true);
+  const [brLang,      setBrLang]      = useState<'fr' | 'en'>(b.language ?? 'fr');
+
+  // Notifications
+  const [notifEnabled, setNotifEnabled] = useState(cfg.notifications?.enabled ?? true);
+  const [notifMinUrg,  setNotifMinUrg]  = useState<'low' | 'medium' | 'high'>(cfg.notifications?.minUrgency ?? 'high');
+  const [notifLlm,     setNotifLlm]     = useState(cfg.triage?.notificationsLlmFilter ?? false);
+
+  // Todo extraction
+  const [teEnabled,  setTeEnabled]  = useState(cfg.todoExtraction?.enabled ?? false);
+  const [teInterval, setTeInterval] = useState(cfg.todoExtraction?.intervalHours ?? 6);
+  const [teLookback, setTeLookback] = useState(cfg.todoExtraction?.lookbackHours ?? 6);
+
+  // Notion todo tracker
+  const tt = cfg.notion?.todoTracker ?? {
+    enabled: false,
+    cronExpression: '0 9 * * *',
+    stagnationDays: 7,
+    priorityKeywords: ['P1', 'High', 'Élevée', 'Urgent'],
+    statusDoneKeywords: ['Done', 'Terminé', 'Fini', 'Completed'],
+    maxAlerts: 10,
+  };
+  const [ttEnabled,   setTtEnabled]   = useState(tt.enabled ?? false);
+  const [ttDbs,       setTtDbs]       = useState((cfg.notion?.todoDatabaseIds ?? []).join('\n'));
+  const [ttCron,      setTtCron]      = useState(tt.cronExpression ?? '0 9 * * *');
+  const [ttStag,      setTtStag]      = useState(tt.stagnationDays ?? 7);
+  const [ttPrio,      setTtPrio]      = useState((tt.priorityKeywords ?? []).join(', '));
+  const [ttDone,      setTtDone]      = useState((tt.statusDoneKeywords ?? []).join(', '));
+  const [ttMax,       setTtMax]       = useState(tt.maxAlerts ?? 10);
+
+  // Notion connector recursion depth
+  const [recDepth, setRecDepth] = useState(cfg.notion?.recursionDepth ?? 3);
+
+  const labels = brLang === 'en'
+    ? { needs: 'To reply', stag: 'Stagnating tasks', nt: 'New todos', app: 'Pending approvals' }
+    : { needs: 'À répondre', stag: 'Tâches qui stagnent', nt: 'Nouveaux todos', app: 'Approvals en attente' };
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Briefing */}
+      <div style={cardStyle}>
+        <SectionTitle>Briefing quotidien</SectionTitle>
+        <ToggleRow label="Enabled" hint="Envoi automatique d'un résumé quotidien sur ton canal d'approbation." checked={brEnabled} onChange={setBrEnabled} />
+        <FieldRow label="Cron expression" hint="Format crontab (ex: `0 8 * * 1-5` = 8h du lundi au vendredi)">
+          <Input value={brCron} onChange={setBrCron} placeholder="0 8 * * 1-5" style={{ width: 200 }} />
+        </FieldRow>
+        <FieldRow label="Sections">
+          <div className="flex flex-col gap-1">
+            <ToggleRow label={labels.needs} checked={brNeeds} onChange={setBrNeeds} />
+            <ToggleRow label={labels.stag} checked={brStag} onChange={setBrStag} />
+            <ToggleRow label={labels.nt} checked={brNew} onChange={setBrNew} />
+            <ToggleRow label={labels.app} checked={brApp} onChange={setBrApp} />
+          </div>
+        </FieldRow>
+        <ToggleRow label="Silent when empty" hint='Si rien à signaler, ne rien envoyer (sinon envoie un message "rien à signaler").' checked={brSilent} onChange={setBrSilent} />
+        <FieldRow label="Language">
+          <Select value={brLang} onChange={v => setBrLang(v as 'fr' | 'en')} options={[{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }]} />
+        </FieldRow>
+      </div>
+
+      {/* Notifications */}
+      <div style={cardStyle}>
+        <SectionTitle>Notifications temps réel</SectionTitle>
+        <ToggleRow label="Enabled" hint="Émet des notifications push en temps réel à partir du triage." checked={notifEnabled} onChange={setNotifEnabled} />
+        <FieldRow label="Minimum urgency" hint="Seuil minimum pour déclencher une notification">
+          <Select value={notifMinUrg} onChange={v => setNotifMinUrg(v as 'low' | 'medium' | 'high')}
+            options={[{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }]} />
+        </FieldRow>
+        <ToggleRow label="Use LLM smart filter" hint="Coût LLM supplémentaire — désactivé par défaut" checked={notifLlm} onChange={setNotifLlm} />
+      </div>
+
+      {/* Todo extraction */}
+      <div style={cardStyle}>
+        <SectionTitle>Extraction de tâches (batch)</SectionTitle>
+        <ToggleRow label="Enabled" hint="Analyse les conversations anonymisées toutes les N heures pour extraire des TODO concrets. Coût LLM proportionnel au nombre de chats actifs." checked={teEnabled} onChange={setTeEnabled} />
+        <div className="flex gap-4 flex-wrap">
+          <FieldRow label="Interval hours">
+            <NumberInput value={teInterval} onChange={setTeInterval} min={1} max={24} />
+          </FieldRow>
+          <FieldRow label="Lookback hours">
+            <NumberInput value={teLookback} onChange={setTeLookback} min={1} max={168} />
+          </FieldRow>
+        </div>
+      </div>
+
+      {/* Notion todo tracker */}
+      <div style={cardStyle}>
+        <SectionTitle>Notion — Tracker de tâches stagnantes</SectionTitle>
+        <ToggleRow label="Enabled" hint="Scanne périodiquement les databases Notion configurées et alerte sur les P1 qui stagnent." checked={ttEnabled} onChange={setTtEnabled} />
+        <FieldRow label="Database IDs" hint="Un ID par ligne">
+          <Textarea value={ttDbs} onChange={setTtDbs} placeholder="abcd1234..." rows={3} />
+        </FieldRow>
+        <FieldRow label="Cron expression">
+          <Input value={ttCron} onChange={setTtCron} placeholder="0 9 * * *" style={{ width: 200 }} />
+        </FieldRow>
+        <div className="flex gap-4 flex-wrap">
+          <FieldRow label="Stagnation days">
+            <NumberInput value={ttStag} onChange={setTtStag} min={1} max={30} />
+          </FieldRow>
+          <FieldRow label="Max alerts per ping">
+            <NumberInput value={ttMax} onChange={setTtMax} min={1} max={50} />
+          </FieldRow>
+        </div>
+        <FieldRow label="Priority keywords" hint="Comma-separated">
+          <Input value={ttPrio} onChange={setTtPrio} placeholder="P1, High, Élevée, Urgent" />
+        </FieldRow>
+        <FieldRow label="Done status keywords" hint="Comma-separated">
+          <Input value={ttDone} onChange={setTtDone} placeholder="Done, Terminé, Fini, Completed" />
+        </FieldRow>
+      </div>
+
+      {/* Notion connector depth */}
+      <div style={cardStyle}>
+        <SectionTitle>Notion — Connecteur knowledge</SectionTitle>
+        <FieldRow label="Recursion depth" hint="Profondeur d'exploration des sous-pages Notion. 0 = page seule, 3 = recommandé, 5 = profond (lent).">
+          <NumberInput value={recDepth} onChange={setRecDepth} min={0} max={5} />
+        </FieldRow>
+      </div>
+
+      <SaveBar saving={saving} saved={saved} error={error} needsRestart={needsRestart} onSave={() => save({
+        briefing: {
+          enabled: brEnabled,
+          cronExpression: brCron,
+          sections: { needsReply: brNeeds, stagnatingTasks: brStag, newTodos: brNew, pendingApprovals: brApp },
+          silentWhenEmpty: brSilent,
+          language: brLang,
+        },
+        notifications: {
+          ...(cfg.notifications ?? {}),
+          enabled: notifEnabled,
+          minUrgency: notifMinUrg,
+        },
+        triage: {
+          ...(cfg.triage ?? { enabled: false, myHandles: [], ignoreOwnTeam: true, mentionOnly: false }),
+          notificationsLlmFilter: notifLlm,
+        },
+        todoExtraction: {
+          enabled: teEnabled,
+          intervalHours: teInterval,
+          lookbackHours: teLookback,
+        },
+        notion: {
+          ...(cfg.notion ?? {}),
+          recursionDepth: recDepth,
+          todoDatabaseIds: ttDbs.split('\n').map(s => s.trim()).filter(Boolean),
+          todoTracker: {
+            enabled: ttEnabled,
+            cronExpression: ttCron,
+            stagnationDays: ttStag,
+            priorityKeywords: ttPrio.split(',').map(s => s.trim()).filter(Boolean),
+            statusDoneKeywords: ttDone.split(',').map(s => s.trim()).filter(Boolean),
+            maxAlerts: ttMax,
+          },
+        },
       })} />
     </div>
   );
@@ -1786,8 +1996,9 @@ const KNOWN_SECRETS: Record<string, { label: string; hint: string }> = {
   TELEGRAM_BOT_TOKEN:      { label: 'Telegram Bot Token',      hint: 'BotFather → /newbot' },
   TELEGRAM_API_ID:         { label: 'Telegram API ID',         hint: 'my.telegram.org → App API' },
   TELEGRAM_API_HASH:       { label: 'Telegram API Hash',       hint: 'my.telegram.org → App API' },
-  SLACK_USER_TOKEN:        { label: 'Slack User Token (xoxp)', hint: 'api.slack.com → OAuth' },
-  SLACK_BOT_TOKEN:         { label: 'Slack Bot Token (xoxb)',  hint: 'api.slack.com → OAuth' },
+  SLACK_USER_TOKEN:        { label: 'Slack User Token (xoxc / xoxp)', hint: 'Browser: localStorage in Slack web  |  OAuth: api.slack.com → Apps' },
+  SLACK_COOKIE_D:          { label: 'Slack Cookie d (xoxd)',          hint: 'Browser mode only — DevTools → Application → Cookies → d' },
+  SLACK_BOT_TOKEN:         { label: 'Slack Bot Token (xoxb)',          hint: 'api.slack.com → OAuth' },
   DISCORD_BOT_TOKEN:       { label: 'Discord Bot Token',       hint: 'discord.com/developers → Bot' },
   NOTION_API_KEY:          { label: 'Notion API Key',          hint: 'notion.so/my-integrations' },
   GOOGLE_CLIENT_ID:        { label: 'Google OAuth Client ID',  hint: 'console.cloud.google.com → Credentials' },
@@ -2021,6 +2232,7 @@ export default function Configure() {
           {tab === 'voice'    && <VoiceTab    cfg={cfg} onSaved={onSaved} />}
           {tab === 'channels' && <ChannelsTab cfg={cfg} onSaved={onSaved} />}
           {tab === 'pipeline' && <PipelineTab cfg={cfg} onSaved={onSaved} />}
+          {tab === 'assistance' && <AssistanceTab cfg={cfg} onSaved={onSaved} />}
           {tab === 'agents'   && <AgentsTab   cfg={cfg} onSaved={onSaved} />}
           {tab === 'plugins'  && <PluginsTab  cfg={cfg} onSaved={onSaved} />}
           {tab === 'secrets'  && <SecretsTab />}

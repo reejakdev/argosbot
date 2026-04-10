@@ -228,6 +228,8 @@ async function boot() {
   ) {
     if (config.secrets?.SLACK_USER_TOKEN)
       process.env.SLACK_USER_TOKEN = config.secrets.SLACK_USER_TOKEN;
+    if ((config.secrets as Record<string, string> | undefined)?.SLACK_COOKIE_D)
+      process.env.SLACK_COOKIE_D = (config.secrets as Record<string, string>).SLACK_COOKIE_D;
     const slackChannel = createSlackChannel(config.channels.slack);
     if (slackChannel) {
       registerChannel(slackChannel);
@@ -458,6 +460,28 @@ async function boot() {
     () => expireStaleApprovals(),
     () => (telegramChannel ? sendDailyBriefing(config, telegramChannel) : Promise.resolve()),
     () => refreshStaleKnowledge(config),
+    {
+      enabled: config.todoExtraction.enabled,
+      intervalHours: config.todoExtraction.intervalHours,
+      handler: async () => {
+        const { runTodoExtraction } = await import('./core/todos.js');
+        await runTodoExtraction(config, llmConfig);
+      },
+    },
+    {
+      enabled:
+        (config.notion?.todoTracker?.enabled ?? false) &&
+        (config.notion?.todoDatabaseIds?.length ?? 0) > 0,
+      cronExpression: config.notion?.todoTracker?.cronExpression ?? '0 9 * * *',
+      handler: async () => {
+        const { runNotionTodoTracker } = await import('./core/notion-todo-tracker.js');
+        await runNotionTodoTracker(config, sendToApprovalChat);
+      },
+    },
+    {
+      enabled: config.briefing?.enabled ?? true,
+      cronExpression: config.briefing?.cronExpression ?? '0 8 * * 1-5',
+    },
   );
 
   // Task briefings — morning / noon / evening

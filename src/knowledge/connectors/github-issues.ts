@@ -113,6 +113,9 @@ export async function fetchGitHubIssues(opts: {
 
     const isLarge = fullText.length > 8000;
     log.info(`GitHub issues "${opts.name}": fetched (${fullText.length} chars)`);
+    log.info(
+      `[knowledge:github-issues] fetched 1 docs, ~${Math.round(fullText.length / 1024)} KB`,
+    );
 
     return {
       key: `github-issues:${opts.owner ?? 'me'}${opts.repo ? '/' + opts.repo : ''}`,

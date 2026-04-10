@@ -43,6 +43,7 @@ export function startJarvisDisplay(config: JarvisConfig): void {
 
   const localWss = new WebSocketServer({ server });
   wssInstances.push(localWss);
+  attachHeartbeat(localWss);
 
   localWss.on('connection', (ws) => {
     log.info('Jarvis display client connected (local)');
@@ -93,14 +94,45 @@ export function jarvisSendStatus(status: 'idle' | 'thinking' | 'speaking' | 'lis
   broadcast({ type: 'status', status, ts: Date.now() });
 }
 
-/** Check if any Jarvis client is connected */
+/** Check if any Jarvis client is connected (and alive — ping/pong validated) */
 export function hasJarvisClients(): boolean {
   for (const w of wssInstances) {
     for (const ws of w.clients) {
-      if (ws.readyState === WebSocket.OPEN) return true;
+      const wsExt = ws as WebSocket & { isAlive?: boolean };
+      if (ws.readyState === WebSocket.OPEN && wsExt.isAlive !== false) return true;
     }
   }
   return false;
+}
+
+/** Attach ping/pong heartbeat to a WSS so dead clients are killed quickly. */
+export function attachHeartbeat(wss: WebSocketServer): void {
+  wss.on('connection', (ws) => {
+    const wsExt = ws as WebSocket & { isAlive?: boolean };
+    wsExt.isAlive = true;
+    ws.on('pong', () => {
+      wsExt.isAlive = true;
+    });
+  });
+  // Every 15s, ping all clients. If they didn't respond to the previous ping → terminate.
+  const interval = setInterval(() => {
+    for (const ws of wss.clients) {
+      const wsExt = ws as WebSocket & { isAlive?: boolean };
+      if (wsExt.isAlive === false) {
+        log.debug('Terminating stale display WS (no pong response)');
+        ws.terminate();
+        continue;
+      }
+      wsExt.isAlive = false;
+      try {
+        ws.ping();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, 15_000);
+  interval.unref?.();
+  wss.on('close', () => clearInterval(interval));
 }
 
 function broadcast(data: Record<string, unknown>): void {
@@ -115,6 +147,7 @@ function broadcast(data: Record<string, unknown>): void {
 /** Register an external WSS (created by the main HTTPS server) so broadcast reaches it */
 export function registerExternalWss(externalWss: WebSocketServer): void {
   wssInstances.push(externalWss);
+  attachHeartbeat(externalWss);
   log.info('External WSS registered for Argos Display');
 }
 

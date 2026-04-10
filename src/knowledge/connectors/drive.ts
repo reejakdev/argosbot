@@ -196,7 +196,18 @@ export async function fetchGoogleDrive(
     return null;
   }
 
-  const combined = parts.join('\n\n').slice(0, 20_000); // cap at 20k chars
+  let combined = parts.join('\n\n');
+  const MAX_BYTES = 500 * 1024;
+  if (combined.length > MAX_BYTES) {
+    log.warn(
+      `[knowledge:drive] document ${source.name} truncated from ${Math.round(combined.length / 1024)} KB to 500 KB`,
+    );
+    combined = combined.slice(0, MAX_BYTES);
+  }
+  log.info(
+    `[knowledge:drive] fetched ${exported} docs, ~${Math.round(combined.length / 1024)} KB`,
+  );
+  combined = combined.slice(0, 20_000); // cap at 20k chars for content field
   log.info(`Drive "${source.name}": exported ${exported}/${files.length} file(s)`);
 
   return {

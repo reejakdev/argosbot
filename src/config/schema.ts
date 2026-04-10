@@ -91,6 +91,34 @@ const TriageSchema = z
     mentionOnly: z.boolean().default(false),
     /** Database Notion cible pour les tâches créées (optionnel) */
     notionTodoDatabaseId: z.string().optional(),
+    /** Pre-screen + LLM second opinion before creating a notification */
+    notificationsLlmFilter: z.boolean().default(false),
+  })
+  .default({});
+
+const TodoExtractionSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    intervalHours: z.number().min(1).max(24).default(6),
+    lookbackHours: z.number().min(1).max(168).default(6),
+  })
+  .default({});
+
+// ─── Briefing ─────────────────────────────────────────────────────────────────
+const BriefingSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    cronExpression: z.string().default('0 8 * * 1-5'),
+    sections: z
+      .object({
+        needsReply: z.boolean().default(true),
+        stagnatingTasks: z.boolean().default(true),
+        newTodos: z.boolean().default(true),
+        pendingApprovals: z.boolean().default(true),
+      })
+      .default({}),
+    silentWhenEmpty: z.boolean().default(true),
+    language: z.enum(['fr', 'en']).default('fr'),
   })
   .default({});
 
@@ -166,14 +194,20 @@ const SlackMonitoredChannelSchema = z.object({
   tags: z.array(z.string()).default([]),
 });
 
-/** Listener — user token (xoxp-), read-only, sees all channels/DMs */
+/** Listener — user token (xoxp- or xoxc-+cookie), read-only, sees all channels/DMs */
 const SlackListenerSchema = z
   .object({
     enabled: z.boolean().default(false),
     monitoredChannels: z.array(SlackMonitoredChannelSchema).default([]),
     monitorDMs: z.boolean().default(true),
-    /** Polling interval in seconds. Default: 60. */
-    pollIntervalSeconds: z.number().min(10).default(60),
+    /** Polling interval in seconds. Default: 300 (5 min). Keep high with xoxc- to avoid triggering presence signals. */
+    pollIntervalSeconds: z.number().min(30).default(300),
+    /**
+     * Active listening window (local time, 24h). Polling is skipped outside this range.
+     * Defaults: start=9 (09:00), end=22 (22:00). Set both to 0 to disable the filter.
+     */
+    activeHoursStart: z.number().min(0).max(23).default(9),
+    activeHoursEnd: z.number().min(0).max(23).default(22),
   })
   .default({});
 
@@ -195,7 +229,7 @@ const SlackChannelSchema = z
     enabled: z.boolean().default(false),
     monitoredChannels: z.array(SlackMonitoredChannelSchema).default([]),
     monitorDMs: z.boolean().default(true),
-    pollIntervalSeconds: z.number().min(10).default(60),
+    pollIntervalSeconds: z.number().min(10).default(180),
     listener: SlackListenerSchema,
     personal: SlackPersonalSchema,
   })
@@ -271,6 +305,10 @@ const ChannelsSchema = z
 
 const NotificationsSchema = z
   .object({
+    /** Master toggle — disable to silence all realtime notifications. */
+    enabled: z.boolean().default(true),
+    /** Minimum urgency level that triggers a notification. */
+    minUrgency: z.enum(['low', 'medium', 'high']).default('high'),
     /**
      * Canal préféré pour les notifications push (proposals, alertes, heartbeat).
      * Si absent, Argos utilise la priorité automatique : telegram_bot > telegram > slack > whatsapp.
@@ -411,7 +449,7 @@ const KnowledgeSourceSchema = z.discriminatedUnion('type', [
     name: z.string(),
     /** Glob patterns or exact paths, relative to HOME or absolute */
     paths: z.array(z.string()),
-    refreshHours: z.number().default(1),
+    refreshHours: z.number().default(6),
   }),
   z.object({
     type: z.literal('github-issues'),
@@ -419,7 +457,7 @@ const KnowledgeSourceSchema = z.discriminatedUnion('type', [
     /** If omitted, fetches across all repos for the authenticated user */
     owner: z.string().optional(),
     repo: z.string().optional(),
-    refreshHours: z.number().default(2),
+    refreshHours: z.number().default(12),
   }),
 ]);
 
@@ -471,6 +509,25 @@ const NotionSchema = z.object({
   agentDatabaseId: z.string(),
   ownerDatabaseId: z.string().optional(),
   mode: z.enum(['agent', 'owner', 'both']).default('agent'),
+  /** Databases scanned by the notion-todo-tracker cron */
+  todoDatabaseIds: z.array(z.string()).default([]),
+  /** Recursion depth for the knowledge connector when fetching pages with sub-pages */
+  recursionDepth: z.number().int().min(0).max(5).default(3),
+  /** Notion stagnating-todo tracker cron config */
+  todoTracker: z
+    .object({
+      enabled: z.boolean().default(false),
+      cronExpression: z.string().default('0 9 * * *'),
+      stagnationDays: z.number().int().min(1).max(30).default(7),
+      priorityKeywords: z
+        .array(z.string())
+        .default(['P1', 'High', 'Élevée', 'Urgent']),
+      statusDoneKeywords: z
+        .array(z.string())
+        .default(['Done', 'Terminé', 'Fini', 'Completed']),
+      maxAlerts: z.number().int().min(1).max(50).default(10),
+    })
+    .default({}),
 });
 
 // ─── Linear ───────────────────────────────────────────────────────────────────
@@ -631,7 +688,7 @@ const EmbeddingsSchema = z
 
 const HeartbeatSchema = z.object({
   enabled: z.boolean().default(false),
-  intervalMinutes: z.number().min(5).default(60),
+  intervalMinutes: z.number().min(5).default(120),
   prompt: z.string().optional(),
 });
 
@@ -691,7 +748,7 @@ const WalletSchema = z.object({
   monitor: z
     .object({
       enabled: z.boolean().default(false),
-      pollIntervalSeconds: z.number().min(10).default(60),
+      pollIntervalSeconds: z.number().min(10).default(300),
       /** Also alert on native coin (ETH, MATIC, SOL…) balance increases */
       watchNative: z.boolean().default(true),
       /** ERC-20 / SPL tokens to watch for incoming transfers */
@@ -856,10 +913,17 @@ export const ConfigSchema = z.object({
   privacy: PrivacySchema,
   // Triage — core, channel-agnostic
   triage: TriageSchema,
+  todoExtraction: TodoExtractionSchema,
+  briefing: BriefingSchema,
   // Heartbeat — proactivité générique
   heartbeat: HeartbeatSchema.default({}),
   // Knowledge — sources de l'espace de travail
   knowledge: KnowledgeSchema,
+  // Addons — opaque configuration bag for personal addons in src/addons/.
+  // Each addon reads its own subkey. Schema is intentionally permissive
+  // (passthrough) so user addons can carry arbitrary config without forcing
+  // a schema migration. Excluded from public Argos build.
+  addons: z.record(z.string(), z.unknown()).default({}),
   // LLM providers
   llm: LlmSchema.default({}),
   // Web app

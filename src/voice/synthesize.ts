@@ -39,6 +39,12 @@ function resolveLocalVoice(config: TtsConfig): string | undefined {
 export async function synthesizeSpeech(text: string, config: TtsConfig): Promise<Buffer> {
   const provider = config.ttsProvider ?? 'openai';
 
+  // Always log who's calling synthesis — helps trace credit burn
+  if (provider === 'elevenlabs' || provider === 'openai') {
+    const stack = new Error().stack?.split('\n').slice(2, 5).join(' → ').trim() ?? 'unknown';
+    log.info(`💸 TTS synthesis (${provider}, ${text.length} chars) — caller: ${stack.slice(0, 200)}`);
+  }
+
   if (provider === 'openai') {
     const apiKey = config.openAiTtsApiKey;
     if (!apiKey) throw new Error('openAiTtsApiKey required for TTS');

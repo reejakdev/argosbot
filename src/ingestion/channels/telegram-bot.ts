@@ -321,6 +321,7 @@ export class TelegramBot {
         if (this.argosConfig.voice.ttsEnabled && reply) {
           try {
             const { synthesizeSpeech } = await import('../../voice/synthesize.js');
+            const { stripThinking } = await import('../../voice/speak.js');
             const ttsConfig = {
               ttsProvider: this.argosConfig.voice.ttsProvider,
               openAiTtsApiKey: this.argosConfig.voice.openAiTtsApiKey,
@@ -329,7 +330,12 @@ export class TelegramBot {
               elevenLabsApiKey: this.argosConfig.voice.elevenLabsApiKey,
               elevenLabsVoiceId: this.argosConfig.voice.elevenLabsVoiceId,
             };
-            const audioBytes = await synthesizeSpeech(reply, ttsConfig);
+            const cleanReply = stripThinking(reply);
+            if (!cleanReply.trim()) {
+              await this.sendMessage(chatId, reply);
+              return;
+            }
+            const audioBytes = await synthesizeSpeech(cleanReply, ttsConfig);
 
             // Send as voice note via multipart/form-data
             const formData = new globalThis.FormData();
@@ -970,11 +976,68 @@ export class TelegramBot {
         await cmdProposals((t) => this.sendMessage(chatId, t));
         break;
 
-      case '/tasks':
+      case '/tasks': {
+        const { listOpenTodos } = await import('../../core/todos.js');
+        const todos = listOpenTodos(50);
+        if (!todos.length) {
+          await this.sendMessage(chatId, 'No open todos.');
+        } else {
+          const lines = todos.map((t) => {
+            const sfx = t.id.slice(-6);
+            const partner = t.partner_name ?? 'unknown';
+            const prio = t.priority === 'high' ? ' 🔴' : t.priority === 'medium' ? ' 🟡' : '';
+            return `\`${sfx}\` _${partner}_ — ${t.title}${prio}`;
+          });
+          await this.sendMessage(chatId, `*Open todos (${todos.length}):*\n${lines.join('\n')}`, true);
+        }
+        break;
+      }
+
+      case '/done': {
+        const { markTodoDone } = await import('../../core/todos.js');
+        if (!arg.trim()) {
+          await this.sendMessage(chatId, 'Usage: /done <id-suffix> or /done all');
+          break;
+        }
+        const n = markTodoDone(arg.trim());
+        await this.sendMessage(chatId, n > 0 ? `✅ Marked ${n} todo(s) done.` : 'No matching open todo.');
+        break;
+      }
+
+      case '/notifs': {
+        const { listUnreadNotifications } = await import('../../core/notifications.js');
+        const notifs = listUnreadNotifications(20);
+        if (!notifs.length) {
+          await this.sendMessage(chatId, 'No unread notifications.');
+        } else {
+          const lines = notifs.map((n) => {
+            const sfx = n.id.slice(-6);
+            const partner = n.partner_name ?? 'unknown';
+            const icon = n.urgency === 'high' ? '🔴' : n.urgency === 'medium' ? '🟡' : '🔵';
+            const link = n.message_url ? ` [link](${n.message_url})` : '';
+            return `${icon} \`${sfx}\` _${partner}_ — ${n.title}${link}`;
+          });
+          await this.sendMessage(chatId, `*Unread notifications (${notifs.length}):*\n${lines.join('\n')}`, true);
+        }
+        break;
+      }
+
+      case '/seen': {
+        const { markNotificationSeen } = await import('../../core/notifications.js');
+        if (!arg.trim()) {
+          await this.sendMessage(chatId, 'Usage: /seen <id-suffix> or /seen all');
+          break;
+        }
+        const n = markNotificationSeen(arg.trim());
+        await this.sendMessage(chatId, n > 0 ? `👁 Marked ${n} notification(s) seen.` : 'No matching unread notification.');
+        break;
+      }
+
+      case '/tasks_legacy':
         await cmdTasks((t, opts) => this.sendMessage(chatId, t, true, opts), arg);
         break;
 
-      case '/done':
+      case '/done_legacy':
         await cmdDone(arg, (t) => this.sendMessage(chatId, t));
         break;
 
@@ -1483,10 +1546,26 @@ If nothing is completed, return {"completed": [], "reasoning": ""}`,
       await import('../../llm/compaction.js');
     const { llmCall } = await import('../../llm/index.js');
 
-    if (needsCompaction(conv)) {
-      conv = await compactHistory(conv, this.llmConfig, llmCall);
+    // Lower compaction trigger: also compact when this user's history exceeds
+    // 30 messages OR ~20KB total content, in addition to the default needsCompaction check.
+    const totalBytes = conv.messages.reduce(
+      (acc, m) => acc + (typeof m.content === 'string' ? m.content.length : 0),
+      0,
+    );
+    const overSized = conv.messages.length > 30 || totalBytes > 20_000;
+    if (needsCompaction(conv) || overSized) {
+      conv = await compactHistory(
+        overSized && !needsCompaction(conv)
+          ? // Force compaction by inflating temporarily — compactHistory checks needsCompaction
+            ({ ...conv, messages: [...conv.messages, ...Array(21).fill({ role: 'user', content: '' })] })
+          : conv,
+        this.llmConfig,
+        llmCall,
+      );
+      // Strip placeholder empties if we forced
+      conv.messages = conv.messages.filter((m) => m.content !== '');
       await this.saveConversation(userId, conv);
-      log.info(`Conversation compacted for user ${userId}`);
+      log.info(`Conversation compacted for user ${userId} (msgs=${conv.messages.length}, bytes=${totalBytes})`);
     }
 
     // Build system prompt

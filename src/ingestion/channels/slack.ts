@@ -1,20 +1,27 @@
 /**
- * Slack channel — User token polling (xoxp-).
+ * Slack channel — User token polling.
  *
- * Uses YOUR OWN Slack account (not a bot), so Argos sees:
- *   - Every DM you receive
- *   - Every channel you're a member of
- *   - Private channels, shared channels, everything
+ * Supports two auth modes (auto-detected from env vars):
  *
- * No bot invite needed. Same philosophy as Telegram MTProto.
+ * ── Mode A: Browser token (recommended, no app needed) ──────────────────────
+ *   SLACK_USER_TOKEN   xoxc-... (from localStorage in Slack web)
+ *   SLACK_COOKIE_D     xoxd-... (cookie "d" from DevTools → Application → Cookies)
  *
- * Auth setup (one-time):
- *   1. Go to https://api.slack.com/apps → Create New App → From scratch
- *   2. OAuth & Permissions → User Token Scopes:
- *        channels:history, channels:read, groups:history, groups:read,
- *        im:history, im:read, mpim:history, mpim:read, users:read
- *   3. Install to workspace → copy User OAuth Token (xoxp-...)
- *   4. Set SLACK_USER_TOKEN in config.secrets or .env
+ *   How to get them (one-time, ~2 min):
+ *     1. Open Slack in Chrome → F12 → Console
+ *        JSON.parse(localStorage.localConfig_v2).teams
+ *        Copy the token starting with xoxc-...
+ *     2. DevTools → Application → Cookies → https://app.slack.com
+ *        Copy the value of cookie "d" (starts with xoxd-...)
+ *     3. Set SLACK_USER_TOKEN=xoxc-... and SLACK_COOKIE_D=xoxd-... in config.secrets or .env
+ *
+ *   Note: xoxc tokens expire on logout or password change. No Slack app needed.
+ *
+ * ── Mode B: OAuth User Token (requires Slack app) ───────────────────────────
+ *   SLACK_USER_TOKEN   xoxp-... (User OAuth Token from api.slack.com/apps)
+ *   (no SLACK_COOKIE_D needed — uses @slack/web-api SDK)
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
  *
  * Polling: ~60s by default (configurable via pollIntervalSeconds).
  * Uses conversations.history with oldest= cursor to fetch only new messages.
@@ -37,9 +44,18 @@ const ulid = monotonicFactory();
 
 export interface SlackConfig {
   userToken: string;
+  /** xoxd-... cookie value — required when userToken is xoxc- (browser mode) */
+  cookieD?: string;
   monitoredChannels: Array<{ channelId: string; name: string; tags?: string[] }>;
   monitorDMs: boolean;
   pollIntervalSeconds: number;
+  /**
+   * Active listening window (local time, 24h).
+   * Polling is skipped if current hour < activeHoursStart or >= activeHoursEnd.
+   * Both set to 0 = always active.
+   */
+  activeHoursStart: number;
+  activeHoursEnd: number;
 }
 
 type SlackWebClient = {
@@ -83,6 +99,47 @@ function extractLinks(text: string): string[] {
   return [...new Set(unwrapped.match(URL_REGEX) ?? [])];
 }
 
+// ─── Browser-token fetch client (xoxc- + xoxd- cookie) ───────────────────────
+
+/**
+ * Thin Slack API client that authenticates via browser token (xoxc-) + cookie (d=xoxd-).
+ * Uses the same API endpoints as the SDK — just plain fetch with the right headers.
+ * No Slack app or OAuth flow required.
+ */
+function createBrowserTokenClient(token: string, cookieD: string): SlackWebClient {
+  async function post(method: string, params: Record<string, unknown>): Promise<unknown> {
+    const body = new URLSearchParams({ token });
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null) body.set(k, String(v));
+    }
+    const res = await fetch(`https://slack.com/api/${method}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Cookie: `d=${cookieD}`,
+      },
+      body: body.toString(),
+    });
+    if (!res.ok) throw new Error(`Slack HTTP ${res.status} on ${method}`);
+    const json = (await res.json()) as Record<string, unknown>;
+    if (!json.ok) throw Object.assign(new Error(`Slack API error: ${json.error}`), { data: json });
+    return json;
+  }
+
+  return {
+    conversations: {
+      list: (opts) => post('conversations.list', opts) as ReturnType<SlackWebClient['conversations']['list']>,
+      history: (opts) => post('conversations.history', opts) as ReturnType<SlackWebClient['conversations']['history']>,
+    },
+    users: {
+      info: (opts) => post('users.info', opts) as ReturnType<SlackWebClient['users']['info']>,
+    },
+    auth: {
+      test: () => post('auth.test', {}) as ReturnType<SlackWebClient['auth']['test']>,
+    },
+  };
+}
+
 // ─── SlackChannel class ───────────────────────────────────────────────────────
 
 export class SlackChannel implements Channel {
@@ -91,7 +148,7 @@ export class SlackChannel implements Channel {
   private config: SlackConfig;
   private webClient: SlackWebClient | null = null;
   private onMessageCb: ((msg: RawMessage) => Promise<void>) | null = null;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private botUserId: string | null = null;
   private userCache: Map<string, string> = new Map();
   private static readonly MAX_USER_CACHE = 1000;
@@ -108,10 +165,18 @@ export class SlackChannel implements Channel {
 
   async start(): Promise<void> {
     try {
-      const { WebClient } = (await import('@slack/web-api')) as unknown as {
-        WebClient: new (token: string) => SlackWebClient;
-      };
-      this.webClient = new WebClient(this.config.userToken);
+      if (this.config.cookieD) {
+        // Browser-token mode: xoxc- + xoxd- cookie, no SDK needed
+        this.webClient = createBrowserTokenClient(this.config.userToken, this.config.cookieD);
+        log.info('Slack: using browser token (xoxc- + cookie)');
+      } else {
+        // OAuth mode: xoxp- token via @slack/web-api SDK
+        const { WebClient } = (await import('@slack/web-api')) as unknown as {
+          WebClient: new (token: string) => SlackWebClient;
+        };
+        this.webClient = new WebClient(this.config.userToken);
+        log.info('Slack: using OAuth user token (xoxp-)');
+      }
 
       // Identify self to skip own messages
       try {
@@ -125,13 +190,12 @@ export class SlackChannel implements Channel {
       // Initialize cursors to "now" — only ingest messages received after start
       await this.initCursors();
 
-      // Start polling loop
-      const intervalMs = this.config.pollIntervalSeconds * 1000;
-      this.pollTimer = setInterval(() => {
-        this.poll().catch((e) => log.warn('Slack poll error:', e));
-      }, intervalMs);
+      // Start polling loop with randomized interval (±30% jitter) to avoid detectable patterns
+      this.scheduleNextPoll();
 
-      log.info(`Slack user-token polling started (every ${this.config.pollIntervalSeconds}s)`);
+      log.info(
+        `Slack polling started (~${this.config.pollIntervalSeconds}s ± 30% jitter)`,
+      );
     } catch (e) {
       log.error('Slack start failed', e);
     }
@@ -139,10 +203,28 @@ export class SlackChannel implements Channel {
 
   async stop(): Promise<void> {
     if (this.pollTimer) {
-      clearInterval(this.pollTimer);
+      clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
     log.info('Slack channel stopped');
+  }
+
+  /**
+   * Schedule next poll after a randomized delay.
+   * Base = pollIntervalSeconds, jitter = ±30% uniform random.
+   * This makes the polling pattern indistinguishable from normal human activity.
+   */
+  private scheduleNextPoll(): void {
+    const base = this.config.pollIntervalSeconds * 1000;
+    const jitter = base * 0.3 * (Math.random() * 2 - 1); // ±30%
+    const delay = Math.round(base + jitter);
+    this.pollTimer = setTimeout(() => {
+      this.poll()
+        .catch((e) => log.warn('Slack poll error:', e))
+        .finally(() => {
+          if (this.pollTimer !== null) this.scheduleNextPoll();
+        });
+    }, delay);
   }
 
   // ── Private ──────────────────────────────────────────────────────────────────
@@ -204,6 +286,16 @@ export class SlackChannel implements Channel {
 
   private async poll(): Promise<void> {
     if (!this.webClient || !this.onMessageCb) return;
+
+    // Active-hours gate — no HTTP requests made outside the window (no presence signal to Slack)
+    const { activeHoursStart: start, activeHoursEnd: end } = this.config;
+    if (start !== 0 || end !== 0) {
+      const hour = new Date().getHours();
+      if (hour < start || hour >= end) {
+        log.debug(`Slack polling paused — outside active hours (${start}:00–${end}:00, current: ${hour}:xx)`);
+        return;
+      }
+    }
 
     const channels = await this.resolveChannels();
 
@@ -303,18 +395,29 @@ export function createSlackChannel(config?: {
   monitoredChannels?: Array<{ channelId: string; name: string; tags?: string[] }>;
   monitorDMs?: boolean;
   pollIntervalSeconds?: number;
+  activeHoursStart?: number;
+  activeHoursEnd?: number;
 }): SlackChannel | null {
   const userToken = process.env.SLACK_USER_TOKEN;
+  const cookieD = process.env.SLACK_COOKIE_D;
 
   if (!userToken) {
-    log.debug('Slack not configured — set SLACK_USER_TOKEN (xoxp-...)');
+    log.debug('Slack not configured — set SLACK_USER_TOKEN (xoxc-... + SLACK_COOKIE_D, or xoxp-...)');
+    return null;
+  }
+
+  if (userToken.startsWith('xoxc-') && !cookieD) {
+    log.warn('Slack: SLACK_USER_TOKEN is xoxc- but SLACK_COOKIE_D is not set — set cookie d from browser DevTools');
     return null;
   }
 
   return new SlackChannel({
     userToken,
+    cookieD: cookieD || undefined,
     monitoredChannels: config?.monitoredChannels ?? [],
     monitorDMs: config?.monitorDMs ?? true,
-    pollIntervalSeconds: config?.pollIntervalSeconds ?? 60,
+    pollIntervalSeconds: config?.pollIntervalSeconds ?? 300,
+    activeHoursStart: config?.activeHoursStart ?? 9,
+    activeHoursEnd: config?.activeHoursEnd ?? 22,
   });
 }

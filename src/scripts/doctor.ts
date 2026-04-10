@@ -465,9 +465,16 @@ async function checkOptionalIntegrations(
   const slackCfg = (channels.slack ?? {}) as Record<string, unknown>;
   const slackEnabled = slackCfg.enabled === true;
   const slackToken = secrets['SLACK_USER_TOKEN'];
-  if (slackEnabled && slackToken)
-    pass('Slack listener', `user token ✓  ${c.gray}(xoxp-...)${c.reset}`);
-  else if (slackEnabled && !slackToken)
+  const slackCookieD = secrets['SLACK_COOKIE_D'];
+  if (slackEnabled && slackToken) {
+    const mode = slackToken.startsWith('xoxc-')
+      ? slackCookieD ? `browser token ✓  ${c.gray}(xoxc- + cookie)${c.reset}` : `${c.yellow}xoxc- token but SLACK_COOKIE_D missing${c.reset}`
+      : `OAuth token ✓  ${c.gray}(xoxp-)${c.reset}`;
+    if (slackToken.startsWith('xoxc-') && !slackCookieD)
+      fail('Slack listener', 'xoxc- token requires SLACK_COOKIE_D', 'npm run setup → Slack listener');
+    else
+      pass('Slack listener', mode);
+  } else if (slackEnabled && !slackToken)
     fail(
       'Slack listener',
       'enabled but SLACK_USER_TOKEN missing',

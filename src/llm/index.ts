@@ -278,8 +278,19 @@ async function callAnthropic(config: LLMConfig, messages: LLMMessage[]): Promise
     model: config.model,
     max_tokens: config.maxTokens ?? 4096,
     ...(config.temperature !== undefined && { temperature: config.temperature }),
-    // system is always a plain string for the SDK path
-    ...(systemMsg && typeof systemMsg.content === 'string' && { system: systemMsg.content }),
+    // system can be a plain string OR an array of text blocks (for cache_control support)
+    ...(systemMsg &&
+      (typeof systemMsg.content === 'string'
+        ? { system: systemMsg.content }
+        : Array.isArray(systemMsg.content)
+          ? {
+              system: (systemMsg.content as Array<Record<string, unknown>>).map((b) => ({
+                type: 'text' as const,
+                text: String(b.text ?? ''),
+                ...(b.cache_control ? { cache_control: b.cache_control as { type: 'ephemeral' } } : {}),
+              })),
+            }
+          : {})),
     messages: nonSystem.map((m) => ({
       role: m.role as 'user' | 'assistant',
       // Pass array content directly (Anthropic SDK accepts image blocks natively)

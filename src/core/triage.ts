@@ -66,7 +66,14 @@ interface PreScreenResult {
   isFromOwnTeam: boolean; // sender is a member of an internal team
   isFromAnyTeam: boolean; // sender is a member of ANY watched team
   senderTeam?: string; // the team name the sender belongs to
+  isUrgent: boolean; // regex hit on urgency keywords (en + fr)
 }
+
+// Urgency keywords — EN + FR. Used as a hint to the LLM AND as a promotion gate:
+// if pre.isUrgent, low/medium → high urgency (notification interrupt).
+// Kept narrow on purpose: only words that actually signal interrupt-now.
+const URGENT_KEYWORDS_RX =
+  /(urgent|asap|immediately|right now|\bnow\b|\bdown\b|compromis|hack|deadline|tomorrow|today|escal|legal|terminat|critical|broken|outage|panne|cass[ée]|next hour|d[eé]s que possible|tout de suite)/i;
 
 function preScreen(
   text: string,
@@ -146,6 +153,8 @@ function preScreen(
   // Any message from a monitored partner chat is a candidate — the LLM decides if it's actionable
   const isExternal = !!msg?.partnerName && !isFromAnyTeam;
 
+  const isUrgent = URGENT_KEYWORDS_RX.test(text);
+
   return {
     mentionsMe,
     isReplyToMe,
@@ -156,6 +165,7 @@ function preScreen(
     isFromOwnTeam,
     senderTeam,
     isFromAnyTeam,
+    isUrgent,
   };
 }
 
@@ -168,13 +178,23 @@ interface LLMExtraction {
   urgency: 'low' | 'medium' | 'high';
 }
 
+// ─── Test injection hook ──────────────────────────────────────────────────────
+// Allows tests to override the LLM call without monkey-patching ESM modules.
+type LlmCallFn = typeof import('../llm/index.js').llmCall;
+let _llmCallOverride: LlmCallFn | null = null;
+export function __setLlmCallForTest(fn: LlmCallFn | null): void {
+  _llmCallOverride = fn;
+}
+export { preScreen as __preScreenForTest };
+
 async function llmExtract(
   text: string,
   pre: PreScreenResult,
   llmConfig: LLMConfig,
   anonymizer: import('../privacy/anonymizer.js').Anonymizer | null,
 ): Promise<LLMExtraction> {
-  const { llmCall, extractJson } = await import('../llm/index.js');
+  const { llmCall: realLlmCall, extractJson } = await import('../llm/index.js');
+  const llmCall = _llmCallOverride ?? realLlmCall;
 
   // Anonymise only for cloud models (primary role)
   const safeText = anonymizer ? anonymizer.anonymize(text).text : text;
@@ -194,39 +214,71 @@ async function llmExtract(
   if (pre.isFromOwnTeam) hints.push('message from an internal team member');
   if (pre.isExternal && !pre.mentionsMe && !pre.mentionedTeams.length)
     hints.push('message from an external partner — no explicit mention, classify by content');
+  if (pre.isUrgent)
+    hints.push('PRE-SCREEN URGENCY HIT — message contains urgency keywords (urgent/asap/down/deadline/etc), strongly consider urgency=high if action is needed');
 
   const ownerInfo = [`Owner handles: ${llmConfig ? '' : ''}${(text: string) => text}`];
   void ownerInfo; // unused — info injected via config below
 
-  const response = await llmCall(llmConfig, [
-    {
-      role: 'system',
-      content: `You are a triage classifier for an operations team.
-Your job: read a partner message and decide what action it requires.
+  const isAnthropic = llmConfig.provider === 'anthropic';
+  const systemText = `You are a HIGH-PRECISION triage classifier for a busy operator who receives ~200 partner messages/day.
+Your goal: surface ONLY messages that actually require the owner or their team to do something.
+When in doubt → skip. False positives waste the owner's attention. Be strict.
 
-KEY RULE — External partner messages (no @mention):
-- If the partner is making a request, asking a question, or needs something → create a task
-- If the owner or their team is implicitly concerned (topic matches their role) → my_task or team_task
-- If the message is purely informational, a status update, or casual chat → skip
-- If an identifier needs whitelisting → tx_whitelist
+ROUTES
+- my_task      = owner must DO or REPLY to a concrete request (clear verb + object)
+- team_task    = a specific team is tagged or the topic clearly belongs to one team
+- tx_whitelist = partner wants an identifier whitelisted/added to a tx allowlist
+- skip         = anything else
 
-Routes:
-- my_task      = owner needs to DO something or REPLY (explicitly tagged OR topic clearly in their scope)
-- team_task    = a team member is tagged or topic belongs to a specific team
-- tx_whitelist = partner wants to whitelist an identifier — create a review pack
-- skip         = purely informational, status update, casual, no action required
+URGENCY
+- high   = requires interrupting the owner NOW: production down, security incident, money at risk, hard deadline today/tomorrow, partner threatening to escalate or pull contract, explicit "urgent/asap/now"
+- medium = concrete actionable request with a soft deadline ("by Friday", "next week", "when you can")
+- low    = nice-to-have or background, no real deadline
 
-Respond ONLY with valid JSON, no markdown:
+ALWAYS SKIP these patterns (do NOT create a task):
+- Status updates: "deploy completed", "migration done", "report uploaded"
+- FYI / heads-up / "just so you know" with no action requested
+- Out-of-office / "I'll be offline tomorrow"
+- Social: "thanks", "ok", "cool", "great", "👍", "lol", greetings, congrats, birthdays
+- Vague nudges with no content: "any update?", "ping", "?", "hey", "hm", "still waiting", "did you see my last message?"
+- Forwarded news, marketing, newsletters, webinar invites, job postings, off-topic chat
+- Messages where the owner/team is not the one expected to act
+
+EXAMPLES of SKIP:
+  "Deploy completed on staging" → skip (status)
+  "FYI new docs published" → skip (info)
+  "any update?" → skip (vague nudge, no concrete ask)
+  "thanks!" → skip (social)
+  "I'll be offline tomorrow" → skip (OOO)
+
+EXAMPLES of my_task:
+  "Can you send the receiving address by Friday?" → my_task, medium
+  "Please review the attached contract" → my_task, medium
+  "URGENT: production is down, need you ASAP" → my_task, high
+
+Respond ONLY with valid JSON, no markdown, no commentary:
 {
   "route": "my_task" | "team_task" | "tx_whitelist" | "skip",
-  "title": "short action title (max 80 chars)",
-  "body": "1-2 sentence summary of what needs doing",
+  "title": "short action title (verb + object, max 80 chars)",
+  "body": "1-2 sentence summary of what the owner needs to do",
   "urgency": "low" | "medium" | "high"
-}`,
-    },
+}`;
+
+  const systemMessage = isAnthropic
+    ? ({
+        role: 'system' as const,
+        content: [
+          { type: 'text', text: systemText, cache_control: { type: 'ephemeral' } },
+        ] as unknown as import('../llm/index.js').LLMContentBlock[],
+      })
+    : { role: 'system' as const, content: systemText };
+
+  const response = await llmCall({ ...llmConfig, maxTokens: 256 }, [
+    systemMessage,
     {
       role: 'user',
-      content: `Context hints: ${hints.join('; ') || 'external partner message'}\n\nMessage:\n${safeText.slice(0, 1500)}`,
+      content: `Context hints: ${hints.join('; ') || 'external partner message'}\n\nMessage:\n${safeText.slice(0, 800)}`,
     },
   ]);
 
@@ -336,6 +388,17 @@ export async function triage(
 
   if (extraction.route === 'skip') return null;
 
+  // Pre-screen urgency override: if regex caught urgency keywords AND the LLM
+  // agreed there's an action, promote to high. This catches LLM under-rating
+  // (e.g. "terminate the contract in next hour") and guarantees genuine
+  // urgency reaches the notification path.
+  if (pre.isUrgent && extraction.urgency !== 'high') {
+    log.info(
+      `Triage urgency promoted to high by pre-screen for ${msg.partnerName} ("${extraction.title.slice(0, 50)}")`,
+    );
+    extraction.urgency = 'high';
+  }
+
   const result: TriageResult = {
     route: extraction.route,
     title: extraction.title,
@@ -349,11 +412,15 @@ export async function triage(
     messageUrl: msg.messageUrl,
   };
 
-  audit('triage_matched', msg.id, 'triage', {
-    route: result.route,
-    partner: result.partner,
-    urgency: result.urgency,
-  });
+  try {
+    audit('triage_matched', msg.id, 'triage', {
+      route: result.route,
+      partner: result.partner,
+      urgency: result.urgency,
+    });
+  } catch (e) {
+    log.debug(`audit failed (non-fatal): ${e}`);
+  }
 
   log.info(`Triage → ${result.route} | "${result.title.slice(0, 60)}" [${msg.partnerName}]`);
 
