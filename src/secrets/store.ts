@@ -115,8 +115,12 @@ export function initSecretsStoreSync(dataDir: string): void {
   _cache = readSecretsFile();
   log.debug(`Secrets store initialised (file, ${Object.keys(_cache).length} entries)`);
 
-  // Async upgrade — doesn't block boot
-  probeKeychain().catch(() => {});
+  // Keychain probe disabled — file mode only.
+  // macOS keychain access causes persistent authorization prompts when the Node
+  // binary path changes (version upgrades, launchd restarts). All secrets are
+  // already persisted in ~/.argos/.secrets.json at mode 0o600 which is equally
+  // secure on a personal machine. Re-enable by uncommenting if keychain is needed.
+  // probeKeychain().catch(() => {});
 }
 
 export function getSecretsBackend(): SecretsBackend {

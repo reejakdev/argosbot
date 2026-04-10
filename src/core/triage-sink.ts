@@ -18,6 +18,41 @@ import type { TriageResult } from './triage.js';
 const log = createLogger('triage-sink');
 const ulid = monotonicFactory();
 
+/** Truncate at word boundary, appending ellipsis if cut. */
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max).replace(/\s+\S*$/, '') + '…';
+}
+
+// ─── Notification formatting ──────────────────────────────────────────────────
+
+function notionPageUrl(pageId: string | null | undefined): string | null {
+  if (!pageId) return null;
+  return `https://notion.so/${pageId.replace(/-/g, '')}`;
+}
+
+function sourceLinks(messageUrl?: string | null, notionPageId?: string | null): string {
+  const parts: string[] = [];
+  if (messageUrl) parts.push(`[↗ Message](${messageUrl})`);
+  const notionUrl = notionPageUrl(notionPageId);
+  if (notionUrl) parts.push(`[↗ Notion](${notionUrl})`);
+  return parts.join('  ·  ');
+}
+
+function formatTaskNotif(
+  title: string,
+  partner: string | undefined,
+  urgency: string,
+  icon: string,
+  messageUrl?: string | null,
+  notionPageId?: string | null,
+): string {
+  const links = sourceLinks(messageUrl, notionPageId);
+  const partnerLine = partner ? `\n_${partner}_` : '';
+  const linksLine = links ? `\n${links}` : '';
+  return `${icon} *${truncate(title, 90)}*${partnerLine}${linksLine}`;
+}
+
 // ─── In-memory LRU cache for memory+knowledge searches in generateDraftReply ──
 // Process-local, TTL 5 min, cap 50 entries. Cuts duplicate FTS5/vector searches
 // when the same partner sends similar messages in a short window.
@@ -66,6 +101,9 @@ export async function triageSink(
     case 'my_reply':
       await sinkReply(result, config, sendNotification, llmConfig);
       break;
+    case 'notification':
+      await sinkNotification(result, config, sendNotification, llmConfig);
+      break;
     case 'tx_whitelist':
       await sinkTxWhitelist(result, config, sendNotification, llmConfig);
       break;
@@ -84,29 +122,42 @@ async function sinkTask(
   const now = Date.now();
   const isMyTask = result.route === 'my_task' ? 1 : 0;
 
-  // Dedup — if an open/in_progress task already exists for this partner+channel, skip creation
+  // Dedup — if an open/in_progress task already exists for this chat, skip creation.
+  // Also catches recently-completed tasks (< 2h) to prevent restart-replay duplicates.
+  // chat_id is globally unique per platform so no need to filter by channel.
+  const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
   const existing = db
     .prepare(
       `
     SELECT id FROM tasks
-    WHERE chat_id = ? AND (channel = ? OR channel IS NULL)
-      AND status IN ('open', 'in_progress')
+    WHERE chat_id = ?
+      AND (
+        status IN ('open', 'in_progress')
+        OR (status = 'completed' AND completed_at > ?)
+      )
+    ORDER BY detected_at DESC
     LIMIT 1
   `,
     )
-    .get(result.chatId, result.channel) as { id: string } | undefined;
+    .get(result.chatId, twoHoursAgo) as { id: string } | undefined;
 
   if (existing) {
     log.debug(
       `Task dedup — open task ${existing.id} already exists for ${result.partner}, skipping`,
     );
-    // Dedup path: skip draft regeneration — original task already has its draft proposal
-    const icon = isMyTask ? '📋' : '👥';
-    const urgent = result.urgency === 'high' ? ' 🔴' : '';
-    const link = result.messageUrl ? `\n${formatMessageLinks(result.messageUrl)}` : '';
-    await notify(
-      `${icon} *${result.title}*${urgent} _(task already open)_\n_${result.partner}_${link}`,
-    ).catch(() => {});
+    // Dedup path: still notify for my_task (new message on same thread).
+    // createNotification deduplicates in DB (upsert per chat).
+    if (isMyTask && result.urgency !== 'low') {
+      try {
+        const { createNotification } = await import('./notifications.js');
+        await createNotification(result, config, llmConfig);
+      } catch (e) {
+        log.warn(`createNotification (dedup) failed: ${e}`);
+      }
+      const icon = result.urgency === 'high' ? '🔴' : '🟡';
+      await notify(formatTaskNotif(result.title, result.partner, result.urgency, icon, result.messageUrl, null) + '\n_↩ déjà dans ta liste_').catch(() => {});
+    }
+    // Low-urgency or team_task dedup → silent (no notify, owner already has the task open)
     return;
   }
 
@@ -138,44 +189,11 @@ async function sinkTask(
   log.info(`Task saved: ${id} — "${result.title.slice(0, 60)}"`);
   audit('triage_task_created', id, 'task', { route: result.route, partner: result.partner });
 
-  // Real-time notification — additive to the existing task flow.
-  // Smart-filtered (regex pre-screen already done by triage + LLM second opinion).
-  try {
-    const { createNotification } = await import('./notifications.js');
-    await createNotification(result, config, llmConfig);
-  } catch (e) {
-    log.warn(`createNotification failed: ${e}`);
-  }
-
-  // 2. Notion — if configured and not read-only
-  if (config.notion && !config.readOnly) {
-    const dbId =
-      config.triage.notionTodoDatabaseId ??
-      (isMyTask ? config.notion.ownerDatabaseId : config.notion.agentDatabaseId) ??
-      config.notion.agentDatabaseId;
-
-    if (dbId) {
-      try {
-        const { NotionWorker } = await import('../workers/notion.js');
-        const worker = new NotionWorker(config);
-        await worker.createEntry({
-          title: result.title,
-          content: result.body,
-          database_type: 'task',
-          tags: [result.partner, result.urgency, ...(result.assignee ? [result.assignee] : [])],
-          priority:
-            result.urgency === 'high' ? 'High' : result.urgency === 'medium' ? 'Medium' : 'Low',
-        });
-        log.info(`Notion task created for "${result.title.slice(0, 50)}"`);
-      } catch (e) {
-        log.warn(`Notion write failed (task still saved in SQLite): ${e}`);
-        audit('notion_sync_failed', id, 'task', {
-          error: String(e),
-          title: result.title.slice(0, 80),
-        });
-      }
-    }
-  }
+  // 2. Notion Kanban — create before notification so we have the page URL
+  const notionPageId = await createNotionTaskPage(
+    config, id, result.title, result.body, result.partner, result.channel,
+    result.urgency, result.route, result.messageUrl, now, 'midas',
+  );
 
   // 3. Draft reply — generate and store as proposal (requires approval before send)
   if (llmConfig && !config.readOnly) {
@@ -184,13 +202,11 @@ async function sinkTask(
     );
   }
 
-  // 4. Notification — only for HIGH-urgency my_task.
-  // Lower-urgency my_task still gets persisted (silent todo) but no ping —
-  // the owner pulls them via /tasks instead of being interrupted.
-  // team_task (other team) → silent regardless of urgency.
-  if (isMyTask && result.urgency === 'high') {
-    const link = result.messageUrl ? `\n${formatMessageLinks(result.messageUrl)}` : '';
-    await notify(`📋 *${result.title}* 🔴\n_${result.partner}_${link}`).catch(() => {});
+  // 4. Notification — for my_task with urgency high or medium.
+  // Low-urgency or team_task → silent (pull via /tasks).
+  if (isMyTask && result.urgency !== 'low') {
+    const icon = result.urgency === 'high' ? '🔴' : '🟡';
+    await notify(formatTaskNotif(result.title, result.partner, result.urgency, icon, result.messageUrl, notionPageId)).catch(() => {});
   } else if (isMyTask) {
     log.info(`Silent my_task (urgency=${result.urgency}) — no notification ping`);
   } else {
@@ -340,6 +356,28 @@ async function sinkReply(
   const now = Date.now();
   const id = ulid();
 
+  // Dedup — skip proposal creation if an unproposed draft already exists for this chat in last 30min
+  const recentProposal = db
+    .prepare(
+      `SELECT id FROM proposals WHERE context_summary LIKE ? AND status = 'proposed' AND created_at > ? LIMIT 1`,
+    )
+    .get(`%${result.partner}%`, now - 30 * 60 * 1000) as { id: string } | undefined;
+
+  if (recentProposal) {
+    log.debug(`sinkReply dedup — proposal already exists for ${result.partner} (${recentProposal.id})`);
+    // Still push notification (createNotification deduplicates by chat)
+    const urgentIcon = result.urgency === 'high' ? '🔴' : result.urgency === 'medium' ? '🟡' : '💬';
+    try {
+      const { createNotification } = await import('./notifications.js');
+      await createNotification(result, config, llmConfig);
+    } catch (e) {
+      log.warn(`createNotification (reply dedup) failed: ${e}`);
+    }
+    const links = sourceLinks(result.messageUrl);
+    await notify(`${urgentIcon} *${result.partner}* — ${result.title}${links ? `\n${links}` : ''}\n_/proposals_`).catch(() => {});
+    return;
+  }
+
   // Generate a proper RAG-backed draft (same pipeline as my_task) when LLM available
   // Falls back to raw body placeholder so the proposal is never empty
   let draft = `[Draft — review before sending]\n\n${result.body}`;
@@ -400,8 +438,8 @@ async function sinkReply(
 
   db.prepare(
     `
-    INSERT INTO proposals (id, context_summary, plan, actions, draft_reply, status, created_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, 'proposed', ?, ?)
+    INSERT INTO proposals (id, task_id, context_summary, plan, actions, draft_reply, status, created_at, expires_at)
+    VALUES (?, NULL, ?, ?, ?, ?, 'proposed', ?, ?)
   `,
   ).run(
     id,
@@ -416,10 +454,45 @@ async function sinkReply(
   log.info(`Reply proposal created: ${id} — "${result.title.slice(0, 50)}"`);
   audit('triage_reply_proposal', id, 'proposal', { partner: result.partner });
 
-  const urgent = result.urgency === 'high' ? ' 🔴' : '';
+  const urgentIcon = result.urgency === 'high' ? '🔴' : result.urgency === 'medium' ? '🟡' : '💬';
+  try {
+    const { createNotification } = await import('./notifications.js');
+    await createNotification(result, config, llmConfig);
+  } catch (e) {
+    log.warn(`createNotification (reply) failed: ${e}`);
+  }
+  const links = sourceLinks(result.messageUrl);
   await notify(
-    `💬 *Reply needed — ${result.partner}*${urgent}\n${result.title}\n\n_"${draft.slice(0, 180)}"_\n\n_Proposal \`${id.slice(-8)}\` — approve in the web app_`,
+    `${urgentIcon} *${result.partner}* — ${result.title}${links ? `\n${links}` : ''}\n\n_"${draft.slice(0, 160)}"_\n/proposals`,
   ).catch(() => {});
+}
+
+// ─── Notification-only sink (important info, no task) ────────────────────────
+
+async function sinkNotification(
+  result: TriageResult,
+  config: Config,
+  notify: (text: string) => Promise<void>,
+  llmConfig?: LLMConfig,
+): Promise<void> {
+  // Only fire for medium+ urgency — low urgency notifications are silent
+  if (result.urgency === 'low') {
+    log.debug(`Notification-only: skipping low urgency for ${result.partner}`);
+    return;
+  }
+
+  try {
+    const { createNotification } = await import('./notifications.js');
+    await createNotification(result, config, llmConfig);
+  } catch (e) {
+    log.warn(`createNotification (notification route) failed: ${e}`);
+  }
+
+  const icon = result.urgency === 'high' ? '🔴' : '🟡';
+  const links = sourceLinks(result.messageUrl);
+  await notify(`${icon} *${result.partner}*\n${result.title}${links ? `\n${links}` : ''}`).catch(() => {});
+
+  log.info(`Notification-only: ${result.partner} — "${result.title.slice(0, 60)}" [${result.urgency}]`);
 }
 
 // ─── Tx whitelist sink ────────────────────────────────────────────────────────
@@ -461,10 +534,108 @@ async function sinkTxWhitelist(
   audit('triage_whitelist_task', id, 'task', { partner: result.partner, addrs });
 
   // ── Notification ──────────────────────────────────────────────────────────
-  const addrNote = addrs.length
-    ? `\nAddresses: \`${addrs.join('`, `')}\``
-    : '\n⚠️ No address extracted';
-  const link = result.messageUrl ? `\n${formatMessageLinks(result.messageUrl)}` : '';
+  const addrNote = addrs.length ? `\`${addrs.join('`  `')}\`` : '_adresse non détectée_';
+  const links = sourceLinks(result.messageUrl);
+  await notify(`🔐 *${result.partner}* — whitelist\n${addrNote}${links ? `\n${links}` : ''}\n/proposals`).catch(() => {});
 
-  await notify(`🔐 *${result.title}*\n_${result.partner}_${addrNote}${link}`).catch(() => {});
+  // Notion Kanban — tx_whitelist also goes to Todo — Midas
+  await createNotionTaskPage(config, id, result.title, result.body, result.partner, result.channel, result.urgency, 'tx_whitelist', result.messageUrl, now);
+}
+
+// ─── Shared Notion task page creator (via NotionWorker) ───────────────────────
+
+async function createNotionTaskPage(
+  config: Config,
+  taskId: string,
+  title: string,
+  body: string,
+  partner: string | undefined,
+  channel: string | undefined,
+  urgency: string | undefined,
+  type: string,
+  messageUrl: string | undefined,
+  detectedAt: number,
+  database: 'midas' | 'personal' = 'midas',
+): Promise<string | null> {
+  if (!config.notion || config.readOnly) return null;
+
+  const dbId = database === 'personal'
+    ? config.triage.notionPersonalDatabaseId
+    : (config.triage.notionTaskDatabaseId ?? config.triage.notionTodoDatabaseId);
+
+  if (!dbId) return null;
+
+  // Generate checklist — use primary LLM (anonymised title+body already safe to send)
+  let steps: string[] = [];
+  try {
+    const { llmCall, llmConfigFromConfig, extractJson } = await import('../llm/index.js');
+    const llm = llmConfigFromConfig(config);
+    const resp = await llmCall(llm, [
+      {
+        role: 'system',
+        content: `You are a task planner for a DeFi/fintech operations team. Given a task title and context, produce a concise ordered checklist of concrete steps to complete the task. Max 8 steps, 1 sentence each. Respond ONLY with JSON: {"steps": ["step 1", "step 2", ...]}. No markdown.`,
+      },
+      {
+        role: 'user',
+        content: `Task: ${title}\n\nContext: ${(body || '').slice(0, 1000)}`,
+      },
+    ]);
+    const parsed = extractJson<{ steps: string[] }>(resp.content);
+    if (Array.isArray(parsed?.steps)) steps = parsed.steps.slice(0, 8).map(String);
+  } catch (e) {
+    log.debug(`Checklist generation failed (non-blocking): ${e}`);
+  }
+
+  const { NotionWorker } = await import('../workers/notion.js');
+  const worker = new NotionWorker(config);
+  const result = await worker.createKanbanTask({
+    database_id: dbId,
+    title,
+    body,
+    partner,
+    source_url: messageUrl,
+    channel,
+    urgency,
+    type,
+    detected_at: detectedAt,
+    task_id: taskId,
+    database,
+    steps,
+  });
+
+  if (result.success && result.pageId) {
+    getDb().prepare('UPDATE tasks SET notion_page_id = ? WHERE id = ?').run(result.pageId, taskId);
+    return result.pageId;
+  }
+
+  if (!result.success) {
+    audit('notion_sync_failed', taskId, 'task', { error: result.output, title: title.slice(0, 80) });
+  }
+  return null;
+}
+
+// ─── Public: create a personal todo in Notion ────────────────────────────────
+
+export async function createPersonalTodo(
+  config: Config,
+  title: string,
+  body?: string,
+  source?: string,
+): Promise<{ taskId: string; notionPageId: string | null }> {
+  const db = getDb();
+  const id = ulid();
+  const now = Date.now();
+
+  db.prepare(
+    `INSERT INTO tasks (id, title, description, category, source_ref, is_my_task, status, detected_at)
+     VALUES (?, ?, ?, 'personal', ?, 1, 'open', ?)`,
+  ).run(id, title, body ?? null, source ?? null, now);
+
+  const pageId = await createNotionTaskPage(
+    config, id, title, body ?? '', undefined, undefined, 'medium', 'personal', undefined, now, 'personal',
+  );
+
+  log.info(`Personal todo created: ${id} — "${title.slice(0, 50)}"`);
+  audit('personal_todo_created', id, 'task', { title: title.slice(0, 80) });
+  return { taskId: id, notionPageId: pageId };
 }

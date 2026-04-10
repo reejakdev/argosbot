@@ -138,6 +138,7 @@ export function buildSystemPrompt(role: PromptRole, config: Config): string {
         `Analyze the classified context and propose actions. All actions require owner approval before execution.`,
         `If the message mentions any identifier, document, or resource: call semantic_search FIRST, then plan.`,
         `Do not propose tx_pack or draft_reply containing identifiers without verifying them via semantic_search.`,
+        `notion_todo from monitored channels: only create a Notion todo when the message requires a clear, concrete action from the owner — not for informational updates, market news, or teammate status messages. When you do create one, ALWAYS pass source_url (the message URL from the context, format: url=<url>) and a meaningful context field explaining what action is needed and why. Never create a todo just because something interesting happened.`,
       ]
         .filter(Boolean)
         .join('\n\n');

@@ -308,6 +308,130 @@ export class NotionWorker {
     }
   }
 
+  // ── Create a Kanban task (Status property type, source callout, context body) ─
+
+  async createKanbanTask(input: {
+    database_id: string;
+    title: string;
+    body?: string;
+    partner?: string;
+    source_url?: string;
+    channel?: string;
+    urgency?: string;
+    type?: string;
+    detected_at?: number;
+    task_id?: string;
+    database?: 'midas' | 'personal';
+    steps?: string[]; // LLM-generated checklist
+  }): Promise<WorkerResult & { pageId?: string }> {
+    // Notion is owner's own workspace — bypass readOnly (same as calendar for owner)
+    if (!this.client)
+      return { success: false, dryRun: false, output: 'Notion not configured (missing apiKey)' };
+
+    try {
+      const priority =
+        input.urgency === 'high' ? 'High' : input.urgency === 'medium' ? 'Medium' : 'Low';
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const properties: Record<string, any> = {
+        Name: { title: [{ text: { content: input.title } }] },
+        Status: { status: { name: 'Todo' } },
+        Priority: { select: { name: priority } },
+        Detected: { date: { start: new Date(input.detected_at ?? Date.now()).toISOString() } },
+      };
+      if (input.partner) properties['Partner'] = { rich_text: [{ text: { content: input.partner } }] };
+      if (input.body) properties['Context'] = { rich_text: [{ text: { content: input.body.slice(0, 2000) } }] };
+      if (input.source_url) properties['Source'] = { url: input.source_url };
+      if (input.task_id) properties['Argos ID'] = { rich_text: [{ text: { content: input.task_id } }] };
+      if (input.database !== 'personal') {
+        if (input.channel) properties['Channel'] = { select: { name: input.channel } };
+        if (input.urgency) properties['Urgency'] = { select: { name: input.urgency } };
+        if (input.type) properties['Type'] = { select: { name: input.type } };
+      }
+
+      // Page body: meta callout → full context → checklist
+      const children: unknown[] = [];
+
+      // Meta callout — partner + source link
+      const metaParts: Array<{ type: 'text'; text: { content: string; link?: { url: string } } }> = [];
+      if (input.partner) metaParts.push({ type: 'text', text: { content: input.partner } });
+      if (input.source_url) {
+        if (metaParts.length) metaParts.push({ type: 'text', text: { content: ' · ' } });
+        metaParts.push({ type: 'text', text: { content: '↗ source', link: { url: input.source_url } } });
+      }
+      if (metaParts.length) {
+        children.push({
+          object: 'block', type: 'callout',
+          callout: { rich_text: metaParts, icon: { emoji: '📎' }, color: 'gray_background' },
+        });
+      }
+
+      // Full context — chunked (Notion 2000 char/block limit)
+      if (input.body?.trim()) {
+        children.push({
+          object: 'block', type: 'heading_3',
+          heading_3: { rich_text: [{ type: 'text', text: { content: 'Context' } }] },
+        });
+        const chunks = input.body.match(/.{1,2000}/gs) ?? [input.body];
+        for (const chunk of chunks) {
+          children.push({
+            object: 'block', type: 'paragraph',
+            paragraph: { rich_text: [{ type: 'text', text: { content: chunk } }] },
+          });
+        }
+      }
+
+      // LLM-generated checklist
+      if (input.steps?.length) {
+        children.push({ object: 'block', type: 'divider', divider: {} });
+        children.push({
+          object: 'block', type: 'heading_3',
+          heading_3: { rich_text: [{ type: 'text', text: { content: 'How to complete' } }] },
+        });
+        for (const step of input.steps) {
+          children.push({
+            object: 'block', type: 'to_do',
+            to_do: { rich_text: [{ type: 'text', text: { content: step } }], checked: false },
+          });
+        }
+      }
+
+      const page = await this.client!.pages.create({
+        parent: { database_id: input.database_id },
+        icon: { emoji: input.database === 'personal' ? '📌' : '📋' },
+        properties,
+        children: children as never,
+      });
+
+      const pageId = (page as { id: string }).id;
+      log.info(`Kanban task created: ${pageId} — "${input.title.slice(0, 50)}"`);
+      return { success: true, dryRun: false, output: `📋 Task created: ${input.title}`, pageId };
+    } catch (e) {
+      log.error('createKanbanTask failed', e);
+      return { success: false, dryRun: false, output: String(e) };
+    }
+  }
+
+  // ── Move a Kanban task to Done ─────────────────────────────────────────────
+
+  async completeKanbanTask(pageId: string): Promise<WorkerResult> {
+    // Owner workspace — bypass readOnly
+    if (!this.client) return { success: false, dryRun: false, output: 'Notion not configured' };
+    try {
+      await this.client.pages.update({
+        page_id: pageId,
+        properties: {
+          Status: { status: { name: 'Done' } } as never,
+          Completed: { date: { start: new Date().toISOString() } } as never,
+        },
+      });
+      return { success: true, dryRun: false, output: `✅ Task marked Done: ${pageId}` };
+    } catch (e) {
+      log.error('completeKanbanTask failed', e);
+      return { success: false, dryRun: false, output: String(e) };
+    }
+  }
+
   // ── Mark todo done ─────────────────────────────────────────────────────────
 
   async completeTodo(pageId: string): Promise<WorkerResult> {

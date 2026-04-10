@@ -20,6 +20,8 @@ import {
   cmdDone,
   cmdDoneShortcut,
   cmdCancel,
+  cmdNotifs,
+  cmdSeen,
 } from './telegram-bot-commands.js';
 
 const log = createLogger('telegram-bot');
@@ -815,10 +817,17 @@ export class TelegramBot {
   }
 
   private async handleCommand(chatId: string, userId: string, text: string): Promise<void> {
-    // /done_XXXXXX shortcut (Telegram inline command with underscore-separated ID)
+    // /done_XXXXXX shortcut
     const doneShortcut = text.match(/^\/done_([A-Z0-9]+)(@\S+)?$/i);
     if (doneShortcut) {
       await cmdDoneShortcut(doneShortcut[1], (t) => this.sendMessage(chatId, t));
+      return;
+    }
+
+    // /seen_XXXXXX shortcut
+    const seenShortcut = text.match(/^\/seen_([A-Z0-9]+)(@\S+)?$/i);
+    if (seenShortcut) {
+      await cmdSeen(seenShortcut[1], (t) => this.sendMessage(chatId, t));
       return;
     }
 
@@ -976,62 +985,22 @@ export class TelegramBot {
         await cmdProposals((t) => this.sendMessage(chatId, t));
         break;
 
-      case '/tasks': {
-        const { listOpenTodos } = await import('../../core/todos.js');
-        const todos = listOpenTodos(50);
-        if (!todos.length) {
-          await this.sendMessage(chatId, 'No open todos.');
-        } else {
-          const lines = todos.map((t) => {
-            const sfx = t.id.slice(-6);
-            const partner = t.partner_name ?? 'unknown';
-            const prio = t.priority === 'high' ? ' 🔴' : t.priority === 'medium' ? ' 🟡' : '';
-            return `\`${sfx}\` _${partner}_ — ${t.title}${prio}`;
-          });
-          await this.sendMessage(chatId, `*Open todos (${todos.length}):*\n${lines.join('\n')}`, true);
-        }
+      case '/tasks':
+      case '/t':
+        await cmdTasks((t, opts) => this.sendMessage(chatId, t, true, opts), arg);
         break;
-      }
 
-      case '/done': {
-        const { markTodoDone } = await import('../../core/todos.js');
-        if (!arg.trim()) {
-          await this.sendMessage(chatId, 'Usage: /done <id-suffix> or /done all');
-          break;
-        }
-        const n = markTodoDone(arg.trim());
-        await this.sendMessage(chatId, n > 0 ? `✅ Marked ${n} todo(s) done.` : 'No matching open todo.');
+      case '/done':
+        await cmdDone(arg, (t, opts) => this.sendMessage(chatId, t, true, opts));
         break;
-      }
 
-      case '/notifs': {
-        const { listUnreadNotifications } = await import('../../core/notifications.js');
-        const notifs = listUnreadNotifications(20);
-        if (!notifs.length) {
-          await this.sendMessage(chatId, 'No unread notifications.');
-        } else {
-          const lines = notifs.map((n) => {
-            const sfx = n.id.slice(-6);
-            const partner = n.partner_name ?? 'unknown';
-            const icon = n.urgency === 'high' ? '🔴' : n.urgency === 'medium' ? '🟡' : '🔵';
-            const link = n.message_url ? ` [link](${n.message_url})` : '';
-            return `${icon} \`${sfx}\` _${partner}_ — ${n.title}${link}`;
-          });
-          await this.sendMessage(chatId, `*Unread notifications (${notifs.length}):*\n${lines.join('\n')}`, true);
-        }
+      case '/notifs':
+        await cmdNotifs((t, opts) => this.sendMessage(chatId, t, true, opts));
         break;
-      }
 
-      case '/seen': {
-        const { markNotificationSeen } = await import('../../core/notifications.js');
-        if (!arg.trim()) {
-          await this.sendMessage(chatId, 'Usage: /seen <id-suffix> or /seen all');
-          break;
-        }
-        const n = markNotificationSeen(arg.trim());
-        await this.sendMessage(chatId, n > 0 ? `👁 Marked ${n} notification(s) seen.` : 'No matching unread notification.');
+      case '/seen':
+        await cmdSeen(arg, (t, opts) => this.sendMessage(chatId, t, true, opts));
         break;
-      }
 
       case '/tasks_legacy':
         await cmdTasks((t, opts) => this.sendMessage(chatId, t, true, opts), arg);
@@ -1309,52 +1278,26 @@ export class TelegramBot {
       case '/help':
         await this.sendMessage(
           chatId,
-          '🔭 *Argos commands*\n\n' +
-            '*Monitoring*\n' +
-            '/add_chat — lister tes chats\n' +
-            '/chats — chats surveillés\n' +
-            '/remove_chat <id>\n\n' +
-            '*Triage*\n' +
-            '/triage — config & statut\n' +
-            '/triage on|off\n' +
-            '/triage mention-only on|off\n' +
-            '/triage ignore-own on|off\n' +
-            '/my_handles — mes pseudos\n' +
-            '/add_my_handle @pseudo\n\n' +
-            '*Équipes*\n' +
-            '/teams — lister les équipes\n' +
-            '/add_team <nom> [desc]\n' +
-            '/team <nom>\n' +
-            '/team_own <nom> on|off\n' +
-            '/add_handle <équipe> @pseudo\n' +
-            '/add_keyword <équipe> <mot>\n' +
-            '/remove_team <nom>\n\n' +
-            '*Whitelist TX*\n' +
-            '/whitelist\n' +
-            '/add_whitelist <mot>\n' +
-            '/remove_whitelist <mot>\n\n' +
-            '*Knowledge*\n' +
-            '/sources — sources indexées\n' +
-            '/add_source <url> — ajouter une URL\n' +
-            '/add_source github owner/repo\n' +
-            '/remove_source <index>\n' +
-            '/refresh_sources — re-indexer\n\n' +
-            '*Style*\n' +
-          '/train <texte> — analyser ton style d\'écriture\n' +
-          'Envoie un fichier avec caption /train\n\n' +
-          '*Filtres*\n' +
-            '/ignore @user — ignorer un sender (pas de tâches)\n' +
-            '/unignore @user — ne plus ignorer\n' +
-            '/ignore — lister les ignorés\n\n' +
+          '🔭 *Argos*\n\n' +
+            '*Tâches*\n' +
+            '/t — mes tâches ouvertes (lien source + /done\\_ID)\n' +
+            '/t all — toutes les tâches équipe\n' +
+            '/done\\_XXXXXX — marquer done (clic direct)\n' +
+            '/done all — tout clore\n\n' +
+            '*Notifications*\n' +
+            '/notifs — notifications non lues\n' +
+            '/seen all — tout marquer vu\n\n' +
+            '*Proposals*\n' +
+            '/proposals — approbations en attente\n' +
+            '/cancel — annuler les proposals\n\n' +
+            '*Chats surveillés*\n' +
+            '/add\\_chat — ajouter un chat\n' +
+            '/chats — liste des chats\n\n' +
+            '*Équipes & triage*\n' +
+            '/teams · /triage · /my\\_handles\n\n' +
             '*Système*\n' +
-            '/stop — stopper la tâche en cours\n' +
-            '/status · /proposals · /tasks · /done <id>|all · /cancel · /compact · /clear\n\n' +
-            '🔒 Approvals: web app only\n\n' +
-            '*Setup & maintenance*\n' +
-            '`npm run setup -- --step 1` — LLM / API keys\n' +
-            '`npm run setup -- --step 4` — Telegram credentials\n' +
-            '`npm run setup -- --step 6` — Voice, Cloudflare, MCP\n' +
-            '`npm run doctor` — health check',
+            '/status · /compact · /clear · /stop\n' +
+            '/sources · /refresh\\_sources\n',
         );
         break;
 

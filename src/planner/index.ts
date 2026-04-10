@@ -478,7 +478,10 @@ function buildUserPrompt(
   relevantMemories: string,
 ): string {
   const messages = window.messages
-    .map((m, i) => `[${i + 1}] ${new Date(m.receivedAt).toISOString()}\n${m.content}`)
+    .map((m, i) => {
+      const url = m.messageUrl ? ` | url=${m.messageUrl}` : '';
+      return `[${i + 1}] ${new Date(m.receivedAt).toISOString()}${url}\n${m.content}`;
+    })
     .join('\n\n');
 
   const agentSection = window.agentContext

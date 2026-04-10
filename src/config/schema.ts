@@ -91,6 +91,10 @@ const TriageSchema = z
     mentionOnly: z.boolean().default(false),
     /** Database Notion cible pour les tâches créées (optionnel) */
     notionTodoDatabaseId: z.string().optional(),
+    /** Database Notion Kanban pour le task tracker Midas (Status: Todo/In Progress/Done) */
+    notionTaskDatabaseId: z.string().optional(),
+    /** Database Notion Kanban pour les todos personnels */
+    notionPersonalDatabaseId: z.string().optional(),
     /** Pre-screen + LLM second opinion before creating a notification */
     notificationsLlmFilter: z.boolean().default(false),
   })
@@ -382,6 +386,12 @@ const AnonymizerSchema = z.object({
   mode: z.enum(['regex', 'none']).default('regex'),
   knownPersons: z.array(z.string()).default([]),
   bucketAmounts: z.boolean().default(true),
+  /**
+   * URL of the GLiNER NER server (gliner_server.py).
+   * When set, GLiNER replaces the LLM second-pass anonymizer — faster, no hallucinations.
+   * Example: "http://127.0.0.1:7688"
+   */
+  glinerUrl: z.string().url().optional(),
   /**
    * Anonymize blockchain-style identifiers (ETH/BTC addresses, tx hashes, ENS names).
    * Default: false — identifiers are kept so Claude can reason about them for

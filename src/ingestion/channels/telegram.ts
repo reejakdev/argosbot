@@ -41,6 +41,7 @@ import { handleCallback, requestApproval } from '../../gateway/approval.js';
 import { executeProposal } from '../../workers/index.js';
 import type { RawMessage, Proposal, ProposedAction } from '../../types.js';
 import type { Channel } from './registry.js';
+import { cmdTasks, cmdDone, cmdNotifs, cmdSeen } from './telegram-bot-commands.js';
 
 const ulid = monotonicFactory();
 const log = createLogger('telegram');
@@ -270,9 +271,13 @@ export class TelegramChannel implements Channel {
       return;
     }
 
-    // Skip own messages entirely — they should never trigger tasks/proposals.
-    // (Previously we tried to inject as context but the classifier still processed them.)
-    if (isSelf && !isSavedMessages) return;
+    // Own messages in monitored chats: pass to pipeline with fromSelf=true.
+    // The pipeline skips triage/context-window (no task created) but runs completion
+    // detection — so replying in a channel auto-closes the open task for that chat.
+    if (isSelf && !isSavedMessages) {
+      // Still needs to be a monitored chat — resolve below, but set flag early.
+      // We fall through to the normal RawMessage build; fromSelf=true is set there.
+    }
 
     // Skip messages sent by bots — automated notifications, not partner messages
     if (senderId) {
@@ -422,6 +427,7 @@ export class TelegramChannel implements Channel {
         : undefined,
       receivedAt: Date.now(),
       timestamp: msg.date ? msg.date * 1000 : undefined,
+      fromSelf: isSelf,
       meta: {
         telegram_message_id: msgId,
         telegram_chat_id: chatId,
@@ -762,17 +768,42 @@ export class TelegramChannel implements Channel {
   // ─── Command handler (in Saved Messages) ─────────────────────────────────────
 
   private async handleCommand(text: string, _msgId: number): Promise<void> {
-    const [cmd, ...args] = text.trim().split(/\s+/);
+    const trimmed = text.trim();
+
+    // /done_XXXXXX shortcut
+    const doneShortcut = trimmed.match(/^\/done_([A-Z0-9]+)/i);
+    if (doneShortcut) {
+      await cmdDone(doneShortcut[1], (t) => this.sendMessage('me', t).then(() => {}));
+      return;
+    }
+
+    // /seen_XXXXXX shortcut
+    const seenShortcut = trimmed.match(/^\/seen_([A-Z0-9]+)/i);
+    if (seenShortcut) {
+      await cmdSeen(seenShortcut[1], (t) => this.sendMessage('me', t).then(() => {}));
+      return;
+    }
+
+    const [cmd, ...args] = trimmed.split(/\s+/);
 
     switch (cmd) {
       case '/status':
         await this.sendMessage('me', await this.getStatusMessage());
         break;
       case '/tasks':
-        await this.sendMessage('me', this.getTasksMessage());
+      case '/t':
+        await cmdTasks((t) => this.sendMessage('me', t).then(() => {}), args[0] ?? '');
         break;
       case '/memory':
         await this.sendMessage('me', this.getMemoryMessage());
+        break;
+
+      case '/notifs':
+        await cmdNotifs((t) => this.sendMessage('me', t).then(() => {}));
+        break;
+
+      case '/seen':
+        await cmdSeen(args[0] ?? '', (t) => this.sendMessage('me', t).then(() => {}));
         break;
       case '/proposals':
         await this.sendMessage('me', this.getPendingProposals());
@@ -831,17 +862,9 @@ export class TelegramChannel implements Channel {
         break;
       }
 
-      case '/done': {
-        const shortId = args[0];
-        if (shortId) {
-          // /done <id> — mark a specific todo complete
-          await this.completeTodo(shortId);
-        } else {
-          await this.clearDoneTodos();
-          await this.sendMessage('me', '✅ Done todos cleared from Saved Messages');
-        }
+      case '/done':
+        await cmdDone(args[0] ?? '', (t) => this.sendMessage('me', t).then(() => {}));
         break;
-      }
 
       case '/ignore-chat': {
         const targetId = args[0];

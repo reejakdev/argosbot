@@ -26,6 +26,12 @@
  */
 
 import { createLogger } from '../logger.js';
+
+/** Truncate at word boundary, appending ellipsis if cut. */
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max).replace(/\s+\S*$/, '') + '…';
+}
 import { getDb, audit } from '../db/index.js';
 import { fastScreen, deepSanitize } from '../privacy/sanitizer.js';
 import { classify } from '../ingestion/classifier.js';
@@ -72,7 +78,18 @@ export async function ingestMessage(
   log.debug(`Ingesting message from ${msg.partnerName ?? msg.chatId}`, {
     channel: msg.channel,
     length: msg.content.length,
+    fromSelf: msg.fromSelf ?? false,
   });
+
+  // ── Owner's own messages: completion-detection only, skip triage/window ────
+  // This auto-closes open tasks when the owner replies in a monitored channel.
+  if (msg.fromSelf) {
+    const anon = anonymizer.anonymize(msg.content);
+    checkTaskCompletion(msg, anon.text, llmConfig, privacyConfig, config).catch((e) =>
+      log.debug(`Self-message completion check: ${e}`),
+    );
+    return;
+  }
 
   // Persist raw reference (no content stored — just metadata + hash)
   const db = getDb();
@@ -115,20 +132,37 @@ export async function ingestMessage(
   // ── Phase 2: anonymize (regex pass) ──────────────────────────────────────────
   let anon = anonymizer.anonymize(msg.content);
 
-  // LLM second pass — catches what regex missed (names, companies, project names…)
-  // ONLY runs if a local privacy provider is configured for the llmAnon role.
+  // NER second pass — catches what regex missed (names, companies, project names…)
+  // Priority: GLiNER (local NER server) > LLM privacy provider > skip
   // Skipped entirely when anonymizer.mode === 'none'.
-  const llmAnonConfig = llmForRole('llmAnon', llmConfig, privacyConfig, config);
-  if (config.anonymizer.mode !== 'none' && llmAnonConfig !== llmConfig) {
-    try {
-      const { enhanceWithLlm } = await import('../privacy/llm-anonymizer.js');
-      const enhanced = await enhanceWithLlm(anon, llmAnonConfig, { skipIfClean: false });
-      anon = enhanced;
-      if (enhanced.llmApplied > 0) {
-        log.debug(`LLM anonymizer applied ${enhanced.llmApplied} additional redactions`);
+  if (config.anonymizer.mode !== 'none') {
+    if (config.anonymizer.glinerUrl) {
+      // GLiNER path — fast local NER, no hallucinations, no token cost
+      try {
+        const { enhanceWithGliner } = await import('../privacy/gliner-anonymizer.js');
+        const enhanced = await enhanceWithGliner(anon, { url: config.anonymizer.glinerUrl });
+        anon = enhanced;
+        if (enhanced.llmApplied > 0) {
+          log.debug(`GLiNER applied ${enhanced.llmApplied} additional redactions`);
+        }
+      } catch (e) {
+        log.warn('GLiNER anonymizer failed, falling back to regex-only result:', e);
       }
-    } catch (e) {
-      log.warn('LLM anonymizer failed, falling back to regex-only result:', e);
+    } else {
+      // LLM fallback — only if a dedicated local privacy provider is configured
+      const llmAnonConfig = llmForRole('llmAnon', llmConfig, privacyConfig, config);
+      if (llmAnonConfig !== llmConfig) {
+        try {
+          const { enhanceWithLlm } = await import('../privacy/llm-anonymizer.js');
+          const enhanced = await enhanceWithLlm(anon, llmAnonConfig, { skipIfClean: false });
+          anon = enhanced;
+          if (enhanced.llmApplied > 0) {
+            log.debug(`LLM anonymizer applied ${enhanced.llmApplied} additional redactions`);
+          }
+        } catch (e) {
+          log.warn('LLM anonymizer failed, falling back to regex-only result:', e);
+        }
+      }
     }
   }
 
@@ -248,20 +282,21 @@ async function checkTaskCompletion(
   config: Config,
 ): Promise<void> {
   const db = getDb();
+  // chat_id is unique per platform — no need to filter by channel (avoids channel=NULL mismatches)
   const openTasks = db
     .prepare(
       `
-    SELECT id, title, description FROM tasks
+    SELECT id, title, description, notion_page_id FROM tasks
     WHERE chat_id = ?
-      AND (channel = ? OR channel IS NULL)
       AND (status = 'open' OR status = 'in_progress')
     LIMIT 10
   `,
     )
-    .all(msg.chatId, msg.channel ?? msg.source) as Array<{
+    .all(msg.chatId) as Array<{
     id: string;
     title: string;
     description: string | null;
+    notion_page_id: string | null;
   }>;
 
   if (openTasks.length === 0) return;
@@ -293,7 +328,8 @@ If no tasks are resolved, return {"completed": [], "reasoning": ""}`,
 
   const now = Date.now();
   for (const taskId of result.completed) {
-    if (!openTasks.some((t) => t.id === taskId)) continue; // safety check
+    const task = openTasks.find((t) => t.id === taskId);
+    if (!task) continue; // safety check
     db.prepare(`UPDATE tasks SET status = 'completed', completed_at = ? WHERE id = ?`).run(
       now,
       taskId,
@@ -302,6 +338,18 @@ If no tasks are resolved, return {"completed": [], "reasoning": ""}`,
     db.prepare(
       `UPDATE proposals SET status = 'cancelled' WHERE task_id = ? AND status = 'proposed'`,
     ).run(taskId);
+
+    // Sync completion to Notion — move to Done column
+    if (task.notion_page_id && config.notion) {
+      try {
+        const { NotionWorker } = await import('../workers/notion.js');
+        await new NotionWorker(config).completeKanbanTask(task.notion_page_id);
+        log.info(`Notion task moved to Done: ${task.notion_page_id}`);
+      } catch (e) {
+        log.warn(`Notion completion sync failed for ${task.notion_page_id}: ${e}`);
+      }
+    }
+
     log.info(`Task auto-completed: ${taskId} — ${result.reasoning?.slice(0, 80)}`);
     audit('task_auto_completed', taskId, 'task', {
       by: msg.senderName ?? msg.partnerName,
@@ -419,19 +467,26 @@ export async function processWindow(
     (result.taskScope === 'my_task' && result.ownerConfidence >= 0.8) ||
     (result.category === 'client_request' && result.isMyTask && result.ownerConfidence >= 0.7);
 
+  // Only create a task when the classifier explicitly says action is needed.
+  // If requiresAction=false or isDuplicate=true, the classifier has already determined
+  // this message doesn't warrant a new task — respect that signal.
   if (
     ownerInvolved &&
+    result.requiresAction &&
+    !result.isDuplicate &&
     (result.category === 'task' ||
       result.category === 'tx_request' ||
       result.category === 'client_request' ||
       result.requiresAction)
   ) {
-    const taskId = saveTask(result.summary.slice(0, 120), result, window);
+    const taskId = saveTask(truncate(result.summary, 120), result, window);
     broadcastEvent('task_created', {
       id: taskId,
       summary: result.summary,
       partner: window.partnerName,
     });
+  } else if (ownerInvolved && !result.requiresAction) {
+    log.debug(`Window ${window.id} — task skipped (requiresAction=false, isDuplicate=${result.isDuplicate})`);
   }
 
   // Keyword suggestion — fire-and-forget, non-blocking
@@ -442,9 +497,12 @@ export async function processWindow(
     emitEvent(`task_completed:${taskId}`, { taskId, partner: window.partnerName });
   }
 
-  // Skip planning if nothing actionable
-  if (!result.requiresAction && (result.importance ?? 0) < 4) {
-    log.debug(`Window ${window.id} — no action required (importance ${result.importance})`);
+  // Skip planning if the classifier explicitly says nothing needs to be done.
+  // High importance alone is not a reason to run the planner — importance affects memory
+  // retention, not whether an action is warranted. Planner creates proposals; if there's
+  // nothing to propose, skip it.
+  if (!result.requiresAction) {
+    log.debug(`Window ${window.id} — planner skipped (requiresAction=false, importance=${result.importance})`);
     return;
   }
 

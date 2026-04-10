@@ -108,6 +108,12 @@ export interface RawMessage {
   // ─── Channel-specific extras ─────────────────────────────────────────────
   /** Adapter-specific extras — e.g. Telegram message_id, Slack ts, Discord guild_id */
   meta?: Record<string, unknown>;
+
+  // ─── Owner message flag ───────────────────────────────────────────────────
+  /** True when the message was sent by the Argos owner themselves.
+   *  Owner messages skip triage + context window (no task created),
+   *  but still run completion detection (auto-close open tasks). */
+  fromSelf?: boolean;
 }
 
 // ─── After anonymization ──────────────────────────────────────────────────────

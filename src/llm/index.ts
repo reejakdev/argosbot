@@ -355,7 +355,15 @@ async function callAnthropicBearer(
   ];
   if (systemMsg?.content) {
     // Argos system prompt goes in the SECOND block (no cache_control on this one)
-    systemBlocks.push({ type: 'text', text: systemMsg.content as string });
+    if (Array.isArray(systemMsg.content)) {
+      for (const block of systemMsg.content as Array<{ type: string; text: string; cache_control?: { type: string } }>) {
+        if (block.type === 'text' && block.text) {
+          systemBlocks.push({ type: 'text', text: block.text });
+        }
+      }
+    } else {
+      systemBlocks.push({ type: 'text', text: systemMsg.content as string });
+    }
   }
 
   // Only last message gets cache_control to stay under the 4-block limit
@@ -1077,7 +1085,16 @@ async function* _streamAnthropicBearer(
     },
   ];
   if (systemMsg?.content) {
-    systemBlocks.push({ type: 'text', text: systemMsg.content as string });
+    if (Array.isArray(systemMsg.content)) {
+      // Array of content blocks (e.g. from triage with cache_control) — merge into systemBlocks
+      for (const block of systemMsg.content as Array<{ type: string; text: string; cache_control?: { type: string } }>) {
+        if (block.type === 'text' && block.text) {
+          systemBlocks.push({ type: 'text', text: block.text });
+        }
+      }
+    } else {
+      systemBlocks.push({ type: 'text', text: systemMsg.content as string });
+    }
   }
 
   const nonEmpty = nonSystem.filter((m) =>

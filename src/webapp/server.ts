@@ -2483,6 +2483,24 @@ export function startWebApp(options: WebAppOptions): void {
     }
   });
 
+  // ── CA cert download — no auth, lets other devices install the mkcert CA ─
+  // Must be registered BEFORE the SPA catch-all or it will never be reached
+  const caPath = path.join(os.homedir(), '.argos', 'tls', 'mkcert-rootCA.pem');
+  app.get('/ca.pem', (_req, res) => {
+    if (!existsSync(caPath)) {
+      res.status(404).send('CA cert not found. Run "argos setup" first.');
+      return;
+    }
+    try {
+      const content = readFileSync(caPath);
+      res.setHeader('Content-Type', 'application/x-x509-ca-cert');
+      res.setHeader('Content-Disposition', 'attachment; filename="argos-ca.pem"');
+      res.send(content);
+    } catch {
+      res.status(500).send('Failed to read CA cert.');
+    }
+  });
+
   // React SPA — serve static build if available, otherwise inline fallback
   if (existsSync(CLIENT_DIST)) {
     app.use(express.static(CLIENT_DIST));
@@ -2512,23 +2530,6 @@ export function startWebApp(options: WebAppOptions): void {
       res.send(HTML_APP);
     });
   }
-
-  // ── CA cert download — no auth, lets other devices install the mkcert CA ─
-  const caPath = path.join(os.homedir(), '.argos', 'tls', 'mkcert-rootCA.pem');
-  app.get('/ca.pem', (_req, res) => {
-    if (!existsSync(caPath)) {
-      res.status(404).send('CA cert not found. Run "argos setup" first.');
-      return;
-    }
-    try {
-      const content = readFileSync(caPath);
-      res.setHeader('Content-Type', 'application/x-x509-ca-cert');
-      res.setHeader('Content-Disposition', 'attachment; filename="argos-ca.pem"');
-      res.send(content);
-    } catch {
-      res.status(500).send('Failed to read CA cert.');
-    }
-  });
 
   // ── TLS / HTTPS support ──────────────────────────────────────────────────
   const tlsCert = cfg.webapp?.tlsCert;

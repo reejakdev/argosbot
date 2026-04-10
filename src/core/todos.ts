@@ -100,31 +100,30 @@ export async function extractTodosForChat(
 
   let extracted: ExtractedTodo[] = [];
   try {
-    const resp = await llmCall({ ...llmConfig, maxTokens: 1024 }, [
+    const resp = await llmCall({ ...llmConfig, maxTokens: 512 }, [
       {
         role: 'system',
-        content: `Extract HIGH-PRECISION concrete TODOs from this anonymized partner conversation.
+        content: `Extract ONLY the most critical, concrete TODOs from this anonymized partner conversation.
 Reply ONLY with strict JSON: {"todos": [{"title": "...", "description": "...", "priority": "low|medium|high"}]}.
 
-A TODO must have a CLEAR VERB + OBJECT and be something the owner can actually do.
-REJECT vague items like "follow up", "check in", "discuss", "think about", "be aware".
-REJECT status updates, FYI, social messages, OOO notices.
-If nothing concrete, reply {"todos": []}.
+STRICT rules:
+- Max 3 todos per conversation. If more than 3 things seem actionable, keep only the top 3 by urgency.
+- A TODO must be EXPLICITLY requested or clearly blocked — not inferred from context.
+- Must have a clear verb + specific object. Titles must start with a verb and be under 80 chars.
+- REJECT: vague items, follow-ups, status updates, FYI messages, market news, team internal updates, OOO notices.
+- REJECT: anything the owner is just being informed about (not asked to do).
+- When in doubt, reply {"todos": []}.
 
-EXAMPLES of GOOD todos (include):
-  - "Send receiving address to partner X"
-  - "Review Q1 contract draft"
-  - "Schedule call with partner Y next week"
-  - "Whitelist new beneficiary address"
+GOOD (explicit ask or clear blocker):
+  - "Send receiving address to [PARTNER_1]"
+  - "Review and sign Q1 contract draft"
+  - "Whitelist new beneficiary address from [PARTNER_2]"
 
-EXAMPLES of BAD items (REJECT):
-  - "Follow up with partner" (no concrete action)
-  - "Check in on the project" (vague)
-  - "Discuss timeline" (no decision/output)
-  - "Be aware of the new policy" (info, not a todo)
-  - "Stay on top of it" (vague)
-
-Keep titles short (under 80 chars), start with a verb.`,
+BAD (reject these):
+  - "Follow up on project" — vague
+  - "Check new token launch" — just info
+  - "Discuss timeline" — no output
+  - "Be aware of policy change" — informational`,
       },
       {
         role: 'user',

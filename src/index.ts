@@ -143,8 +143,10 @@ async function boot() {
     maxTokens: config.claude.maxTokens,
   });
 
-  // 4. Privacy layer (anonymizer)
+  // 4. Privacy layer (anonymizer) + GLiNER NER server lifecycle
   const anonymizer = new Anonymizer(config.anonymizer);
+  const { ensureGliner } = await import('./privacy/gliner-manager.js');
+  ensureGliner(config.anonymizer).catch((e) => log.warn(`GLiNER manager error: ${e}`));
 
   // 5. Context window manager
   const tgListener = config.channels.telegram.listener;
@@ -603,6 +605,8 @@ async function boot() {
     await signalChannel?.stop();
     walletMonitorStop?.();
     stopCrons();
+    const { stopGliner } = await import('./privacy/gliner-manager.js');
+    stopGliner();
     db.close();
     process.exit(0);
   };

@@ -80,6 +80,7 @@ function runMigrations(db: Database.Database): void {
     { version: 17, sql: MIGRATION_17 },
     { version: 18, sql: MIGRATION_18 },
     { version: 19, sql: MIGRATION_19 },
+    { version: 20, sql: MIGRATION_20 },
   ];
 
   for (const migration of migrations) {
@@ -457,6 +458,11 @@ const MIGRATION_19 = `
   );
   CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
   CREATE INDEX IF NOT EXISTS idx_todos_chat ON todos(chat_id);
+`;
+
+// ─── Migration 20: notion_page_id on tasks ──────────────────────────────────
+const MIGRATION_20 = `
+  ALTER TABLE tasks ADD COLUMN notion_page_id TEXT;
 `;
 
 // ─── Migration 11: knowledge graph ───────────────────────────────────────────

@@ -115,7 +115,7 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
   {
     name: 'notion_create',
     description:
-      'Create a Notion page — either inside a database (use database_type or database_id) or as a subpage of an existing page (use parent_page_id). Use parent_page_id when you want to create a plain subpage, not a database entry.',
+      'Create a Notion page — either inside a database (use database_type or database_id) or as a subpage of an existing page (use parent_page_id). Use parent_page_id when you want to create a plain subpage, not a database entry. IMPORTANT: for tasks and todos (work or personal), use the notion_todo skill instead — it handles the correct Kanban databases (Todo — Midas, Todo — Personnel) with the right schema.',
     input_schema: {
       type: 'object',
       properties: {

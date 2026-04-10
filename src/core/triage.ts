@@ -34,11 +34,12 @@ const log = createLogger('triage');
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 export type TriageRoute =
-  | 'my_task' // tagged me, action needed → my Notion todo
-  | 'my_reply' // tagged me, reply needed  → draft reply proposal
-  | 'team_task' // tagged my team           → Notion todo + team tag
+  | 'my_task'      // actionable work item I must complete (not just reply) → task created
+  | 'my_reply'     // question/request needing a reply only → notification + draft, no task
+  | 'notification' // important message to not miss (urgent info, update I need to see) → notification only, no task
+  | 'team_task'    // tagged my team → task for them + silent
   | 'tx_whitelist' // whitelist address request → tx review pack
-  | 'skip'; // nothing actionable
+  | 'skip';        // nothing actionable
 
 export interface TriageResult {
   route: TriageRoute;
@@ -221,47 +222,54 @@ async function llmExtract(
   void ownerInfo; // unused — info injected via config below
 
   const isAnthropic = llmConfig.provider === 'anthropic';
-  const systemText = `You are a HIGH-PRECISION triage classifier for a busy operator who receives ~200 partner messages/day.
-Your goal: surface ONLY messages that actually require the owner or their team to do something.
-When in doubt → skip. False positives waste the owner's attention. Be strict.
+  const systemText = `You are a HIGH-PRECISION triage classifier for a busy fintech operations manager who receives ~200 partner messages/day.
 
-ROUTES
-- my_task      = owner must DO or REPLY to a concrete request (clear verb + object)
-- team_task    = a specific team is tagged or the topic clearly belongs to one team
-- tx_whitelist = partner wants an identifier whitelisted/added to a tx allowlist
-- skip         = anything else
+ROUTES — pick exactly one:
 
-URGENCY
-- high   = requires interrupting the owner NOW: production down, security incident, money at risk, hard deadline today/tomorrow, partner threatening to escalate or pull contract, explicit "urgent/asap/now"
-- medium = concrete actionable request with a soft deadline ("by Friday", "next week", "when you can")
-- low    = nice-to-have or background, no real deadline
+my_task      = Owner must complete a concrete multi-step action or deliverable (not just reply).
+               Examples: process withdrawals, send funds, review contract, set up integration, deploy fix.
+               Creates a task in the to-do list.
 
-ALWAYS SKIP these patterns (do NOT create a task):
-- Status updates: "deploy completed", "migration done", "report uploaded"
-- FYI / heads-up / "just so you know" with no action requested
-- Out-of-office / "I'll be offline tomorrow"
-- Social: "thanks", "ok", "cool", "great", "👍", "lol", greetings, congrats, birthdays
-- Vague nudges with no content: "any update?", "ping", "?", "hey", "hm", "still waiting", "did you see my last message?"
-- Forwarded news, marketing, newsletters, webinar invites, job postings, off-topic chat
-- Messages where the owner/team is not the one expected to act
+my_reply     = Owner needs to answer a question or give a quick response — the "work" is just the reply.
+               Examples: "what's the address?", "can you confirm?", "did you receive X?", "are you available Thursday?"
+               Does NOT create a task — generates a draft reply + push notification.
 
-EXAMPLES of SKIP:
-  "Deploy completed on staging" → skip (status)
-  "FYI new docs published" → skip (info)
-  "any update?" → skip (vague nudge, no concrete ask)
-  "thanks!" → skip (social)
-  "I'll be offline tomorrow" → skip (OOO)
+notification = Important message the owner must NOT miss, but requires no action right now.
+               Examples: partner transferred funds (FYI), liquidity warning, regulatory update, critical system alert, incident resolved but owner should know.
+               Push notification only — no task, no draft.
 
-EXAMPLES of my_task:
-  "Can you send the receiving address by Friday?" → my_task, medium
-  "Please review the attached contract" → my_task, medium
-  "URGENT: production is down, need you ASAP" → my_task, high
+team_task    = Request clearly directed at a specific internal team (not the owner).
+               Silently logged for that team — no notification to owner.
 
-Respond ONLY with valid JSON, no markdown, no commentary:
+tx_whitelist = Partner wants an address/identifier whitelisted or added to an allowlist.
+               Creates a whitelist review task.
+
+skip         = Nothing actionable. No push. No task.
+               - Social: thanks, ok, 👍, greetings, congrats
+               - Vague nudges: "ping", "?", "any update?", "hey", "still waiting"
+               - OOO: "I'll be offline tomorrow"
+               - Pure status (no action needed): "deploy done", "report uploaded", "migration complete"
+               - Newsletters, marketing, off-topic chat
+
+URGENCY:
+- high   = interrupt now: money at risk, production down, hard deadline today/tomorrow, explicit urgent/asap, partner escalating
+- medium = concrete request, soft deadline (by end of week, when you can)
+- low    = background, informational, no deadline
+
+DECISION TREE:
+1. Is it social / vague / OOO / pure status? → skip
+2. Does it ask me to DO something concrete (multi-step, not just reply)? → my_task
+3. Does it ask me a question or need a quick reply? → my_reply
+4. Is it important info I must see but no action needed? → notification (only if urgency=medium or high)
+5. Is it directed at an internal team? → team_task
+6. Wallet/address whitelist request? → tx_whitelist
+7. Otherwise → skip
+
+Respond ONLY with valid JSON, no markdown:
 {
-  "route": "my_task" | "team_task" | "tx_whitelist" | "skip",
-  "title": "short action title (verb + object, max 80 chars)",
-  "body": "1-2 sentence summary of what the owner needs to do",
+  "route": "my_task" | "my_reply" | "notification" | "team_task" | "tx_whitelist" | "skip",
+  "title": "max 80 chars — verb + object (e.g. 'Process withdrawal requests for Ether.fi')",
+  "body": "1-2 sentences — what happened and what is expected",
   "urgency": "low" | "medium" | "high"
 }`;
 
@@ -292,7 +300,9 @@ Respond ONLY with valid JSON, no markdown, no commentary:
         ? 'my_task'
         : pre.mentionedTeams.length
           ? 'team_task'
-          : 'skip';
+          : pre.isUrgent
+            ? 'notification'
+            : 'skip';
     return { route, title: safeText.slice(0, 80), body: safeText.slice(0, 200), urgency: 'medium' };
   }
 }
@@ -312,6 +322,12 @@ export async function triage(
     return null;
   }
   if (!msg.content?.trim()) return null;
+
+  // Skip slash commands — bot commands for other bots in group chats (e.g. /redeem, /start)
+  if (/^\s*\/[a-zA-Z]/.test(msg.content)) {
+    log.debug(`Triage skip [${msg.partnerName}]: slash command ignored`);
+    return null;
+  }
 
   // 1. Fast pre-screen — skip if nothing relevant
   const pre = preScreen(msg.content, config, msg);
