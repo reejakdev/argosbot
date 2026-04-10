@@ -319,6 +319,24 @@ export function registerBuiltinJobs(
   registerHandler('memory_purge', async () => {
     purgeExpiredMemory();
   });
+
+  // Boot-time memory purge + WAL checkpoint if missed (PC was off at 03:00)
+  setImmediate(() => {
+    try {
+      const db = getDb();
+      const row = db
+        .prepare(`SELECT last_run FROM cron_jobs WHERE name = 'memory_purge' LIMIT 1`)
+        .get() as { last_run: number | null } | undefined;
+      const lastRun = row?.last_run ?? 0;
+      if (Date.now() - lastRun > 12 * 60 * 60 * 1000) {
+        log.info('Boot-time memory purge (last run >12h ago)');
+        purgeExpiredMemory();
+        db.pragma('wal_checkpoint(TRUNCATE)');
+      }
+    } catch (e) {
+      log.warn(`Boot-time memory purge failed: ${e}`);
+    }
+  });
   registerHandler('approval_expiry', async () => {
     expireApprovals();
   });
@@ -339,7 +357,26 @@ export function registerBuiltinJobs(
     await compactVectorStore();
   });
   upsertCronJob('memory_purge', '0 3 * * *', 'memory_purge'); // 03:00 daily
-  upsertCronJob('vector_compact', '30 3 * * *', 'vector_compact'); // 03:30 daily
+  upsertCronJob('vector_compact', '30 3 * * *', 'vector_compact'); // 03:30 daily — fallback if PC is on
+
+  // Boot-time compaction: run if last compaction was more than 12h ago (catches missed nightly crons)
+  setImmediate(async () => {
+    try {
+      const db = getDb();
+      const row = db
+        .prepare(`SELECT last_run FROM cron_jobs WHERE name = 'vector_compact' LIMIT 1`)
+        .get() as { last_run: number | null } | undefined;
+      const lastRun = row?.last_run ?? 0;
+      if (Date.now() - lastRun > 12 * 60 * 60 * 1000) {
+        log.info('Boot-time vector compaction (last run >12h ago)');
+        const { compactVectorStore } = await import('../vector/store.js');
+        await compactVectorStore();
+        db.prepare(`UPDATE cron_jobs SET last_run = ? WHERE name = 'vector_compact'`).run(Date.now());
+      }
+    } catch (e) {
+      log.warn(`Boot-time vector compaction failed: ${e}`);
+    }
+  });
   upsertCronJob('approval_expiry', '*/5 * * * *', 'approval_expiry'); // every 5min
   if (briefingOpts?.enabled !== false) {
     upsertCronJob(
