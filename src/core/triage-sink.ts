@@ -256,30 +256,23 @@ async function generateDraftReply(
   const cached = _draftCacheGet(cacheKey);
 
   let memories: Array<{ content: string }>;
-  let styleMemories: Array<{ content: string }>;
   let knowledgeContext = '';
 
   if (cached) {
     memories = cached.memories;
-    styleMemories = cached.styleMemories ?? [];
     knowledgeContext = cached.knowledgeContext;
     log.debug(`generateDraftReply: cache hit for ${result.partner}`);
   } else {
     // 1. Search memory for relevant context (addresses, past interactions, docs)
+    // Writing style is already in the system prompt via user.md (/train command)
     memories = search({
       query: result.body,
       partnerName: result.partner,
       limit: 5,
     });
 
-    // 2. Search memory for owner's writing style — past replies, tone, phrasing
-    styleMemories = search({
-      query: `how ${ownerName} writes replies tone style`,
-      limit: 3,
-    });
-
     log.debug(
-      `generateDraftReply: ${memories.length} memory result(s), ${styleMemories.length} style result(s) for partner=${result.partner}`,
+      `generateDraftReply: ${memories.length} memory result(s) for partner=${result.partner}`,
     );
 
     // 3. Search knowledge sources (Notion, files) via semantic search if available
@@ -300,7 +293,7 @@ async function generateDraftReply(
 
     _draftCacheSet(cacheKey, {
       memories,
-      styleMemories,
+      styleMemories: [],
       knowledgeContext,
       expires: Date.now() + DRAFT_CACHE_TTL_MS,
     });
@@ -308,10 +301,6 @@ async function generateDraftReply(
 
   const memoryContext = memories.length
     ? `\n\nRelevant context from memory:\n${memories.map((m) => `- ${m.content}`).join('\n')}`
-    : '';
-
-  const styleContext = styleMemories.length
-    ? `\n\nExamples of how ${ownerName} writes (tone, style, language):\n${styleMemories.map((m) => `- ${m.content}`).join('\n')}`
     : '';
 
   const knowledgeBlock = knowledgeContext
@@ -329,11 +318,11 @@ async function generateDraftReply(
     {
       role: 'system',
       content: `You are ${ownerName}. Write a reply to a partner message IN FIRST PERSON.
-- Match the owner's writing style: concise, direct, same language as the partner.
+- Match the owner's writing style (see user profile above): concise, direct, same language as the partner.
 - If the partner asks for specific data (addresses, amounts) AND you have it in context — include it.
 - If you don't have the data — say you'll send it shortly, never make things up.
 - Placeholders like [ADDR_1] or [AMT_...] in the message represent real values — reference them naturally (e.g. "I'll send you the address shortly" instead of "I'll send you [ADDR_1]").
-- No greeting, no subject line — just the message body. Never refer to yourself in third person.${styleContext}${memoryContext}${knowledgeBlock}${legendBlock}`,
+- No greeting, no subject line — just the message body. Never refer to yourself in third person.${memoryContext}${knowledgeBlock}${legendBlock}`,
     },
     {
       role: 'user',
