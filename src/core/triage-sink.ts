@@ -18,6 +18,33 @@ import type { TriageResult } from './triage.js';
 const log = createLogger('triage-sink');
 const ulid = monotonicFactory();
 
+/**
+ * Build a human-readable legend for anonymized placeholders in a message body.
+ * Helps the LLM understand what [ADDR_1], [AMT_10K-100K_USDC], [PERSON_1] etc. refer to
+ * so it can write natural drafts without echoing the raw placeholder tokens.
+ */
+function buildPlaceholderLegend(body: string): string {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+
+  for (const [, token] of body.matchAll(/\[([A-Z0-9_\-]+)\]/g)) {
+    if (seen.has(token)) continue;
+    seen.add(token);
+
+    if (/^ADDR_/.test(token)) lines.push(`[${token}] = a wallet / blockchain address`);
+    else if (/^AMT_/.test(token)) lines.push(`[${token}] = an amount (crypto or fiat)`);
+    else if (/^HASH_/.test(token)) lines.push(`[${token}] = a transaction hash`);
+    else if (/^ENS_/.test(token)) lines.push(`[${token}] = an ENS domain`);
+    else if (/^PERSON_/.test(token)) lines.push(`[${token}] = a person's name`);
+    else if (/^EMAIL_/.test(token)) lines.push(`[${token}] = an email address`);
+    else if (/^PHONE_/.test(token)) lines.push(`[${token}] = a phone number`);
+    else if (/^IBAN_/.test(token)) lines.push(`[${token}] = a bank account (IBAN)`);
+    else lines.push(`[${token}] = a redacted value`);
+  }
+
+  return lines.join('\n');
+}
+
 /** Truncate at word boundary, appending ellipsis if cut. */
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
@@ -58,6 +85,7 @@ function formatTaskNotif(
 // when the same partner sends similar messages in a short window.
 interface DraftSearchCacheEntry {
   memories: Array<{ content: string }>;
+  styleMemories: Array<{ content: string }>;
   knowledgeContext: string;
   expires: number;
 }
@@ -195,12 +223,8 @@ async function sinkTask(
     result.urgency, result.route, result.messageUrl, now, 'midas',
   );
 
-  // 3. Draft reply — generate and store as proposal (requires approval before send)
-  if (llmConfig && !config.readOnly) {
-    generateDraftReply(result, id, config, llmConfig, notify).catch((e) =>
-      log.warn(`Draft reply generation failed: ${e}`),
-    );
-  }
+  // 3. Draft reply — only for my_reply route (direct ping/question). my_task is
+  //    an action item, not a conversational reply — drafting there produces off-topic output.
 
   // 4. Notification — for my_task with urgency high or medium.
   // Low-urgency or team_task → silent (pull via /tasks).
@@ -232,10 +256,12 @@ async function generateDraftReply(
   const cached = _draftCacheGet(cacheKey);
 
   let memories: Array<{ content: string }>;
+  let styleMemories: Array<{ content: string }>;
   let knowledgeContext = '';
 
   if (cached) {
     memories = cached.memories;
+    styleMemories = cached.styleMemories ?? [];
     knowledgeContext = cached.knowledgeContext;
     log.debug(`generateDraftReply: cache hit for ${result.partner}`);
   } else {
@@ -245,21 +271,25 @@ async function generateDraftReply(
       partnerName: result.partner,
       limit: 5,
     });
+
+    // 2. Search memory for owner's writing style — past replies, tone, phrasing
+    styleMemories = search({
+      query: `how ${ownerName} writes replies tone style`,
+      limit: 3,
+    });
+
     log.debug(
-      `generateDraftReply: ${memories.length} memory result(s) for partner=${result.partner}`,
+      `generateDraftReply: ${memories.length} memory result(s), ${styleMemories.length} style result(s) for partner=${result.partner}`,
     );
 
-    // 2. Search knowledge sources (Notion, files) via semantic search if available
+    // 3. Search knowledge sources (Notion, files) via semantic search if available
     try {
       const { hybridSearch } = await import('../vector/store.js');
       const embCfg = (
         config as unknown as { embeddings?: import('../config/schema.js').EmbeddingsConfig }
       ).embeddings;
-      log.debug(`generateDraftReply: embeddings enabled=${embCfg?.enabled}`);
       if (embCfg?.enabled) {
-        // hybridSearch = semantic + keyword — catches camelCase token names that don't embed well
         const results = await hybridSearch(result.body, embCfg, { topK: 3, minSimilarity: 0.35 });
-        log.debug(`generateDraftReply: ${results.length} knowledge chunk(s) found`);
         if (results.length) {
           knowledgeContext = results.map((r) => r.chunk.content).join('\n\n');
         }
@@ -270,30 +300,40 @@ async function generateDraftReply(
 
     _draftCacheSet(cacheKey, {
       memories,
+      styleMemories,
       knowledgeContext,
       expires: Date.now() + DRAFT_CACHE_TTL_MS,
     });
   }
-  log.debug(
-    `generateDraftReply: calling LLM for draft (knowledgeContext=${knowledgeContext.length} chars, body="${result.body.slice(0, 80)}")`,
-  );
 
   const memoryContext = memories.length
     ? `\n\nRelevant context from memory:\n${memories.map((m) => `- ${m.content}`).join('\n')}`
+    : '';
+
+  const styleContext = styleMemories.length
+    ? `\n\nExamples of how ${ownerName} writes (tone, style, language):\n${styleMemories.map((m) => `- ${m.content}`).join('\n')}`
     : '';
 
   const knowledgeBlock = knowledgeContext
     ? `\n\nRelevant knowledge:\n${knowledgeContext.slice(0, 4000)}`
     : '';
 
+  // Build a placeholder legend so the LLM understands anonymized values
+  // e.g. [ADDR_1] = "the wallet address mentioned", [AMT_10K-100K_USDC] = "the USDC amount"
+  const placeholderLegend = buildPlaceholderLegend(result.body);
+  const legendBlock = placeholderLegend
+    ? `\n\nNote on anonymized placeholders in the message:\n${placeholderLegend}`
+    : '';
+
   const response = await llmCall(llmConfig, [
     {
       role: 'system',
       content: `You are ${ownerName}. Write a reply to a partner message IN FIRST PERSON.
-If the partner is asking for specific data (addresses, amounts, info) AND you have it in the context below — include it directly in your reply.
-If you don't have the data — say you'll send it shortly, don't make things up.
-Same language as the partner. No greeting, no subject line — just the message body.
-NEVER refer to yourself in third person.${memoryContext}${knowledgeBlock}`,
+- Match the owner's writing style: concise, direct, same language as the partner.
+- If the partner asks for specific data (addresses, amounts) AND you have it in context — include it.
+- If you don't have the data — say you'll send it shortly, never make things up.
+- Placeholders like [ADDR_1] or [AMT_...] in the message represent real values — reference them naturally (e.g. "I'll send you the address shortly" instead of "I'll send you [ADDR_1]").
+- No greeting, no subject line — just the message body. Never refer to yourself in third person.${styleContext}${memoryContext}${knowledgeBlock}${legendBlock}`,
     },
     {
       role: 'user',
